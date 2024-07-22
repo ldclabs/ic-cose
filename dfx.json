@@ -1,0 +1,21 @@
+{
+  "canisters": {
+    "ic_cose_canister": {
+      "candid": "src/ic_cose_canister/ic_cose_canister.did",
+      "declarations": {
+        "node_compatibility": true
+      },
+      "package": "ic_cose_canister",
+      "optimize": "cycles",
+      "type": "rust"
+    }
+  },
+  "defaults": {
+    "build": {
+      "args": "",
+      "packtool": ""
+    }
+  },
+  "output_env_file": ".env",
+  "version": 1
+}

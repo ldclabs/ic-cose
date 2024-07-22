@@ -1,0 +1,136 @@
+type ChainArgs = variant { Upgrade : UpgradeArgs; Init : InitArgs };
+type CreateSettingInput = record {
+  status : opt int8;
+  desc : opt text;
+  ctype : nat8;
+  payload : opt blob;
+};
+type CreateSettingOutput = record {
+  updated_at : nat64;
+  public_key : opt blob;
+  hash : opt blob;
+  created_at : nat64;
+  version : nat32;
+};
+type ECDHInput = record {
+  public_key : blob;
+  partial_key : opt blob;
+  nonce : blob;
+};
+type InitArgs = record {
+  service_fee : nat64;
+  ecdsa_key_name : text;
+  name : text;
+  subnet_size : nat64;
+  vetkd_key_name : text;
+};
+type NamespaceInfo = record {
+  key : text;
+  status : int8;
+  updated_at : nat64;
+  members : vec principal;
+  balance : nat;
+  client_settings_count : nat64;
+  managers : vec principal;
+  desc : text;
+  name : text;
+  max_payload_size : nat64;
+  created_at : nat64;
+  auditors : vec principal;
+  settings_count : nat64;
+  visibility : nat8;
+  total_payload_size : nat64;
+};
+type PublicKeyInput = record {
+  algorithm : opt text;
+  derivation_path : vec blob;
+  namespace : text;
+};
+type Result = variant { Ok; Err : text };
+type Result_1 = variant { Ok : CreateSettingOutput; Err : text };
+type Result_2 = variant { Ok : blob; Err : text };
+type Result_3 = variant { Ok : NamespaceInfo; Err : text };
+type Result_4 = variant { Ok : SettingInfo; Err : text };
+type Result_5 = variant { Ok : StateInfo; Err : text };
+type Result_6 = variant { Ok : vec NamespaceInfo; Err : text };
+type SettingInfo = record {
+  key : text;
+  readers : vec principal;
+  status : int8;
+  updated_at : nat64;
+  subject : principal;
+  public_key : opt blob;
+  desc : text;
+  hash : opt blob;
+  ctype : nat8;
+  created_at : nat64;
+  version : nat32;
+  payload : opt blob;
+};
+type SettingPath = record {
+  ns : text;
+  key : text;
+  client : bool;
+  subject : opt principal;
+  version : nat32;
+};
+type SignInput = record {
+  algorithm : opt text;
+  derivation_path : vec blob;
+  message : blob;
+  namespace : text;
+};
+type StateInfo = record {
+  freezing_threshold : nat;
+  service_fee : nat64;
+  namespace_count : nat64;
+  ecdsa_key_name : text;
+  managers : vec principal;
+  uncollectible_cycles : nat;
+  name : text;
+  auditors : vec principal;
+  ecdsa_public_key : opt blob;
+  incoming_cycles : nat;
+  subnet_size : nat64;
+  vetkd_key_name : text;
+};
+type UpdateSettingInfoInput = record { status : opt int8; desc : opt text };
+type UpdateSettingPayloadInput = record {
+  status : opt int8;
+  version : nat32;
+  payload : blob;
+};
+type UpgradeArgs = record {
+  service_fee : opt nat64;
+  name : opt text;
+  subnet_size : opt nat64;
+};
+service : (opt ChainArgs) -> {
+  admin_add_auditors : (vec principal) -> (Result);
+  admin_add_managers : (vec principal) -> (Result);
+  admin_remove_auditors : (vec principal) -> (Result);
+  admin_remove_managers : (vec principal) -> (Result);
+  create_setting : (SettingPath, CreateSettingInput, opt ECDHInput) -> (
+      Result_1,
+    );
+  ecdh_public_key : (SettingPath, ECDHInput) -> (Result_2);
+  ecdsa_public_key : (PublicKeyInput) -> (Result_2) query;
+  ecdsa_sign : (SignInput) -> (Result_2);
+  get_namespace : (text) -> (Result_3) query;
+  get_setting : (SettingPath, opt ECDHInput) -> (Result_4);
+  get_setting_info : (SettingPath) -> (Result_4) query;
+  get_state : () -> (Result_5) query;
+  list_namespaces : (opt text, opt nat32) -> (Result_6) query;
+  schnorr_public_key : (PublicKeyInput) -> (Result_2) query;
+  schnorr_sign : (SignInput) -> (Result_2);
+  update_setting_info : (SettingPath, UpdateSettingInfoInput) -> (Result_1);
+  update_setting_payload : (
+      SettingPath,
+      UpdateSettingPayloadInput,
+      opt ECDHInput,
+    ) -> (Result_1);
+  validate_admin_add_auditors : (vec principal) -> (Result);
+  validate_admin_add_managers : (vec principal) -> (Result);
+  validate_admin_remove_auditors : (vec principal) -> (Result);
+  validate_admin_remove_managers : (vec principal) -> (Result);
+}
