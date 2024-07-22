@@ -448,7 +448,7 @@ pub mod ns {
             spk.2.to_bytes().to_vec(),
             vec![spk.1],
         ];
-        let message_hash = sha3_256_n([spk.0.as_bytes(), spk.3.as_bytes(), partial_key]);
+        let message_hash = sha3_256_n([spk.0.as_bytes(), partial_key]);
         let sig = sign_with(key_name, derivation_path, message_hash.to_vec()).await?;
         Ok(sha3_256_n([&sig, partial_key]))
     }
