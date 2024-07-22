@@ -41,7 +41,7 @@ impl SettingPath {
     }
 }
 
-pub fn try_decode_payload(max_size: u64, ctype: u8, payload: &ByteBuf) -> Result<Value, String> {
+pub fn try_decode_payload(max_size: u64, ctype: u8, payload: &[u8]) -> Result<Value, String> {
     if max_size > 0 && payload.len() as u64 > max_size {
         return Err(format!(
             "payload size {} exceeds the limit {}",
@@ -50,7 +50,7 @@ pub fn try_decode_payload(max_size: u64, ctype: u8, payload: &ByteBuf) -> Result
         ));
     }
 
-    let val: Value = from_reader(&payload[..]).map_err(format_error)?;
+    let val: Value = from_reader(payload).map_err(format_error)?;
     match ctype {
         2 => {
             val.as_bytes()

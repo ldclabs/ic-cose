@@ -49,3 +49,5 @@ crc32fast = "1.4"
 url = "2.5"
 once_cell = "1.19"
 getrandom = { version = "0.2", features = ["custom"] }
+coset = { git = "https://github.com/ldclabs/coset.git", rev = "50583c5df52b653eb9b17c2940ad4b7fe3d67ff1" }
+aes-gcm = "0.10"

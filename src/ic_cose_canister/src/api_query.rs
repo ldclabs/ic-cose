@@ -1,5 +1,5 @@
 use ic_cose_types::{
-    crypto::*,
+    cose::PublicKeyInput,
     namespace::NamespaceInfo,
     setting::{SettingInfo, SettingPath},
     state::StateInfo,

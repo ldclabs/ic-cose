@@ -1,11 +1,8 @@
 use candid::Principal;
 use ciborium::{from_reader, from_reader_with_buffer, into_writer};
 use ic_cose_types::{
-    crypto::{ecdh_x25519, sha3_256, sha3_256_n, ECDHInput},
-    namespace::NamespaceInfo,
-    setting::*,
-    state::StateInfo,
-    ByteN,
+    cose::ECDHInput, crypto::ecdh_x25519, namespace::NamespaceInfo, setting::*, sha3_256,
+    sha3_256_n, state::StateInfo, ByteN,
 };
 use ic_stable_structures::{
     memory_manager::{MemoryId, MemoryManager, VirtualMemory},
@@ -154,7 +151,7 @@ impl Namespace {
         None
     }
 
-    pub fn get_setting(
+    pub fn check_and_get_setting(
         &self,
         caller: &Principal,
         setting_path: &SettingPathKey,
@@ -174,6 +171,15 @@ impl Namespace {
         setting.filter(|s| {
             setting_path.4 <= s.version && (can == Some(true) || s.readers.contains(caller))
         })
+    }
+
+    pub fn get_setting(&self, setting_path: &SettingPathKey) -> Option<&Setting> {
+        let setting_key = (setting_path.2, setting_path.3.clone());
+        match setting_path.1 {
+            0 => self.settings.get(&setting_key),
+            1 => self.client_settings.get(&setting_key),
+            _ => None,
+        }
     }
 
     pub fn get_setting_mut(&mut self, setting_path: &SettingPathKey) -> Option<&mut Setting> {
@@ -388,6 +394,7 @@ pub mod state {
 }
 
 pub mod ns {
+
     use ic_cose_types::setting::CreateSettingInput;
 
     use super::*;
@@ -512,7 +519,7 @@ pub mod ns {
                 .ok_or_else(|| format!("namespace {} not found", setting_path.0))?;
 
             let value = ns
-                .get_setting(caller, setting_path)
+                .check_and_get_setting(caller, setting_path)
                 .ok_or_else(|| format!("setting {} not found or no permission", setting_path))?;
 
             Ok(value.to_info(setting_path.2, setting_path.3.clone()))
@@ -529,15 +536,15 @@ pub mod ns {
                 .get(&setting_path.0)
                 .ok_or_else(|| format!("namespace {} not found", setting_path.0))?;
 
-            let value = ns
-                .get_setting(caller, setting_path)
+            let setting = ns
+                .check_and_get_setting(caller, setting_path)
                 .ok_or_else(|| format!("setting {} not found or no permission", setting_path))?;
 
-            if setting_path.4 > 0 && setting_path.4 < value.version {
+            if setting_path.4 > 0 && setting_path.4 < setting.version {
                 Err("setting version not found".to_string())?;
             }
 
-            let payload = if setting_path.4 < value.version {
+            let payload = if setting_path.4 < setting.version {
                 PAYLOADS_STORE.with(|r| {
                     let m = r.borrow();
                     let payload = m
@@ -546,7 +553,7 @@ pub mod ns {
                     Ok::<ByteBuf, String>(ByteBuf::from(payload))
                 })?
             } else {
-                value
+                setting
                     .payload
                     .as_ref()
                     .ok_or_else(|| format!("setting {} payload not found", setting_path))?
@@ -554,9 +561,9 @@ pub mod ns {
             };
 
             Ok((
-                value.to_info(setting_path.2, setting_path.3.clone()),
+                setting.to_info(setting_path.2, setting_path.3.clone()),
                 payload,
-                value.dek.clone(),
+                setting.dek.clone(),
             ))
         })
     }
@@ -632,6 +639,9 @@ pub mod ns {
             let setting = ns
                 .get_setting_mut(setting_path)
                 .ok_or_else(|| format!("setting {} not found", setting_path))?;
+            if setting.status == 1 {
+                Err("readonly setting can not be updated".to_string())?;
+            }
 
             if let Some(status) = input.status {
                 if status == 1 && setting.payload.is_none() {
@@ -650,6 +660,74 @@ pub mod ns {
                 updated_at: setting.updated_at,
                 version: setting.version,
                 hash: None,
+                public_key: None,
+            })
+        })
+    }
+
+    pub fn setting_for_update_payload(
+        caller: &Principal,
+        setting_path: &SettingPathKey,
+    ) -> Result<(SettingInfo, Option<ByteBuf>, u64), String> {
+        NS.with(|r| {
+            let m = r.borrow();
+            let ns = m
+                .get(&setting_path.0)
+                .ok_or_else(|| format!("namespace {} not found", setting_path.0))?;
+
+            if !ns.can_write_setting(caller, setting_path) {
+                Err("no permission".to_string())?;
+            }
+            let setting = ns
+                .get_setting(setting_path)
+                .ok_or_else(|| format!("setting {} not found", setting_path))?;
+            if setting.status == 1 {
+                Err("readonly setting can not be updated".to_string())?;
+            }
+
+            Ok((
+                setting.to_info(setting_path.2, setting_path.3.clone()),
+                setting.dek.clone(),
+                ns.max_payload_size,
+            ))
+        })
+    }
+
+    pub fn update_setting_payload(
+        setting_path: &SettingPathKey,
+        payload: ByteBuf,
+        dek: Option<ByteBuf>,
+        hash: ByteN<32>,
+        status: Option<i8>,
+        now_ms: u64,
+    ) -> Result<UpdateSettingOutput, String> {
+        NS.with(|r| {
+            let mut m = r.borrow_mut();
+            let ns = m
+                .get_mut(&setting_path.0)
+                .ok_or_else(|| format!("namespace {} not found", setting_path.0))?;
+
+            let setting = ns
+                .get_setting_mut(setting_path)
+                .ok_or_else(|| format!("setting {} not found", setting_path))?;
+            if setting.status == 1 {
+                Err("readonly setting can not be updated".to_string())?;
+            }
+
+            setting.version = setting.version.saturating_add(1);
+            setting.hash = Some(hash);
+            setting.payload = Some(payload);
+            setting.dek = dek;
+            setting.updated_at = now_ms;
+            if let Some(status) = status {
+                setting.status = status;
+            }
+
+            Ok(UpdateSettingOutput {
+                created_at: setting.created_at,
+                updated_at: setting.updated_at,
+                version: setting.version,
+                hash: Some(hash),
                 public_key: None,
             })
         })
