@@ -1,13 +1,14 @@
-use candid::CandidType;
+use candid::{CandidType, Principal};
 use coset::{
     CoseEncrypt0, CoseEncrypt0Builder, CoseKeyBuilder, HeaderBuilder, Label, RegisteredLabel,
+    TaggedCborSerializable,
 };
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
 
 use crate::{
     crypto::{aes256_gcm_decrypt, aes256_gcm_encrypt},
-    format_error, skip_prefix, ByteN,
+    format_error, skip_prefix, validate_key, ByteN,
 };
 
 pub use coset::{iana, CborSerializable, CoseKey};
@@ -38,9 +39,31 @@ pub struct ECDHInput {
     pub partial_key: Option<ByteN<32>>, // should provide for encrypted payload with BYOK
 }
 
+#[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SettingPathInput {
+    pub ns: String,
+    pub client: bool,
+    pub subject: Option<Principal>, // default is caller
+    pub key: Option<String>,
+}
+
+impl SettingPathInput {
+    pub fn validate(&self) -> Result<(), String> {
+        validate_key(&self.ns)?;
+        if let Some(ref key) = self.key {
+            validate_key(key)?;
+        }
+        Ok(())
+    }
+}
+
+pub fn try_decode_encrypt0(payload: &[u8]) -> Result<CoseEncrypt0, String> {
+    CoseEncrypt0::from_slice(skip_prefix(&ENCRYPT0_TAG, payload)).map_err(format_error)
+}
+
 pub fn cose_encrypt0(
     payload: &[u8], // plain payload
-    dek: &[u8; 32],
+    secret: &[u8; 32],
     aad: &[u8],
     nonce: [u8; 12],
 ) -> Result<ByteBuf, String> {
@@ -53,16 +76,16 @@ pub fn cose_encrypt0(
         .protected(protected)
         .unprotected(unprotected.build())
         .create_ciphertext(payload, aad, |plain_data, enc| {
-            aes256_gcm_encrypt(dek, &nonce, enc, plain_data).unwrap()
+            aes256_gcm_encrypt(secret, &nonce, enc, plain_data).unwrap()
         })
         .build();
-    let payload = e0.to_vec().map_err(format_error)?;
+    let payload = e0.to_tagged_vec().map_err(format_error)?;
     Ok(ByteBuf::from(payload))
 }
 
 pub fn cose_decrypt0(
     payload: &[u8], // COSE_Encrypt0 item
-    dek: &[u8; 32],
+    secret: &[u8; 32],
     aad: &[u8],
 ) -> Result<ByteBuf, String> {
     let e0 = CoseEncrypt0::from_slice(skip_prefix(&ENCRYPT0_TAG, payload)).map_err(format_error)?;
@@ -73,18 +96,18 @@ pub fn cose_decrypt0(
         )
     })?;
     let plain_data = e0.decrypt(aad, |cipher_data, enc| {
-        aes256_gcm_decrypt(dek, nonce, enc, cipher_data)
+        aes256_gcm_decrypt(secret, nonce, enc, cipher_data)
     })?;
     Ok(ByteBuf::from(plain_data))
 }
 
-pub fn cose_aes256_key(key: [u8; 32]) -> CoseKey {
-    CoseKeyBuilder::new_symmetric_key(key.into())
+pub fn cose_aes256_key(secret: [u8; 32]) -> CoseKey {
+    CoseKeyBuilder::new_symmetric_key(secret.into())
         .algorithm(iana::Algorithm::A256GCM)
         .build()
 }
 
-pub fn cose_key_secret(key: CoseKey) -> Result<[u8; 32], String> {
+pub fn get_cose_key_secret(key: CoseKey) -> Result<[u8; 32], String> {
     let key_label = match key.kty {
         RegisteredLabel::Assigned(iana::KeyType::Symmetric) => {
             Label::Int(iana::SymmetricKeyParameter::K as i64)

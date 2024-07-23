@@ -1,9 +1,10 @@
 use candid::Principal;
-use ic_cose_types::{cose::*, namespace::*, setting::*, state::StateInfo};
+use ic_cose_types::{cose::*, namespace::*, setting::*, state::StateInfo, ByteN};
 use serde_bytes::ByteBuf;
 use std::collections::BTreeSet;
 
 mod api_admin;
+mod api_crypto;
 mod api_init;
 mod api_query;
 mod api_update;

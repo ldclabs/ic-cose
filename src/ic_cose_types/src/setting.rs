@@ -2,9 +2,9 @@ use candid::{CandidType, Principal};
 use ciborium::{from_reader, Value};
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{format_error, validate_key, ByteN};
+use crate::{cose::SettingPathInput, format_error, validate_key, ByteN};
 
 pub const CHUNK_SIZE: u32 = 256 * 1024;
 
@@ -13,24 +13,24 @@ pub struct SettingInfo {
     pub key: String,
     pub subject: Principal,
     pub desc: String,
-    pub created_at: u64,              // unix timestamp in milliseconds
-    pub updated_at: u64,              // unix timestamp in milliseconds
+    pub created_at: u64, // unix timestamp in milliseconds
+    pub updated_at: u64, // unix timestamp in milliseconds
     pub status: i8, // -1: archived; 0: readable and writable; 1: readonlypub auditors: BTreeSet<Principal>,
-    pub readers: BTreeSet<Principal>, // readers can read the setting
-    pub ctype: u8, // CBOR Major type: 2 - byte string; 3 - text string; 4 - array; 5 - map; 6 - tagged item
     pub version: u32,
-    pub hash: Option<ByteN<32>>,     // sha3 256,
-    pub payload: Option<ByteBuf>,    // plain payload
-    pub public_key: Option<ByteBuf>, // ECDH public key from canister
+    pub readers: BTreeSet<Principal>, // readers can read the setting
+    pub tags: BTreeMap<String, String>, // tags for query
+    pub dek: Option<ByteBuf>, // Data Encryption Key that encrypted by BYOK or vetKey in COSE_Encrypt0
+    pub payload: Option<ByteBuf>, // plain payload
+    pub public_key: Option<ByteN<32>>, // server side ECDH public key
 }
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SettingPath {
     pub ns: String,
-    pub key: String,
-    pub version: u32,
     pub client: bool,
     pub subject: Option<Principal>,
+    pub key: String,
+    pub version: u32,
 }
 
 impl SettingPath {
@@ -41,7 +41,19 @@ impl SettingPath {
     }
 }
 
-pub fn try_decode_payload(max_size: u64, ctype: u8, payload: &[u8]) -> Result<Value, String> {
+impl From<SettingPathInput> for SettingPath {
+    fn from(input: SettingPathInput) -> Self {
+        Self {
+            ns: input.ns,
+            client: input.client,
+            subject: input.subject,
+            key: input.key.unwrap_or_default(),
+            version: 0,
+        }
+    }
+}
+
+pub fn try_decode_payload(max_size: u64, payload: &[u8]) -> Result<Value, String> {
     if max_size > 0 && payload.len() as u64 > max_size {
         return Err(format!(
             "payload size {} exceeds the limit {}",
@@ -50,41 +62,16 @@ pub fn try_decode_payload(max_size: u64, ctype: u8, payload: &[u8]) -> Result<Va
         ));
     }
 
-    let val: Value = from_reader(payload).map_err(format_error)?;
-    match ctype {
-        2 => {
-            val.as_bytes()
-                .ok_or_else(|| "invalid byte string".to_string())?;
-        }
-        3 => {
-            val.as_text()
-                .ok_or_else(|| "invalid text string".to_string())?;
-        }
-        4 => {
-            val.as_array()
-                .ok_or_else(|| "invalid array items".to_string())?;
-        }
-        5 => {
-            val.as_map()
-                .ok_or_else(|| "invalid map items".to_string())?;
-        }
-        6 => {
-            val.as_tag()
-                .ok_or_else(|| "invalid tagged item".to_string())?;
-        }
-        _ => {
-            Err("invalid CBOR major type".to_string())?;
-        }
-    }
-    Ok(val)
+    from_reader(payload).map_err(format_error)
 }
 
 #[derive(CandidType, Clone, Debug, Default, Deserialize, Serialize)]
 pub struct CreateSettingInput {
     pub desc: Option<String>,
     pub status: Option<i8>,
-    pub ctype: u8,
-    pub payload: Option<ByteBuf>, // plain payload
+    pub tags: Option<BTreeMap<String, String>>,
+    pub payload: ByteBuf,
+    pub dek: Option<ByteBuf>,
 }
 
 impl CreateSettingInput {
@@ -93,14 +80,11 @@ impl CreateSettingInput {
             if !(0i8..=1i8).contains(&status) {
                 Err("status should be 0 or 1".to_string())?;
             }
-
-            if status == 1 && self.payload.is_none() {
-                Err("readonly setting should have payload".to_string())?;
-            }
         }
-
-        if !(2u8..=6u8).contains(&self.ctype) {
-            Err("ctype should be in [2..6]".to_string())?;
+        if let Some(ref tags) = self.tags {
+            for (k, _) in tags.iter() {
+                validate_key(k)?;
+            }
         }
         Ok(())
     }
@@ -111,14 +95,13 @@ pub struct CreateSettingOutput {
     pub created_at: u64,
     pub updated_at: u64,
     pub version: u32,
-    pub hash: Option<ByteN<32>>,       // sha3 256,
-    pub public_key: Option<ByteN<32>>, // server side ECDH public key
 }
 
 #[derive(CandidType, Clone, Debug, Default, Deserialize, Serialize)]
 pub struct UpdateSettingInfoInput {
     pub desc: Option<String>,
     pub status: Option<i8>,
+    pub tags: Option<BTreeMap<String, String>>,
 }
 
 impl UpdateSettingInfoInput {
@@ -128,13 +111,17 @@ impl UpdateSettingInfoInput {
                 Err("status should be -1, 0 or 1".to_string())?;
             }
         }
+        if let Some(ref tags) = self.tags {
+            for (k, _) in tags.iter() {
+                validate_key(k)?;
+            }
+        }
         Ok(())
     }
 }
 
 #[derive(CandidType, Clone, Debug, Default, Deserialize, Serialize)]
 pub struct UpdateSettingPayloadInput {
-    pub version: u32, // update payload only if version matches and version will be incremented
     pub payload: ByteBuf, // plain or encrypted payload
     pub status: Option<i8>,
 }

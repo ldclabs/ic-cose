@@ -6,7 +6,10 @@ use ciborium::into_writer;
 use hmac::{Hmac, Mac};
 use serde::Serialize;
 use sha3::{Digest, Sha3_256};
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    ops::Deref,
+};
 
 pub mod cose;
 pub mod crypto;
@@ -101,4 +104,29 @@ pub fn validate_principals(principals: &BTreeSet<Principal>) -> Result<(), Strin
         return Err("anonymous user is not allowed".to_string());
     }
     Ok(())
+}
+
+pub enum OwnedRef<'a, T> {
+    Ref(&'a T),
+    Owned(T),
+}
+
+impl<T> AsRef<T> for OwnedRef<'_, T> {
+    fn as_ref(&self) -> &T {
+        match self {
+            OwnedRef::Ref(r) => r,
+            OwnedRef::Owned(o) => o,
+        }
+    }
+}
+
+impl<T> Deref for OwnedRef<'_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            OwnedRef::Ref(r) => r,
+            OwnedRef::Owned(o) => o,
+        }
+    }
 }

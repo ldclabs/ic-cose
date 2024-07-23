@@ -1,8 +1,13 @@
 use candid::Principal;
 use ciborium::{from_reader, from_reader_with_buffer, into_writer};
 use ic_cose_types::{
-    cose::ECDHInput, crypto::ecdh_x25519, namespace::NamespaceInfo, setting::*, sha3_256,
-    sha3_256_n, state::StateInfo, ByteN,
+    cose::{try_decode_encrypt0, ECDHInput},
+    crypto::ecdh_x25519,
+    namespace::NamespaceInfo,
+    setting::*,
+    sha3_256_n,
+    state::StateInfo,
+    ByteN,
 };
 use ic_stable_structures::{
     memory_manager::{MemoryId, MemoryManager, VirtualMemory},
@@ -101,18 +106,18 @@ impl Namespace {
         }
     }
 
-    fn can_write_setting(&self, caller: &Principal, setting_path: &SettingPathKey) -> bool {
+    pub fn can_write_setting(&self, caller: &Principal, spk: &SettingPathKey) -> bool {
         if self.status != 0 {
             return false;
         }
 
         // only managers can create server side settings for any subject
-        if setting_path.1 == 0 {
+        if spk.1 == 0 {
             return self.managers.contains(caller);
         }
 
         // members can create settings for themselves and update them
-        self.members.contains(caller) && caller == &setting_path.2
+        self.members.contains(caller) && caller == &spk.2
     }
 
     pub fn can_read_namespace(&self, caller: &Principal) -> bool {
@@ -129,11 +134,7 @@ impl Namespace {
             || self.members.contains(caller)
     }
 
-    fn partial_can_read_setting(
-        &self,
-        caller: &Principal,
-        setting_path: &SettingPathKey,
-    ) -> Option<bool> {
+    fn partial_can_read_setting(&self, caller: &Principal, spk: &SettingPathKey) -> Option<bool> {
         if self.visibility == 1 {
             return Some(true);
         }
@@ -142,58 +143,59 @@ impl Namespace {
             return Some(self.managers.contains(caller) || self.auditors.contains(caller));
         }
 
-        if self.managers.contains(caller)
-            || self.auditors.contains(caller)
-            || caller == &setting_path.2
-        {
+        if self.managers.contains(caller) || self.auditors.contains(caller) || caller == &spk.2 {
             return Some(true);
         }
         None
     }
 
+    pub fn has_ns_signing_permission(&self, caller: &Principal) -> bool {
+        if self.status < 0 && !self.managers.contains(caller) {
+            return false;
+        }
+        self.managers.contains(caller) || self.members.contains(caller)
+    }
+
+    pub fn has_setting_kek_permission(&self, caller: &Principal, spk: &SettingPathKey) -> bool {
+        if self.status < 0 && !self.managers.contains(caller) {
+            return false;
+        }
+
+        caller == &spk.2 || (spk.1 == 0 && self.managers.contains(caller))
+    }
+
     pub fn check_and_get_setting(
         &self,
         caller: &Principal,
-        setting_path: &SettingPathKey,
+        spk: &SettingPathKey,
     ) -> Option<&Setting> {
-        let can = self.partial_can_read_setting(caller, setting_path);
+        let can = self.partial_can_read_setting(caller, spk);
         if can == Some(false) {
             return None;
         }
 
-        let setting_key = (setting_path.2, setting_path.3.clone());
-        let setting = match setting_path.1 {
+        let setting_key = (spk.2, spk.3.clone());
+        let setting = match spk.1 {
             0 => self.settings.get(&setting_key),
             1 => self.client_settings.get(&setting_key),
             _ => None,
         };
 
-        setting.filter(|s| {
-            setting_path.4 <= s.version && (can == Some(true) || s.readers.contains(caller))
-        })
+        setting.filter(|s| spk.4 <= s.version && (can == Some(true) || s.readers.contains(caller)))
     }
 
-    pub fn get_setting(&self, setting_path: &SettingPathKey) -> Option<&Setting> {
-        let setting_key = (setting_path.2, setting_path.3.clone());
-        match setting_path.1 {
-            0 => self.settings.get(&setting_key),
-            1 => self.client_settings.get(&setting_key),
-            _ => None,
-        }
-    }
-
-    pub fn get_setting_mut(&mut self, setting_path: &SettingPathKey) -> Option<&mut Setting> {
-        let setting_key = (setting_path.2, setting_path.3.clone());
-        match setting_path.1 {
+    pub fn get_setting_mut(&mut self, spk: &SettingPathKey) -> Option<&mut Setting> {
+        let setting_key = (spk.2, spk.3.clone());
+        match spk.1 {
             0 => self.settings.get_mut(&setting_key),
             1 => self.client_settings.get_mut(&setting_key),
             _ => None,
         }
     }
 
-    pub fn try_insert_setting(&mut self, setting_path: &SettingPathKey, setting: Setting) -> bool {
-        let setting_key = (setting_path.2, setting_path.3.clone());
-        let entry = match setting_path.1 {
+    pub fn try_insert_setting(&mut self, spk: &SettingPathKey, setting: Setting) -> bool {
+        let setting_key = (spk.2, spk.3.clone());
+        let entry = match spk.1 {
             0 => self.settings.entry(setting_key),
             1 => self.client_settings.entry(setting_key),
             _ => {
@@ -213,15 +215,14 @@ impl Namespace {
 #[derive(Clone, Default, Deserialize, Serialize)]
 pub struct Setting {
     pub desc: String,
-    pub created_at: u64,              // unix timestamp in milliseconds
-    pub updated_at: u64,              // unix timestamp in milliseconds
+    pub created_at: u64, // unix timestamp in milliseconds
+    pub updated_at: u64, // unix timestamp in milliseconds
     pub status: i8, // -1: archived; 0: readable and writable; 1: readonlypub auditors: BTreeSet<Principal>,
-    pub readers: BTreeSet<Principal>, // readers can read the setting
-    pub ctype: u8, // CBOR Major type: 2 - byte string; 3 - text string; 4 - array; 5 - map; 6 - tagged item
     pub version: u32,
-    pub hash: Option<ByteN<32>>,  // sha3 256, plain payload hash
+    pub readers: BTreeSet<Principal>, // readers can read the setting
+    pub tags: BTreeMap<String, String>, // tags for query
+    pub payload: ByteBuf,
     pub dek: Option<ByteBuf>, // Data Encryption Key that encrypted by BYOK or vetKey in COSE_Encrypt0
-    pub payload: Option<ByteBuf>, // payload not exist when created
 }
 
 impl Setting {
@@ -233,10 +234,10 @@ impl Setting {
             created_at: self.created_at,
             updated_at: self.updated_at,
             status: self.status,
-            readers: self.readers.clone(),
-            ctype: self.ctype,
             version: self.version,
-            hash: self.hash,
+            readers: self.readers.clone(),
+            tags: self.tags.clone(),
+            dek: self.dek.clone(),
             payload: None,
             public_key: None,
         }
@@ -394,42 +395,70 @@ pub mod state {
 }
 
 pub mod ns {
-
-    use ic_cose_types::setting::CreateSettingInput;
-
     use super::*;
 
     pub fn namespace_count() -> u64 {
         NS.with(|r| r.borrow().len() as u64)
     }
 
-    pub fn can_read(caller: &Principal, namespace: &str) -> bool {
+    pub fn with<R>(
+        namespace: &str,
+        f: impl FnOnce(&Namespace) -> Result<R, String>,
+    ) -> Result<R, String> {
         NS.with(|r| {
             r.borrow()
                 .get(namespace)
-                .map_or(false, |ns| ns.can_read_namespace(caller))
+                .map(f)
+                .unwrap_or_else(|| Err(format!("namespace {} not found", namespace)))
+        })
+    }
+
+    pub fn with_mut<R>(
+        namespace: &str,
+        f: impl FnOnce(&mut Namespace) -> Result<R, String>,
+    ) -> Result<R, String> {
+        NS.with(|r| {
+            r.borrow_mut()
+                .get_mut(namespace)
+                .map(f)
+                .unwrap_or_else(|| Err(format!("namespace {} not found", namespace)))
         })
     }
 
     pub fn ecdsa_public_key(
+        caller: &Principal,
         namespace: String,
         derivation_path: Vec<ByteBuf>,
     ) -> Result<ByteBuf, String> {
-        state::with(|s| {
-            let pk = s.ecdsa_public_key.as_ref().ok_or("no ecdsa public key")?;
-            let mut path: Vec<Vec<u8>> = Vec::with_capacity(derivation_path.len() + 1);
-            path.push(namespace.to_bytes().to_vec());
-            path.extend(derivation_path.into_iter().map(|b| b.into_vec()));
-            let derived_pk = derive_public_key(pk, path);
-            Ok(ByteBuf::from(derived_pk.public_key))
+        with(&namespace, |ns| {
+            if !ns.can_read_namespace(caller) {
+                Err("no permission".to_string())?;
+            }
+
+            state::with(|s| {
+                let pk = s.ecdsa_public_key.as_ref().ok_or("no ecdsa public key")?;
+                let mut path: Vec<Vec<u8>> = Vec::with_capacity(derivation_path.len() + 1);
+                path.push(namespace.to_bytes().to_vec());
+                path.extend(derivation_path.into_iter().map(|b| b.into_vec()));
+                let derived_pk = derive_public_key(pk, path);
+                Ok(ByteBuf::from(derived_pk.public_key))
+            })
         })
     }
 
     pub async fn ecdsa_sign(
+        caller: &Principal,
         namespace: String,
         derivation_path: Vec<ByteBuf>,
         message: ByteBuf,
     ) -> Result<ByteBuf, String> {
+        with(&namespace, |ns| {
+            if !ns.has_ns_signing_permission(caller) {
+                Err("no permission".to_string())?;
+            }
+            Ok(())
+        })?;
+
         let key_name = state::with(|s| s.ecdsa_key_name.clone());
         let mut path: Vec<Vec<u8>> = Vec::with_capacity(derivation_path.len() + 1);
         path.push(namespace.to_bytes().to_vec());
@@ -438,22 +467,22 @@ pub mod ns {
         Ok(ByteBuf::from(sig))
     }
 
-    pub async fn ecdsa_setting_kek(
+    pub async fn ecdh_public_key(
+        caller: &Principal,
         spk: &SettingPathKey,
-        partial_key: &[u8],
-    ) -> Result<[u8; 32], String> {
-        let key_name = state::with(|r| r.ecdsa_key_name.clone());
-        let derivation_path = vec![
-            b"KEK_COSE_Encrypt0_Setting".to_vec(),
-            spk.2.to_bytes().to_vec(),
-            vec![spk.1],
-        ];
-        let message_hash = sha3_256_n([spk.0.as_bytes(), partial_key]);
-        let sig = sign_with(key_name, derivation_path, message_hash.to_vec()).await?;
-        Ok(sha3_256_n([&sig, partial_key]))
+        ecdh: &ECDHInput,
+    ) -> Result<ByteN<32>, String> {
+        with(&spk.0, |ns| {
+            ns.check_and_get_setting(caller, spk)
+                .ok_or_else(|| format!("setting {} not found or no permission", spk))?;
+            Ok(())
+        })?;
+
+        let (_, pk) = inner_ecdh_x25519_static_secret(spk, ecdh).await?;
+        Ok(pk.to_bytes().into())
     }
 
-    pub async fn ecdh_x25519_static_secret(
+    pub async fn inner_ecdh_x25519_static_secret(
         spk: &SettingPathKey,
         ecdh: &ECDHInput,
     ) -> Result<(SharedSecret, PublicKey), String> {
@@ -469,16 +498,27 @@ pub mod ns {
         Ok(ecdh_x25519(secret_key, *ecdh.public_key))
     }
 
+    pub async fn inner_ecdsa_setting_kek(
+        spk: &SettingPathKey,
+        partial_key: &[u8],
+    ) -> Result<[u8; 32], String> {
+        let key_name = state::with(|r| r.ecdsa_key_name.clone());
+        let derivation_path = vec![
+            b"KEK_COSE_Encrypt0_Setting".to_vec(),
+            spk.2.to_bytes().to_vec(),
+            vec![spk.1],
+        ];
+        let message_hash = sha3_256_n([spk.0.as_bytes(), partial_key]);
+        let sig = sign_with(key_name, derivation_path, message_hash.to_vec()).await?;
+        Ok(sha3_256_n([&sig, partial_key]))
+    }
+
     pub fn get_namespace(caller: &Principal, namespace: String) -> Result<NamespaceInfo, String> {
-        NS.with(|r| {
-            let m = r.borrow();
-            let ns = m
-                .get(&namespace)
-                .ok_or_else(|| format!("namespace {} not found", namespace))?;
+        with(&namespace, |ns| {
             if !ns.can_read_namespace(caller) {
                 Err("no permission".to_string())?;
             }
-            Ok(ns.to_info(namespace))
+            Ok(ns.to_info(namespace.clone()))
         })
     }
 
@@ -510,225 +550,197 @@ pub mod ns {
 
     pub fn get_setting_info(
         caller: &Principal,
-        setting_path: &SettingPathKey,
+        spk: &SettingPathKey,
     ) -> Result<SettingInfo, String> {
-        NS.with(|r| {
-            let m = r.borrow();
-            let ns = m
-                .get(&setting_path.0)
-                .ok_or_else(|| format!("namespace {} not found", setting_path.0))?;
+        with(&spk.0, |ns| {
+            let setting = ns
+                .check_and_get_setting(caller, spk)
+                .ok_or_else(|| format!("setting {} not found or no permission", spk))?;
 
-            let value = ns
-                .check_and_get_setting(caller, setting_path)
-                .ok_or_else(|| format!("setting {} not found or no permission", setting_path))?;
-
-            Ok(value.to_info(setting_path.2, setting_path.3.clone()))
+            Ok(setting.to_info(spk.2, spk.3.clone()))
         })
     }
 
-    pub fn get_setting(
-        caller: &Principal,
-        setting_path: &SettingPathKey,
-    ) -> Result<(SettingInfo, ByteBuf, Option<ByteBuf>), String> {
-        NS.with(|r| {
-            let m = r.borrow();
-            let ns = m
-                .get(&setting_path.0)
-                .ok_or_else(|| format!("namespace {} not found", setting_path.0))?;
-
+    pub fn get_setting(caller: &Principal, spk: &SettingPathKey) -> Result<SettingInfo, String> {
+        with(&spk.0, |ns| {
             let setting = ns
-                .check_and_get_setting(caller, setting_path)
-                .ok_or_else(|| format!("setting {} not found or no permission", setting_path))?;
+                .check_and_get_setting(caller, spk)
+                .ok_or_else(|| format!("setting {} not found or no permission", spk))?;
 
-            if setting_path.4 > 0 && setting_path.4 < setting.version {
-                Err("setting version not found".to_string())?;
-            }
-
-            let payload = if setting_path.4 < setting.version {
+            let payload = if spk.4 > 0 && spk.4 < setting.version {
                 PAYLOADS_STORE.with(|r| {
                     let m = r.borrow();
                     let payload = m
-                        .get(setting_path)
-                        .ok_or_else(|| format!("setting {} payload not found", setting_path))?;
+                        .get(spk)
+                        .ok_or_else(|| format!("setting {} payload not found", spk))?;
                     Ok::<ByteBuf, String>(ByteBuf::from(payload))
                 })?
             } else {
-                setting
-                    .payload
-                    .as_ref()
-                    .ok_or_else(|| format!("setting {} payload not found", setting_path))?
-                    .clone()
+                setting.payload.clone()
             };
 
-            Ok((
-                setting.to_info(setting_path.2, setting_path.3.clone()),
-                payload,
-                setting.dek.clone(),
-            ))
+            let mut res = setting.to_info(spk.2, spk.3.clone());
+            res.payload = Some(payload);
+            Ok(res)
         })
     }
 
-    // can not encrypt payload when creating setting
     pub fn create_setting(
         caller: &Principal,
-        setting_path: &SettingPathKey,
+        spk: &SettingPathKey,
         input: CreateSettingInput,
         now_ms: u64,
     ) -> Result<CreateSettingOutput, String> {
-        NS.with(|r| {
-            let mut m = r.borrow_mut();
-            let ns = m
-                .get_mut(&setting_path.0)
-                .ok_or_else(|| format!("namespace {} not found", setting_path.0))?;
-
-            if !ns.can_write_setting(caller, setting_path) {
+        with_mut(&spk.0, |ns| {
+            if !ns.can_write_setting(caller, spk) {
                 Err("no permission".to_string())?;
             }
 
-            if let Some(ref payload) = input.payload {
-                try_decode_payload(ns.max_payload_size, input.ctype, payload)?;
+            if spk.4 != 0 {
+                Err("version mismatch".to_string())?;
+            }
+
+            match input.dek {
+                Some(ref dek) => {
+                    if input.payload.len() as u64 > ns.max_payload_size {
+                        Err("payload size exceeds the limit".to_string())?;
+                    }
+                    // should be valid COSE encrypt0 dek
+                    try_decode_encrypt0(dek)?;
+                    // should be valid COSE encrypt0 payload
+                    try_decode_encrypt0(&input.payload)?;
+                }
+                None => {
+                    // try to validate plain payload
+                    try_decode_payload(ns.max_payload_size, &input.payload)?;
+                }
             }
 
             let output = CreateSettingOutput {
                 created_at: now_ms,
                 updated_at: now_ms,
-                version: if input.payload.is_some() { 1 } else { 0 },
-                hash: input
-                    .payload
-                    .as_ref()
-                    .map(|payload| sha3_256(payload).into()),
-                public_key: None,
+                version: 1,
             };
 
             if !ns.try_insert_setting(
-                setting_path,
+                spk,
                 Setting {
                     desc: input.desc.unwrap_or_default(),
                     created_at: now_ms,
                     updated_at: now_ms,
                     status: input.status.unwrap_or(0),
-                    ctype: input.ctype,
-                    version: output.version,
-                    payload: input.payload,
-                    hash: output.hash,
+                    tags: input.tags.unwrap_or_default(),
+                    payload: input.payload.clone(),
+                    dek: input.dek.clone(),
+                    version: 1,
                     ..Default::default()
                 },
             ) {
-                Err(format!("setting {} already exists", setting_path))?;
+                Err(format!("setting {} already exists", spk))?;
+            }
+
+            if let Some(dek) = input.dek {
+                // save dek to 0 key for future use
+                PAYLOADS_STORE.with(|r| {
+                    r.borrow_mut().insert(spk.clone(), dek.into_vec());
+                });
             }
 
             Ok(output)
         })
     }
 
+    pub fn update_setting_payload(
+        caller: &Principal,
+        spk: &SettingPathKey,
+        input: UpdateSettingPayloadInput,
+        now_ms: u64,
+    ) -> Result<UpdateSettingOutput, String> {
+        with_mut(&spk.0, |ns| {
+            if !ns.can_write_setting(caller, spk) {
+                Err("no permission".to_string())?;
+            }
+
+            let max_payload_size = ns.max_payload_size;
+            let setting = ns
+                .get_setting_mut(spk)
+                .ok_or_else(|| format!("setting {} not found", spk))?;
+            if setting.version != spk.4 {
+                Err("version mismatch".to_string())?;
+            }
+            if setting.status == 1 {
+                Err("readonly setting can not be updated".to_string())?;
+            }
+
+            match setting.dek {
+                Some(_) => {
+                    if input.payload.len() as u64 > max_payload_size {
+                        Err("payload size exceeds the limit".to_string())?;
+                    }
+                    // should be valid COSE encrypt0 payload
+                    try_decode_encrypt0(&input.payload)?;
+                }
+                None => {
+                    // try to validate plain payload
+                    try_decode_payload(max_payload_size, &input.payload)?;
+                }
+            }
+
+            PAYLOADS_STORE.with(|r| {
+                r.borrow_mut()
+                    .insert(spk.clone(), setting.payload.clone().into_vec());
+            });
+
+            if let Some(status) = input.status {
+                setting.status = status;
+            }
+            setting.version = setting.version.saturating_add(1);
+            setting.payload = input.payload;
+            setting.updated_at = now_ms;
+
+            Ok(UpdateSettingOutput {
+                created_at: setting.created_at,
+                updated_at: setting.updated_at,
+                version: setting.version,
+            })
+        })
+    }
+
     pub fn update_setting_info(
         caller: &Principal,
-        setting_path: &SettingPathKey,
+        spk: &SettingPathKey,
         input: UpdateSettingInfoInput,
         now_ms: u64,
     ) -> Result<UpdateSettingOutput, String> {
-        NS.with(|r| {
-            let mut m = r.borrow_mut();
-            let ns = m
-                .get_mut(&setting_path.0)
-                .ok_or_else(|| format!("namespace {} not found", setting_path.0))?;
-
-            if !ns.can_write_setting(caller, setting_path) {
+        with_mut(&spk.0, |ns| {
+            if !ns.can_write_setting(caller, spk) {
                 Err("no permission".to_string())?;
             }
             let setting = ns
-                .get_setting_mut(setting_path)
-                .ok_or_else(|| format!("setting {} not found", setting_path))?;
+                .get_setting_mut(spk)
+                .ok_or_else(|| format!("setting {} not found", spk))?;
+            if setting.version != spk.4 {
+                Err("version mismatch".to_string())?;
+            }
             if setting.status == 1 {
                 Err("readonly setting can not be updated".to_string())?;
             }
 
             if let Some(status) = input.status {
-                if status == 1 && setting.payload.is_none() {
-                    Err("readonly setting should have payload".to_string())?;
-                }
-
                 setting.status = status;
             }
             if let Some(desc) = input.desc {
                 setting.desc = desc;
             }
+            if let Some(tags) = input.tags {
+                setting.tags = tags;
+            }
             setting.updated_at = now_ms;
 
             Ok(UpdateSettingOutput {
                 created_at: setting.created_at,
                 updated_at: setting.updated_at,
                 version: setting.version,
-                hash: None,
-                public_key: None,
-            })
-        })
-    }
-
-    pub fn setting_for_update_payload(
-        caller: &Principal,
-        setting_path: &SettingPathKey,
-    ) -> Result<(SettingInfo, Option<ByteBuf>, u64), String> {
-        NS.with(|r| {
-            let m = r.borrow();
-            let ns = m
-                .get(&setting_path.0)
-                .ok_or_else(|| format!("namespace {} not found", setting_path.0))?;
-
-            if !ns.can_write_setting(caller, setting_path) {
-                Err("no permission".to_string())?;
-            }
-            let setting = ns
-                .get_setting(setting_path)
-                .ok_or_else(|| format!("setting {} not found", setting_path))?;
-            if setting.status == 1 {
-                Err("readonly setting can not be updated".to_string())?;
-            }
-
-            Ok((
-                setting.to_info(setting_path.2, setting_path.3.clone()),
-                setting.dek.clone(),
-                ns.max_payload_size,
-            ))
-        })
-    }
-
-    pub fn update_setting_payload(
-        setting_path: &SettingPathKey,
-        payload: ByteBuf,
-        dek: Option<ByteBuf>,
-        hash: ByteN<32>,
-        status: Option<i8>,
-        now_ms: u64,
-    ) -> Result<UpdateSettingOutput, String> {
-        NS.with(|r| {
-            let mut m = r.borrow_mut();
-            let ns = m
-                .get_mut(&setting_path.0)
-                .ok_or_else(|| format!("namespace {} not found", setting_path.0))?;
-
-            let setting = ns
-                .get_setting_mut(setting_path)
-                .ok_or_else(|| format!("setting {} not found", setting_path))?;
-            if setting.status == 1 {
-                Err("readonly setting can not be updated".to_string())?;
-            }
-
-            setting.version = setting.version.saturating_add(1);
-            setting.hash = Some(hash);
-            setting.payload = Some(payload);
-            setting.dek = dek;
-            setting.updated_at = now_ms;
-            if let Some(status) = status {
-                setting.status = status;
-            }
-
-            Ok(UpdateSettingOutput {
-                created_at: setting.created_at,
-                updated_at: setting.updated_at,
-                version: setting.version,
-                hash: Some(hash),
-                public_key: None,
             })
         })
     }

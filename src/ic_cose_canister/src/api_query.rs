@@ -10,8 +10,9 @@ use crate::store;
 
 #[ic_cdk::query]
 fn get_state() -> Result<StateInfo, String> {
+    let caller = ic_cdk::caller();
     store::state::with(|s| {
-        let mut info = s.to_info(&ic_cdk::caller());
+        let mut info = s.to_info(&caller);
         info.namespace_count = store::ns::namespace_count();
         Ok(info)
     })
@@ -19,11 +20,8 @@ fn get_state() -> Result<StateInfo, String> {
 
 #[ic_cdk::query]
 fn ecdsa_public_key(input: PublicKeyInput) -> Result<ByteBuf, String> {
-    if !store::ns::can_read(&ic_cdk::caller(), &input.namespace) {
-        Err("no permission".to_string())?;
-    }
-
-    store::ns::ecdsa_public_key(input.namespace, input.derivation_path)
+    let caller = ic_cdk::caller();
+    store::ns::ecdsa_public_key(&caller, input.namespace, input.derivation_path)
 }
 
 #[ic_cdk::query]
@@ -33,7 +31,8 @@ fn schnorr_public_key(_input: PublicKeyInput) -> Result<ByteBuf, String> {
 
 #[ic_cdk::query]
 fn get_namespace(namespace: String) -> Result<NamespaceInfo, String> {
-    store::ns::get_namespace(&ic_cdk::caller(), namespace)
+    let caller = ic_cdk::caller();
+    store::ns::get_namespace(&caller, namespace)
 }
 
 #[ic_cdk::query]
@@ -56,4 +55,13 @@ fn get_setting_info(path: SettingPath) -> Result<SettingInfo, String> {
     let caller = ic_cdk::caller();
     let spk = store::SettingPathKey::from_path(path, caller);
     store::ns::get_setting_info(&caller, &spk)
+}
+
+// Clients should execute this query with update call to make the result of execution goes through consensus.
+#[ic_cdk::query]
+fn get_setting(path: SettingPath) -> Result<SettingInfo, String> {
+    path.validate()?;
+    let caller = ic_cdk::caller();
+    let spk = store::SettingPathKey::from_path(path, caller);
+    store::ns::get_setting(&caller, &spk)
 }
