@@ -5,13 +5,16 @@ use ic_cose_types::{
 use crate::{rand_bytes, store};
 
 #[ic_cdk::update]
-async fn ecdh_get_setting(path: SettingPath, ecdh: ECDHInput) -> Result<SettingInfo, String> {
+async fn ecdh_get_setting(
+    path: SettingPath,
+    ecdh: ECDHInput,
+) -> Result<ECDHOutput<SettingInfo>, String> {
     path.validate()?;
 
     let caller = ic_cdk::caller();
     let subject = path.subject.unwrap_or(caller);
     let spk = store::SettingPathKey::from_path(path, subject);
-    let mut info = store::ns::get_setting(&caller, &spk)?;
+    let (mut info, iv) = store::ns::get_setting(&caller, &spk)?;
 
     let aad = spk.2.as_slice();
     let payload = info.payload.as_ref().ok_or("missing payload")?;
@@ -19,7 +22,7 @@ async fn ecdh_get_setting(path: SettingPath, ecdh: ECDHInput) -> Result<SettingI
         None => OwnedRef::Ref(payload),
         Some(ref dek) => {
             let partial_key = ecdh.partial_key.ok_or("missing partial key")?;
-            let key = store::ns::inner_ecdsa_setting_kek(&spk, partial_key.as_ref()).await?;
+            let key = store::ns::inner_ecdsa_setting_kek(&spk, &iv, partial_key.as_ref()).await?;
             let key = cose_decrypt0(dek, &key, aad)?;
             let key = CoseKey::from_slice(&key).map_err(format_error)?;
             let key = get_cose_key_secret(key)?;
@@ -32,8 +35,10 @@ async fn ecdh_get_setting(path: SettingPath, ecdh: ECDHInput) -> Result<SettingI
     let (shared_secret, public_key) = ecdh_x25519(secret_key, *ecdh.public_key);
     let payload = cose_encrypt0(data.as_ref(), shared_secret.as_bytes(), aad, *ecdh.nonce)?;
     info.payload = Some(payload);
-    info.public_key = Some(public_key.to_bytes().into());
-    Ok(info)
+    Ok(ECDHOutput {
+        payload: info,
+        public_key: public_key.to_bytes().into(),
+    })
 }
 
 #[ic_cdk::update]

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{cose::SettingPathInput, format_error, validate_key, ByteN};
+use crate::{cose::SettingPathInput, format_error, validate_key};
 
 pub const CHUNK_SIZE: u32 = 256 * 1024;
 
@@ -21,7 +21,6 @@ pub struct SettingInfo {
     pub tags: BTreeMap<String, String>, // tags for query
     pub dek: Option<ByteBuf>, // Data Encryption Key that encrypted by BYOK or vetKey in COSE_Encrypt0
     pub payload: Option<ByteBuf>, // plain payload
-    pub public_key: Option<ByteN<32>>, // server side ECDH public key
 }
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]

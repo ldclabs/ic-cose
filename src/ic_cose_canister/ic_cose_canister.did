@@ -16,6 +16,8 @@ type ECDHInput = record {
   partial_key : opt blob;
   nonce : blob;
 };
+type ECDHOutput = record { public_key : blob; payload : blob };
+type ECDHOutput_1 = record { public_key : blob; payload : SettingInfo };
 type InitArgs = record {
   service_fee : nat64;
   ecdsa_key_name : text;
@@ -41,17 +43,19 @@ type NamespaceInfo = record {
   total_payload_size : nat64;
 };
 type PublicKeyInput = record {
+  ns : text;
   algorithm : opt text;
   derivation_path : vec blob;
-  namespace : text;
 };
 type Result = variant { Ok; Err : text };
 type Result_1 = variant { Ok : CreateSettingOutput; Err : text };
-type Result_2 = variant { Ok : blob; Err : text };
-type Result_3 = variant { Ok : SettingInfo; Err : text };
-type Result_4 = variant { Ok : NamespaceInfo; Err : text };
-type Result_5 = variant { Ok : StateInfo; Err : text };
-type Result_6 = variant { Ok : vec NamespaceInfo; Err : text };
+type Result_2 = variant { Ok : ECDHOutput; Err : text };
+type Result_3 = variant { Ok : ECDHOutput_1; Err : text };
+type Result_4 = variant { Ok : blob; Err : text };
+type Result_5 = variant { Ok : NamespaceInfo; Err : text };
+type Result_6 = variant { Ok : SettingInfo; Err : text };
+type Result_7 = variant { Ok : StateInfo; Err : text };
+type Result_8 = variant { Ok : vec NamespaceInfo; Err : text };
 type SettingInfo = record {
   dek : opt blob;
   key : text;
@@ -59,7 +63,6 @@ type SettingInfo = record {
   status : int8;
   updated_at : nat64;
   subject : principal;
-  public_key : opt blob;
   desc : text;
   tags : vec record { text; text };
   created_at : nat64;
@@ -80,10 +83,10 @@ type SettingPathInput = record {
   subject : opt principal;
 };
 type SignInput = record {
+  ns : text;
   algorithm : opt text;
   derivation_path : vec blob;
   message : blob;
-  namespace : text;
 };
 type StateInfo = record {
   freezing_threshold : nat;
@@ -118,16 +121,15 @@ service : (opt ChainArgs) -> {
   create_setting : (SettingPath, CreateSettingInput) -> (Result_1);
   ecdh_encrypted_cose_key : (SettingPathInput, ECDHInput) -> (Result_2);
   ecdh_get_setting : (SettingPath, ECDHInput) -> (Result_3);
-  ecdh_public_key : (SettingPathInput, ECDHInput) -> (Result_2);
-  ecdsa_public_key : (PublicKeyInput) -> (Result_2) query;
-  ecdsa_sign : (SignInput) -> (Result_2);
-  get_namespace : (text) -> (Result_4) query;
-  get_setting : (SettingPath) -> (Result_3) query;
-  get_setting_info : (SettingPath) -> (Result_3) query;
-  get_state : () -> (Result_5) query;
-  list_namespaces : (opt text, opt nat32) -> (Result_6) query;
-  schnorr_public_key : (PublicKeyInput) -> (Result_2) query;
-  schnorr_sign : (SignInput) -> (Result_2);
+  ecdsa_public_key : (PublicKeyInput) -> (Result_4) query;
+  ecdsa_sign : (SignInput) -> (Result_4);
+  get_namespace : (text) -> (Result_5) query;
+  get_setting : (SettingPath) -> (Result_6) query;
+  get_setting_info : (SettingPath) -> (Result_6) query;
+  get_state : () -> (Result_7) query;
+  list_namespaces : (opt text, opt nat32) -> (Result_8) query;
+  schnorr_public_key : (PublicKeyInput) -> (Result_4) query;
+  schnorr_sign : (SignInput) -> (Result_4);
   update_setting_info : (SettingPath, UpdateSettingInfoInput) -> (Result_1);
   update_setting_payload : (SettingPath, UpdateSettingPayloadInput) -> (
       Result_1,

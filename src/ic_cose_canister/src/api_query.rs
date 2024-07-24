@@ -1,10 +1,8 @@
 use ic_cose_types::{
-    cose::PublicKeyInput,
     namespace::NamespaceInfo,
     setting::{SettingInfo, SettingPath},
     state::StateInfo,
 };
-use serde_bytes::ByteBuf;
 
 use crate::store;
 
@@ -16,17 +14,6 @@ fn get_state() -> Result<StateInfo, String> {
         info.namespace_count = store::ns::namespace_count();
         Ok(info)
     })
-}
-
-#[ic_cdk::query]
-fn ecdsa_public_key(input: PublicKeyInput) -> Result<ByteBuf, String> {
-    let caller = ic_cdk::caller();
-    store::ns::ecdsa_public_key(&caller, input.namespace, input.derivation_path)
-}
-
-#[ic_cdk::query]
-fn schnorr_public_key(_input: PublicKeyInput) -> Result<ByteBuf, String> {
-    Err("not implemented".to_string())
 }
 
 #[ic_cdk::query]
@@ -63,5 +50,6 @@ fn get_setting(path: SettingPath) -> Result<SettingInfo, String> {
     path.validate()?;
     let caller = ic_cdk::caller();
     let spk = store::SettingPathKey::from_path(path, caller);
-    store::ns::get_setting(&caller, &spk)
+    let (info, _) = store::ns::get_setting(&caller, &spk)?;
+    Ok(info)
 }

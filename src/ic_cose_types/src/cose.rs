@@ -19,14 +19,14 @@ pub const SIGN1_TAG: [u8; 1] = [0xd2];
 
 #[derive(CandidType, Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct PublicKeyInput {
-    pub namespace: String,
+    pub ns: String,
     pub derivation_path: Vec<ByteBuf>,
     pub algorithm: Option<String>,
 }
 
 #[derive(CandidType, Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SignInput {
-    pub namespace: String,
+    pub ns: String,
     pub derivation_path: Vec<ByteBuf>,
     pub message: ByteBuf,
     pub algorithm: Option<String>,
@@ -34,9 +34,15 @@ pub struct SignInput {
 
 #[derive(CandidType, Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ECDHInput {
-    pub public_key: ByteN<32>,          // client side ECDH public key
     pub nonce: ByteN<12>,               // should be random for each request
+    pub public_key: ByteN<32>,          // client side ECDH public key
     pub partial_key: Option<ByteN<32>>, // should provide for encrypted payload with BYOK
+}
+
+#[derive(CandidType, Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ECDHOutput<T> {
+    pub payload: T,            // should be random for each request
+    pub public_key: ByteN<32>, // server side ECDH public key
 }
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]

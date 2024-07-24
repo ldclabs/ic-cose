@@ -1,12 +1,7 @@
 use candid::Principal;
 use ciborium::{from_reader, from_reader_with_buffer, into_writer};
 use ic_cose_types::{
-    cose::{try_decode_encrypt0, ECDHInput},
-    crypto::ecdh_x25519,
-    namespace::NamespaceInfo,
-    setting::*,
-    sha3_256_n,
-    state::StateInfo,
+    cose::try_decode_encrypt0, namespace::NamespaceInfo, setting::*, sha3_256_n, state::StateInfo,
     ByteN,
 };
 use ic_stable_structures::{
@@ -22,7 +17,6 @@ use std::{
     collections::{btree_map::Entry, BTreeMap, BTreeSet},
     fmt, ops,
 };
-use x25519_dalek::{PublicKey, SharedSecret};
 
 use crate::ecdsa::{derive_public_key, public_key_with, sign_with, ECDSAPublicKey};
 
@@ -239,7 +233,6 @@ impl Setting {
             tags: self.tags.clone(),
             dek: self.dek.clone(),
             payload: None,
-            public_key: None,
         }
     }
 }
@@ -437,8 +430,10 @@ pub mod ns {
 
             state::with(|s| {
                 let pk = s.ecdsa_public_key.as_ref().ok_or("no ecdsa public key")?;
-                let mut path: Vec<Vec<u8>> = Vec::with_capacity(derivation_path.len() + 1);
+                let mut path: Vec<Vec<u8>> = Vec::with_capacity(derivation_path.len() + 3);
+                path.push(b"ECDSA_Secp256k1_Signing".to_vec());
                 path.push(namespace.to_bytes().to_vec());
+                path.push(ns.iv.to_vec());
                 path.extend(derivation_path.into_iter().map(|b| b.into_vec()));
                 let derived_pk = derive_public_key(pk, path);
                 Ok(ByteBuf::from(derived_pk.public_key))
@@ -452,54 +447,26 @@ pub mod ns {
         derivation_path: Vec<ByteBuf>,
         message: ByteBuf,
     ) -> Result<ByteBuf, String> {
-        with(&namespace, |ns| {
+        let iv = with(&namespace, |ns| {
             if !ns.has_ns_signing_permission(caller) {
                 Err("no permission".to_string())?;
             }
-            Ok(())
+            Ok(ns.iv.to_vec())
         })?;
 
         let key_name = state::with(|s| s.ecdsa_key_name.clone());
-        let mut path: Vec<Vec<u8>> = Vec::with_capacity(derivation_path.len() + 1);
+        let mut path: Vec<Vec<u8>> = Vec::with_capacity(derivation_path.len() + 3);
+        path.push(b"ECDSA_Secp256k1_Signing".to_vec());
         path.push(namespace.to_bytes().to_vec());
+        path.push(iv);
         path.extend(derivation_path.into_iter().map(|b| b.into_vec()));
         let sig = sign_with(key_name, path, message.into_vec()).await?;
         Ok(ByteBuf::from(sig))
     }
 
-    pub async fn ecdh_public_key(
-        caller: &Principal,
-        spk: &SettingPathKey,
-        ecdh: &ECDHInput,
-    ) -> Result<ByteN<32>, String> {
-        with(&spk.0, |ns| {
-            ns.check_and_get_setting(caller, spk)
-                .ok_or_else(|| format!("setting {} not found or no permission", spk))?;
-            Ok(())
-        })?;
-
-        let (_, pk) = inner_ecdh_x25519_static_secret(spk, ecdh).await?;
-        Ok(pk.to_bytes().into())
-    }
-
-    pub async fn inner_ecdh_x25519_static_secret(
-        spk: &SettingPathKey,
-        ecdh: &ECDHInput,
-    ) -> Result<(SharedSecret, PublicKey), String> {
-        let key_name = state::with(|r| r.ecdsa_key_name.clone());
-        let derivation_path = vec![
-            b"ECDH_EllipticCurveX25519_Setting".to_vec(),
-            spk.2.to_bytes().to_vec(),
-            vec![spk.1],
-        ];
-        let message_hash = sha3_256_n([spk.0.as_bytes(), spk.3.as_bytes(), ecdh.nonce.as_ref()]);
-        let sig = sign_with(key_name, derivation_path, message_hash.to_vec()).await?;
-        let secret_key = sha3_256_n([&sig, ecdh.nonce.as_ref()]);
-        Ok(ecdh_x25519(secret_key, *ecdh.public_key))
-    }
-
     pub async fn inner_ecdsa_setting_kek(
         spk: &SettingPathKey,
+        iv: &[u8],
         partial_key: &[u8],
     ) -> Result<[u8; 32], String> {
         let key_name = state::with(|r| r.ecdsa_key_name.clone());
@@ -507,8 +474,9 @@ pub mod ns {
             b"KEK_COSE_Encrypt0_Setting".to_vec(),
             spk.2.to_bytes().to_vec(),
             vec![spk.1],
+            spk.0.to_bytes().to_vec(),
         ];
-        let message_hash = sha3_256_n([spk.0.as_bytes(), partial_key]);
+        let message_hash = sha3_256_n([iv, partial_key]);
         let sig = sign_with(key_name, derivation_path, message_hash.to_vec()).await?;
         Ok(sha3_256_n([&sig, partial_key]))
     }
@@ -561,7 +529,10 @@ pub mod ns {
         })
     }
 
-    pub fn get_setting(caller: &Principal, spk: &SettingPathKey) -> Result<SettingInfo, String> {
+    pub fn get_setting(
+        caller: &Principal,
+        spk: &SettingPathKey,
+    ) -> Result<(SettingInfo, Vec<u8>), String> {
         with(&spk.0, |ns| {
             let setting = ns
                 .check_and_get_setting(caller, spk)
@@ -581,7 +552,7 @@ pub mod ns {
 
             let mut res = setting.to_info(spk.2, spk.3.clone());
             res.payload = Some(payload);
-            Ok(res)
+            Ok((res, ns.iv.to_vec()))
         })
     }
 
