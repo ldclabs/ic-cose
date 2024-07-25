@@ -1,10 +1,12 @@
 use candid::Principal;
-use ic_cose_types::{types::namespace::*, types::setting::*, types::state::StateInfo, types::*};
+use ic_cose_types::{
+    types::namespace::*, types::setting::*, types::state::StateInfo, types::*, ANONYMOUS,
+};
 use serde_bytes::ByteBuf;
 use std::collections::BTreeSet;
 
 mod api_admin;
-mod api_crypto;
+mod api_cose;
 mod api_init;
 mod api_query;
 mod api_update;
@@ -19,6 +21,14 @@ fn is_controller() -> Result<(), String> {
         Ok(())
     } else {
         Err("user is not a controller".to_string())
+    }
+}
+
+fn is_authenticated() -> Result<(), String> {
+    if ic_cdk::caller() == ANONYMOUS {
+        Err("anonymous user is not allowed".to_string())
+    } else {
+        Ok(())
     }
 }
 

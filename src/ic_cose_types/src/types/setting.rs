@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::SettingPathInput;
-use crate::{format_error, validate_key};
+use super::CosePath;
+use crate::validate_key;
 
 pub const CHUNK_SIZE: u32 = 256 * 1024;
 
@@ -41,8 +41,8 @@ impl SettingPath {
     }
 }
 
-impl From<SettingPathInput> for SettingPath {
-    fn from(input: SettingPathInput) -> Self {
+impl From<CosePath> for SettingPath {
+    fn from(input: CosePath) -> Self {
         Self {
             ns: input.ns,
             client_owned: input.client_owned,
@@ -62,15 +62,15 @@ pub fn try_decode_payload(max_size: u64, payload: &[u8]) -> Result<Value, String
         ));
     }
 
-    from_reader(payload).map_err(format_error)
+    from_reader(payload).map_err(|err| format!("decode CBOR payload failed: {:?}", err))
 }
 
-#[derive(CandidType, Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(CandidType, Clone, Debug, Deserialize, Serialize)]
 pub struct CreateSettingInput {
+    pub payload: ByteBuf,
     pub desc: Option<String>,
     pub status: Option<i8>,
     pub tags: Option<BTreeMap<String, String>>,
-    pub payload: ByteBuf,
     pub dek: Option<ByteBuf>,
 }
 
@@ -90,14 +90,14 @@ impl CreateSettingInput {
     }
 }
 
-#[derive(CandidType, Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(CandidType, Clone, Debug, Deserialize, Serialize)]
 pub struct CreateSettingOutput {
     pub created_at: u64,
     pub updated_at: u64,
     pub version: u32,
 }
 
-#[derive(CandidType, Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(CandidType, Clone, Debug, Deserialize, Serialize)]
 pub struct UpdateSettingInfoInput {
     pub desc: Option<String>,
     pub status: Option<i8>,
@@ -120,7 +120,7 @@ impl UpdateSettingInfoInput {
     }
 }
 
-#[derive(CandidType, Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(CandidType, Clone, Debug, Deserialize, Serialize)]
 pub struct UpdateSettingPayloadInput {
     pub payload: ByteBuf, // plain or encrypted payload
     pub status: Option<i8>,

@@ -6,9 +6,8 @@ use serde_bytes::ByteBuf;
 
 use super::{
     aes::{aes256_gcm_decrypt, aes256_gcm_encrypt},
-    skip_prefix, ENCRYPT0_TAG,
+    format_error, skip_prefix, ENCRYPT0_TAG,
 };
-use crate::format_error;
 
 pub fn try_decode_encrypt0(payload: &[u8]) -> Result<CoseEncrypt0, String> {
     CoseEncrypt0::from_slice(skip_prefix(&ENCRYPT0_TAG, payload)).map_err(format_error)

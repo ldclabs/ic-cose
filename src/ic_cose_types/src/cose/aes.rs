@@ -1,6 +1,6 @@
 use aes_gcm::{aead::KeyInit, AeadInPlace, Aes256Gcm, Key, Nonce};
 
-use crate::format_error;
+use super::format_error;
 
 pub fn aes256_gcm_encrypt(
     key: &[u8; 32],

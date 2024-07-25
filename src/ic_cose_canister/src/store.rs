@@ -1,8 +1,14 @@
 use candid::Principal;
 use ciborium::{from_reader, from_reader_with_buffer, into_writer};
 use ic_cose_types::{
-    cose::{encrypt0::try_decode_encrypt0, sha3_256_n},
-    types::{namespace::NamespaceInfo, setting::*, state::StateInfo},
+    cose::{
+        cwt::{ClaimsSet, Timestamp, SCOPE_NAME},
+        encrypt0::try_decode_encrypt0,
+        format_error, sha256, sha3_256_n,
+        sign1::{cose_sign1, ES256K},
+        CborSerializable,
+    },
+    types::{namespace::NamespaceInfo, setting::*, state::StateInfo, PublicKeyOutput},
     ByteN,
 };
 use ic_stable_structures::{
@@ -19,7 +25,10 @@ use std::{
     fmt, ops,
 };
 
-use crate::ecdsa::{derive_public_key, public_key_with, sign_with, ECDSAPublicKey};
+use crate::{
+    ecdsa::{derive_public_key, public_key_with, sign_with, ECDSAPublicKey},
+    rand_bytes,
+};
 
 type Memory = VirtualMemory<DefaultMemoryImpl>;
 
@@ -40,23 +49,19 @@ pub struct State {
 }
 
 impl State {
-    pub fn to_info(&self, _caller: &Principal) -> StateInfo {
+    pub fn to_info(&self) -> StateInfo {
         StateInfo {
             name: self.name.clone(),
             ecdsa_key_name: self.ecdsa_key_name.clone(),
-            ecdsa_public_key: self
-                .ecdsa_public_key
-                .as_ref()
-                .map(|k| ByteBuf::from(k.public_key.clone())),
             vetkd_key_name: self.vetkd_key_name.clone(),
             managers: self.managers.clone(),
             auditors: self.auditors.clone(),
+            namespace_count: 0,
             subnet_size: self.subnet_size,
             service_fee: self.service_fee,
             incoming_cycles: self.incoming_cycles,
             uncollectible_cycles: self.uncollectible_cycles,
             freezing_threshold: self.freezing_threshold,
-            ..Default::default()
         }
     }
 }
@@ -423,7 +428,7 @@ pub mod ns {
         caller: &Principal,
         namespace: String,
         derivation_path: Vec<ByteBuf>,
-    ) -> Result<ByteBuf, String> {
+    ) -> Result<PublicKeyOutput, String> {
         with(&namespace, |ns| {
             if !ns.can_read_namespace(caller) {
                 Err("no permission".to_string())?;
@@ -432,12 +437,15 @@ pub mod ns {
             state::with(|s| {
                 let pk = s.ecdsa_public_key.as_ref().ok_or("no ecdsa public key")?;
                 let mut path: Vec<Vec<u8>> = Vec::with_capacity(derivation_path.len() + 3);
-                path.push(b"ECDSA_Secp256k1_Signing".to_vec());
+                path.push(b"Secp256k1_Signing".to_vec());
                 path.push(namespace.to_bytes().to_vec());
                 path.push(ns.iv.to_vec());
                 path.extend(derivation_path.into_iter().map(|b| b.into_vec()));
                 let derived_pk = derive_public_key(pk, path);
-                Ok(ByteBuf::from(derived_pk.public_key))
+                Ok(PublicKeyOutput {
+                    public_key: ByteBuf::from(derived_pk.public_key),
+                    chain_code: ByteBuf::from(derived_pk.chain_code),
+                })
             })
         })
     }
@@ -457,12 +465,65 @@ pub mod ns {
 
         let key_name = state::with(|s| s.ecdsa_key_name.clone());
         let mut path: Vec<Vec<u8>> = Vec::with_capacity(derivation_path.len() + 3);
-        path.push(b"ECDSA_Secp256k1_Signing".to_vec());
+        path.push(b"Secp256k1_Signing".to_vec());
         path.push(namespace.to_bytes().to_vec());
         path.push(iv);
         path.extend(derivation_path.into_iter().map(|b| b.into_vec()));
         let sig = sign_with(key_name, path, message.into_vec()).await?;
         Ok(ByteBuf::from(sig))
+    }
+
+    const CWT_EXPIRATION_SECONDS: i64 = 3600;
+    pub async fn ecdsa_sign_identity(
+        caller: &Principal,
+        namespace: String,
+        audience: String,
+        now_ms: u64,
+    ) -> Result<ByteBuf, String> {
+        let permission = with(&namespace, |ns| {
+            if ns.managers.contains(caller) {
+                Ok(format!("Namespace.All:{}", namespace))
+            } else if ns.members.contains(caller) {
+                if ns.auditors.contains(caller) {
+                    Ok(format!(
+                        "Namespace.Read:{} Namespace.All.SubjectedSetting:{}",
+                        namespace, namespace
+                    ))
+                } else {
+                    Ok(format!(
+                        "Namespace.Read.Info:{} Namespace.All.SubjectedSetting:{}",
+                        namespace, namespace
+                    ))
+                }
+            } else if ns.auditors.contains(caller) {
+                Ok(format!("Namespace.Read:{}", namespace))
+            } else {
+                Err("no permission".to_string())
+            }
+        })?;
+
+        let key_name = state::with(|s| s.ecdsa_key_name.clone());
+        let now_sec = (now_ms / 1000) as i64;
+        let mut cwt_id = rand_bytes().await;
+        cwt_id.truncate(16);
+        let claims = ClaimsSet {
+            issuer: Some(ic_cdk::id().to_text()),
+            subject: Some(caller.to_text()),
+            audience: Some(audience),
+            expiration_time: Some(Timestamp::WholeSeconds(now_sec + CWT_EXPIRATION_SECONDS)),
+            not_before: Some(Timestamp::WholeSeconds(now_sec)),
+            issued_at: Some(Timestamp::WholeSeconds(now_sec)),
+            cwt_id: Some(cwt_id),
+            rest: vec![(SCOPE_NAME.clone(), permission.into())],
+        };
+        let payload = claims.to_vec().map_err(format_error)?;
+        let mut sign1 = cose_sign1(payload, ES256K, None)?;
+        let tbs_data = sign1.tbs_data(caller.as_slice());
+        let message_hash = sha256(&tbs_data);
+        let sig = sign_with(key_name, vec![], message_hash.to_vec()).await?;
+        sign1.signature = sig;
+        let token = sign1.to_vec().map_err(format_error)?;
+        Ok(ByteBuf::from(token))
     }
 
     pub async fn inner_ecdsa_setting_kek(
@@ -472,7 +533,7 @@ pub mod ns {
     ) -> Result<[u8; 32], String> {
         let key_name = state::with(|r| r.ecdsa_key_name.clone());
         let derivation_path = vec![
-            b"KEK_COSE_Encrypt0_Setting".to_vec(),
+            b"COSE_Encrypt0_KEK".to_vec(),
             spk.2.to_bytes().to_vec(),
             vec![spk.1],
             spk.0.to_bytes().to_vec(),

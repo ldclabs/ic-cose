@@ -2,16 +2,15 @@ use ic_cose_types::{
     cose::{
         ecdh::ecdh_x25519,
         encrypt0::{cose_decrypt0, cose_encrypt0},
-        get_cose_key_secret, mac3_256, CborSerializable, CoseKey,
+        format_error, get_cose_key_secret, mac3_256, CborSerializable, CoseKey,
     },
-    format_error,
     types::{setting::*, ECDHInput, ECDHOutput},
     OwnedRef, MILLISECONDS,
 };
 
-use crate::{rand_bytes, store};
+use crate::{is_authenticated, rand_bytes, store};
 
-#[ic_cdk::update]
+#[ic_cdk::update(guard = "is_authenticated")]
 async fn ecdh_get_setting(
     path: SettingPath,
     ecdh: ECDHInput,
@@ -48,7 +47,7 @@ async fn ecdh_get_setting(
     })
 }
 
-#[ic_cdk::update]
+#[ic_cdk::update(guard = "is_authenticated")]
 async fn create_setting(
     path: SettingPath,
     input: CreateSettingInput,
@@ -63,7 +62,7 @@ async fn create_setting(
     store::ns::create_setting(&caller, &spk, input, now_ms)
 }
 
-#[ic_cdk::update]
+#[ic_cdk::update(guard = "is_authenticated")]
 async fn update_setting_info(
     path: SettingPath,
     input: UpdateSettingInfoInput,
@@ -78,7 +77,7 @@ async fn update_setting_info(
     store::ns::update_setting_info(&caller, &spk, input, now_ms)
 }
 
-#[ic_cdk::update]
+#[ic_cdk::update(guard = "is_authenticated")]
 async fn update_setting_payload(
     path: SettingPath,
     input: UpdateSettingPayloadInput,

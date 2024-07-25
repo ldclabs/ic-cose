@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 use crate::validate_key;
 
-#[derive(CandidType, Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct NamespaceInfo {
     pub key: String,
     pub name: String,
@@ -23,7 +23,7 @@ pub struct NamespaceInfo {
     pub balance: u128,                 // cycles
 }
 
-#[derive(CandidType, Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(CandidType, Clone, Debug, Deserialize, Serialize)]
 pub struct CreateNamespaceInput {
     pub key: String,
     pub name: String,
@@ -52,7 +52,7 @@ impl CreateNamespaceInput {
     }
 }
 
-#[derive(CandidType, Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(CandidType, Clone, Debug, Deserialize, Serialize)]
 pub struct UpdateNamespaceInput {
     pub name: Option<String>,
     pub desc: Option<String>,

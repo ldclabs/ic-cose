@@ -1,8 +1,7 @@
-use coset::{
-    cwt::{ClaimName, ClaimsSet, Timestamp},
-    iana, CborSerializable,
-};
+use coset::{iana, CborSerializable};
 use num_traits::ToPrimitive;
+
+pub use coset::cwt::*;
 
 const CLOCK_SKEW: i64 = 5 * 60; // 5 minutes
 pub static SCOPE_NAME: ClaimName = ClaimName::Assigned(iana::CwtClaimName::Scope);

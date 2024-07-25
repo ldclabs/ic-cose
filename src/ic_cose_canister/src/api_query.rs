@@ -8,9 +8,8 @@ use crate::store;
 
 #[ic_cdk::query]
 fn get_state() -> Result<StateInfo, String> {
-    let caller = ic_cdk::caller();
     store::state::with(|s| {
-        let mut info = s.to_info(&caller);
+        let mut info = s.to_info();
         info.namespace_count = store::ns::namespace_count();
         Ok(info)
     })

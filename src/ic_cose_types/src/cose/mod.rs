@@ -10,13 +10,18 @@ pub mod ed25519;
 pub mod encrypt0;
 pub mod sign1;
 
-use crate::ByteN;
-
 pub use coset::{iana, CborSerializable, CoseKey};
 
 pub const CBOR_TAG: [u8; 3] = [0xd9, 0xd9, 0xf7];
 pub const ENCRYPT0_TAG: [u8; 1] = [0xd0];
 pub const SIGN1_TAG: [u8; 1] = [0xd2];
+
+pub fn format_error<T>(err: T) -> String
+where
+    T: std::fmt::Debug,
+{
+    format!("{:?}", err)
+}
 
 pub fn crc32(data: &[u8]) -> u32 {
     let mut h = crc32fast::Hasher::new();

@@ -1,4 +1,10 @@
 type ChainArgs = variant { Upgrade : UpgradeArgs; Init : InitArgs };
+type CosePath = record {
+  ns : text;
+  key : opt text;
+  subject : opt principal;
+  client_owned : bool;
+};
 type CreateSettingInput = record {
   dek : opt blob;
   status : opt int8;
@@ -42,20 +48,18 @@ type NamespaceInfo = record {
   visibility : nat8;
   total_payload_size : nat64;
 };
-type PublicKeyInput = record {
-  ns : text;
-  algorithm : opt text;
-  derivation_path : vec blob;
-};
+type PublicKeyInput = record { ns : text; derivation_path : vec blob };
+type PublicKeyOutput = record { public_key : blob; chain_code : blob };
 type Result = variant { Ok; Err : text };
 type Result_1 = variant { Ok : CreateSettingOutput; Err : text };
 type Result_2 = variant { Ok : ECDHOutput; Err : text };
 type Result_3 = variant { Ok : ECDHOutput_1; Err : text };
-type Result_4 = variant { Ok : blob; Err : text };
-type Result_5 = variant { Ok : NamespaceInfo; Err : text };
-type Result_6 = variant { Ok : SettingInfo; Err : text };
-type Result_7 = variant { Ok : StateInfo; Err : text };
-type Result_8 = variant { Ok : vec NamespaceInfo; Err : text };
+type Result_4 = variant { Ok : PublicKeyOutput; Err : text };
+type Result_5 = variant { Ok : blob; Err : text };
+type Result_6 = variant { Ok : NamespaceInfo; Err : text };
+type Result_7 = variant { Ok : SettingInfo; Err : text };
+type Result_8 = variant { Ok : StateInfo; Err : text };
+type Result_9 = variant { Ok : vec NamespaceInfo; Err : text };
 type SettingInfo = record {
   dek : opt blob;
   key : text;
@@ -72,19 +76,12 @@ type SettingInfo = record {
 type SettingPath = record {
   ns : text;
   key : text;
-  client : bool;
   subject : opt principal;
   version : nat32;
-};
-type SettingPathInput = record {
-  ns : text;
-  key : opt text;
-  client : bool;
-  subject : opt principal;
+  client_owned : bool;
 };
 type SignInput = record {
   ns : text;
-  algorithm : opt text;
   derivation_path : vec blob;
   message : blob;
 };
@@ -97,7 +94,6 @@ type StateInfo = record {
   uncollectible_cycles : nat;
   name : text;
   auditors : vec principal;
-  ecdsa_public_key : opt blob;
   incoming_cycles : nat;
   subnet_size : nat64;
   vetkd_key_name : text;
@@ -119,17 +115,18 @@ service : (opt ChainArgs) -> {
   admin_remove_auditors : (vec principal) -> (Result);
   admin_remove_managers : (vec principal) -> (Result);
   create_setting : (SettingPath, CreateSettingInput) -> (Result_1);
-  ecdh_encrypted_cose_key : (SettingPathInput, ECDHInput) -> (Result_2);
+  ecdh_encrypted_cose_key : (CosePath, ECDHInput) -> (Result_2);
   ecdh_get_setting : (SettingPath, ECDHInput) -> (Result_3);
-  ecdsa_public_key : (PublicKeyInput) -> (Result_4) query;
-  ecdsa_sign : (SignInput) -> (Result_4);
-  get_namespace : (text) -> (Result_5) query;
-  get_setting : (SettingPath) -> (Result_6) query;
-  get_setting_info : (SettingPath) -> (Result_6) query;
-  get_state : () -> (Result_7) query;
-  list_namespaces : (opt text, opt nat32) -> (Result_8) query;
-  schnorr_public_key : (PublicKeyInput) -> (Result_4) query;
-  schnorr_sign : (SignInput) -> (Result_4);
+  ecdsa_public_key : (opt PublicKeyInput) -> (Result_4) query;
+  ecdsa_sign : (SignInput) -> (Result_5);
+  get_namespace : (text) -> (Result_6) query;
+  get_setting : (SettingPath) -> (Result_7) query;
+  get_setting_info : (SettingPath) -> (Result_7) query;
+  get_state : () -> (Result_8) query;
+  list_namespaces : (opt text, opt nat32) -> (Result_9) query;
+  schnorr_public_key : (text, opt PublicKeyInput) -> (Result_4) query;
+  schnorr_sign : (text, SignInput) -> (Result_5);
+  sign_identity : (text, text, opt text) -> (Result_5);
   update_setting_info : (SettingPath, UpdateSettingInfoInput) -> (Result_1);
   update_setting_payload : (SettingPath, UpdateSettingPayloadInput) -> (
       Result_1,

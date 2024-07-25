@@ -15,13 +15,6 @@ pub use bytes::*;
 pub static ANONYMOUS: Principal = Principal::anonymous();
 pub const MILLISECONDS: u64 = 1_000_000u64;
 
-pub fn format_error<T>(err: T) -> String
-where
-    T: std::fmt::Debug,
-{
-    format!("{:?}", err)
-}
-
 // to_cbor_bytes returns the CBOR encoding of the given object that implements the Serialize trait.
 pub fn to_cbor_bytes(obj: &impl Serialize) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::new();
