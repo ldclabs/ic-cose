@@ -1,4 +1,4 @@
-# ic-cose
+# IC-COSE
 ⚙️ A decentralized COnfiguration service with Signing and Encryption on the Internet Computer.
 
 ## Overview

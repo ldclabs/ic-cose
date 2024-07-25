@@ -1,4 +1,4 @@
-use ic_cose_types::{
+use ic_cose_types::types::{
     namespace::NamespaceInfo,
     setting::{SettingInfo, SettingPath},
     state::StateInfo,

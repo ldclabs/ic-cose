@@ -1,6 +1,6 @@
 [package]
 name = "ic_cose_types"
-description = "A Rust types library used for integrating with ic-cose cluster."
+description = "A Rust types library used for integrating with IC-COSE."
 publish = true
 repository = "https://github.com/ldclabs/ic-cose/tree/main/src/ic_cose_types"
 version.workspace = true

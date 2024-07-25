@@ -1,5 +1,5 @@
 use candid::Principal;
-use ic_cose_types::{cose::*, namespace::*, setting::*, state::StateInfo};
+use ic_cose_types::{types::namespace::*, types::setting::*, types::state::StateInfo, types::*};
 use serde_bytes::ByteBuf;
 use std::collections::BTreeSet;
 

@@ -1,7 +1,8 @@
 use candid::Principal;
 use ciborium::{from_reader, from_reader_with_buffer, into_writer};
 use ic_cose_types::{
-    cose::try_decode_encrypt0, namespace::NamespaceInfo, setting::*, sha3_256_n, state::StateInfo,
+    cose::{encrypt0::try_decode_encrypt0, sha3_256_n},
+    types::{namespace::NamespaceInfo, setting::*, state::StateInfo},
     ByteN,
 };
 use ic_stable_structures::{
@@ -245,7 +246,7 @@ impl SettingPathKey {
     pub fn from_path(val: SettingPath, caller: Principal) -> Self {
         Self(
             val.ns,
-            if val.client { 1 } else { 0 },
+            if val.client_owned { 1 } else { 0 },
             val.subject.unwrap_or(caller),
             val.key,
             val.version,

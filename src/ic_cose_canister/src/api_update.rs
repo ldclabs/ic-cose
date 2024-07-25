@@ -1,5 +1,12 @@
 use ic_cose_types::{
-    cose::*, crypto::ecdh_x25519, format_error, mac3_256, setting::*, OwnedRef, MILLISECONDS,
+    cose::{
+        ecdh::ecdh_x25519,
+        encrypt0::{cose_decrypt0, cose_encrypt0},
+        get_cose_key_secret, mac3_256, CborSerializable, CoseKey,
+    },
+    format_error,
+    types::{setting::*, ECDHInput, ECDHOutput},
+    OwnedRef, MILLISECONDS,
 };
 
 use crate::{rand_bytes, store};

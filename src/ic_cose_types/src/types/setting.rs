@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{cose::SettingPathInput, format_error, validate_key};
+use super::SettingPathInput;
+use crate::{format_error, validate_key};
 
 pub const CHUNK_SIZE: u32 = 256 * 1024;
 
@@ -26,7 +27,7 @@ pub struct SettingInfo {
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SettingPath {
     pub ns: String,
-    pub client: bool,
+    pub client_owned: bool,
     pub subject: Option<Principal>,
     pub key: String,
     pub version: u32,
@@ -44,7 +45,7 @@ impl From<SettingPathInput> for SettingPath {
     fn from(input: SettingPathInput) -> Self {
         Self {
             ns: input.ns,
-            client: input.client,
+            client_owned: input.client_owned,
             subject: input.subject,
             key: input.key.unwrap_or_default(),
             version: 0,

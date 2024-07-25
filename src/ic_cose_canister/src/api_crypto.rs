@@ -1,4 +1,10 @@
-use ic_cose_types::{cose::*, crypto::ecdh_x25519, format_error, mac3_256};
+use ic_cose_types::{
+    cose::{
+        cose_aes256_key, ecdh::ecdh_x25519, encrypt0::cose_encrypt0, mac3_256, CborSerializable,
+    },
+    format_error,
+    types::{ECDHInput, ECDHOutput, PublicKeyInput, SettingPathInput, SignInput},
+};
 use serde_bytes::ByteBuf;
 
 use crate::{rand_bytes, store};
@@ -24,14 +30,6 @@ fn schnorr_public_key(_input: PublicKeyInput) -> Result<ByteBuf, String> {
 async fn schnorr_sign(_input: SignInput) -> Result<ByteBuf, String> {
     Err("not implemented".to_string())
 }
-
-// #[ic_cdk::update]
-// async fn ecdh_public_key(path: SettingPathInput, ecdh: ECDHInput) -> Result<ByteN<32>, String> {
-//     path.validate()?;
-//     let caller = ic_cdk::caller();
-//     let spk = store::SettingPathKey::from_path(path.into(), caller);
-//     store::ns::ecdh_public_key(&caller, &spk, &ecdh).await
-// }
 
 #[ic_cdk::update]
 async fn ecdh_encrypted_cose_key(
