@@ -47,7 +47,7 @@ pub struct ECDHOutput<T> {
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CosePath {
     pub ns: String,
-    pub client_owned: bool,
+    pub user_owned: bool,
     pub subject: Option<Principal>, // default is caller
     pub key: Option<String>,
 }

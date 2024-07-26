@@ -17,9 +17,9 @@ pub struct NamespaceInfo {
     pub visibility: u8,                // 0: private; 1: public
     pub managers: BTreeSet<Principal>, // managers can read and write all settings
     pub auditors: BTreeSet<Principal>, // auditors can read all settings
-    pub members: BTreeSet<Principal>,  // members can read and write settings they created
-    pub settings_count: u64,           // settings created by managers for members
-    pub client_settings_count: u64,    // settings created by members
+    pub users: BTreeSet<Principal>,    // users can read and write settings they created
+    pub settings_count: u64,           // settings created by managers for users
+    pub user_settings_count: u64,      // settings created by users
     pub balance: u128,                 // cycles
 }
 

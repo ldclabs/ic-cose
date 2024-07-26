@@ -12,8 +12,4 @@ pub struct StateInfo {
     pub auditors: BTreeSet<Principal>,
     pub namespace_count: u64,
     pub subnet_size: u64,
-    pub service_fee: u64, // in cycles
-    pub incoming_cycles: u128,
-    pub uncollectible_cycles: u128, // cycles that cannot be collected
-    pub freezing_threshold: u128,   // cycles
 }

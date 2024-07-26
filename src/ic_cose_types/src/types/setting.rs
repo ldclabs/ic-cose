@@ -27,7 +27,7 @@ pub struct SettingInfo {
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SettingPath {
     pub ns: String,
-    pub client_owned: bool,
+    pub user_owned: bool,
     pub subject: Option<Principal>,
     pub key: String,
     pub version: u32,
@@ -45,7 +45,7 @@ impl From<CosePath> for SettingPath {
     fn from(input: CosePath) -> Self {
         Self {
             ns: input.ns,
-            client_owned: input.client_owned,
+            user_owned: input.user_owned,
             subject: input.subject,
             key: input.key.unwrap_or_default(),
             version: 0,
@@ -124,6 +124,7 @@ impl UpdateSettingInfoInput {
 pub struct UpdateSettingPayloadInput {
     pub payload: ByteBuf, // plain or encrypted payload
     pub status: Option<i8>,
+    pub deprecate_current: Option<bool>, // deprecate the current version
 }
 
 impl UpdateSettingPayloadInput {
@@ -138,3 +139,12 @@ impl UpdateSettingPayloadInput {
 }
 
 pub type UpdateSettingOutput = CreateSettingOutput;
+
+#[derive(CandidType, Clone, Debug, Deserialize, Serialize)]
+pub struct SettingArchivedPayload {
+    pub version: u32,
+    pub archived_at: u64,
+    pub deprecated: bool, // true if the payload should not be used for some reason
+    pub payload: ByteBuf,
+    pub dek: Option<ByteBuf>, // exist if the payload is encrypted
+}

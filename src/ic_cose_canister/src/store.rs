@@ -43,9 +43,6 @@ pub struct State {
     pub auditors: BTreeSet<Principal>,
     pub subnet_size: u64,
     pub service_fee: u64, // in cycles
-    pub incoming_cycles: u128,
-    pub uncollectible_cycles: u128, // cycles that cannot be collected
-    pub freezing_threshold: u128,   // cycles
 }
 
 impl State {
@@ -58,10 +55,6 @@ impl State {
             auditors: self.auditors.clone(),
             namespace_count: 0,
             subnet_size: self.subnet_size,
-            service_fee: self.service_fee,
-            incoming_cycles: self.incoming_cycles,
-            uncollectible_cycles: self.uncollectible_cycles,
-            freezing_threshold: self.freezing_threshold,
         }
     }
 }
@@ -79,10 +72,10 @@ pub struct Namespace {
     pub visibility: u8, // 0: private; 1: public
     pub managers: BTreeSet<Principal>, // managers can read and write all settings
     pub auditors: BTreeSet<Principal>, // auditors can read all settings
-    pub members: BTreeSet<Principal>, // members can read and write settings they created
-    pub settings: BTreeMap<(Principal, String), Setting>, // settings created by managers for members
-    pub client_settings: BTreeMap<(Principal, String), Setting>, // settings created by members
-    pub balance: u128,                                    // cycles or alternative token
+    pub users: BTreeSet<Principal>, // users can read and write settings they created
+    pub settings: BTreeMap<(Principal, String), Setting>, // settings created by managers for users
+    pub user_settings: BTreeMap<(Principal, String), Setting>, // settings created by users
+    pub balance: u128, // gas balance, TODO: https://internetcomputer.org/docs/current/developer-docs/gas-cost
 }
 
 impl Namespace {
@@ -99,9 +92,9 @@ impl Namespace {
             visibility: self.visibility,
             managers: self.managers.clone(),
             auditors: self.auditors.clone(),
-            members: self.members.clone(),
+            users: self.users.clone(),
             settings_count: self.settings.len() as u64,
-            client_settings_count: self.client_settings.len() as u64,
+            user_settings_count: self.user_settings.len() as u64,
             balance: self.balance,
         }
     }
@@ -116,8 +109,8 @@ impl Namespace {
             return self.managers.contains(caller);
         }
 
-        // members can create settings for themselves and update them
-        self.members.contains(caller) && caller == &spk.2
+        // users can create settings for themselves and update them
+        self.users.contains(caller) && caller == &spk.2
     }
 
     pub fn can_read_namespace(&self, caller: &Principal) -> bool {
@@ -131,7 +124,7 @@ impl Namespace {
 
         self.managers.contains(caller)
             || self.auditors.contains(caller)
-            || self.members.contains(caller)
+            || self.users.contains(caller)
     }
 
     fn partial_can_read_setting(&self, caller: &Principal, spk: &SettingPathKey) -> Option<bool> {
@@ -153,7 +146,7 @@ impl Namespace {
         if self.status < 0 && !self.managers.contains(caller) {
             return false;
         }
-        self.managers.contains(caller) || self.members.contains(caller)
+        self.managers.contains(caller) || self.users.contains(caller)
     }
 
     pub fn has_setting_kek_permission(&self, caller: &Principal, spk: &SettingPathKey) -> bool {
@@ -177,7 +170,7 @@ impl Namespace {
         let setting_key = (spk.2, spk.3.clone());
         let setting = match spk.1 {
             0 => self.settings.get(&setting_key),
-            1 => self.client_settings.get(&setting_key),
+            1 => self.user_settings.get(&setting_key),
             _ => None,
         };
 
@@ -188,7 +181,7 @@ impl Namespace {
         let setting_key = (spk.2, spk.3.clone());
         match spk.1 {
             0 => self.settings.get_mut(&setting_key),
-            1 => self.client_settings.get_mut(&setting_key),
+            1 => self.user_settings.get_mut(&setting_key),
             _ => None,
         }
     }
@@ -197,7 +190,7 @@ impl Namespace {
         let setting_key = (spk.2, spk.3.clone());
         let entry = match spk.1 {
             0 => self.settings.entry(setting_key),
-            1 => self.client_settings.entry(setting_key),
+            1 => self.user_settings.entry(setting_key),
             _ => {
                 return false;
             }
@@ -251,7 +244,7 @@ impl SettingPathKey {
     pub fn from_path(val: SettingPath, caller: Principal) -> Self {
         Self(
             val.ns,
-            if val.client_owned { 1 } else { 0 },
+            if val.user_owned { 1 } else { 0 },
             val.subject.unwrap_or(caller),
             val.key,
             val.version,
@@ -288,6 +281,28 @@ impl fmt::Display for SettingPathKey {
     }
 }
 
+#[derive(Clone, Deserialize, Serialize)]
+pub struct SettingArchived {
+    pub archived_at: u64,
+    pub deprecated: bool, // true if the payload should not be used for some reason
+    pub payload: ByteBuf,
+    pub dek: Option<ByteBuf>,
+}
+
+impl Storable for SettingArchived {
+    const BOUND: Bound = Bound::Unbounded;
+
+    fn to_bytes(&self) -> Cow<[u8]> {
+        let mut buf = vec![];
+        into_writer(self, &mut buf).expect("failed to encode SettingArchivedPayload data");
+        Cow::Owned(buf)
+    }
+
+    fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
+        from_reader(&bytes[..]).expect("failed to decode SettingArchivedPayload data")
+    }
+}
+
 const STATE_MEMORY_ID: MemoryId = MemoryId::new(0);
 const NS_MEMORY_ID: MemoryId = MemoryId::new(2);
 const PAYLOADS_MEMORY_ID: MemoryId = MemoryId::new(3);
@@ -313,7 +328,7 @@ thread_local! {
         ).expect("failed to init NS_STORE store")
     );
 
-    static PAYLOADS_STORE: RefCell<StableBTreeMap<SettingPathKey, Vec<u8>, Memory>> = RefCell::new(
+    static PAYLOADS_STORE: RefCell<StableBTreeMap<SettingPathKey, SettingArchived, Memory>> = RefCell::new(
         StableBTreeMap::init(
             MEMORY_MANAGER.with_borrow(|m| m.get(PAYLOADS_MEMORY_ID)),
         )
@@ -483,7 +498,7 @@ pub mod ns {
         let permission = with(&namespace, |ns| {
             if ns.managers.contains(caller) {
                 Ok(format!("Namespace.All:{}", namespace))
-            } else if ns.members.contains(caller) {
+            } else if ns.users.contains(caller) {
                 if ns.auditors.contains(caller) {
                     Ok(format!(
                         "Namespace.Read:{} Namespace.All.SubjectedSetting:{}",
@@ -600,21 +615,42 @@ pub mod ns {
                 .check_and_get_setting(caller, spk)
                 .ok_or_else(|| format!("setting {} not found or no permission", spk))?;
 
-            let payload = if spk.4 > 0 && spk.4 < setting.version {
-                PAYLOADS_STORE.with(|r| {
-                    let m = r.borrow();
-                    let payload = m
-                        .get(spk)
-                        .ok_or_else(|| format!("setting {} payload not found", spk))?;
-                    Ok::<ByteBuf, String>(ByteBuf::from(payload))
-                })?
-            } else {
-                setting.payload.clone()
+            if spk.4 != 0 || spk.4 != setting.version {
+                Err("version mismatch".to_string())?;
             };
 
             let mut res = setting.to_info(spk.2, spk.3.clone());
-            res.payload = Some(payload);
+            res.payload = Some(setting.payload.clone());
             Ok((res, ns.iv.to_vec()))
+        })
+    }
+
+    pub fn get_setting_archived_payload(
+        caller: &Principal,
+        spk: &SettingPathKey,
+    ) -> Result<SettingArchivedPayload, String> {
+        with(&spk.0, |ns| {
+            let setting = ns
+                .check_and_get_setting(caller, spk)
+                .ok_or_else(|| format!("setting {} not found or no permission", spk))?;
+
+            if spk.4 == 0 || spk.4 >= setting.version {
+                Err("version mismatch".to_string())?;
+            };
+
+            let payload = PAYLOADS_STORE.with(|r| {
+                let m = r.borrow();
+                m.get(spk)
+                    .ok_or_else(|| format!("setting {} payload not found", spk))
+            })?;
+
+            Ok(SettingArchivedPayload {
+                version: spk.4,
+                archived_at: payload.archived_at,
+                deprecated: payload.deprecated,
+                payload: payload.payload,
+                dek: payload.dek,
+            })
         })
     }
 
@@ -633,7 +669,7 @@ pub mod ns {
                 Err("version mismatch".to_string())?;
             }
 
-            match input.dek {
+            let size = match input.dek {
                 Some(ref dek) => {
                     if input.payload.len() as u64 > ns.max_payload_size {
                         Err("payload size exceeds the limit".to_string())?;
@@ -642,12 +678,14 @@ pub mod ns {
                     try_decode_encrypt0(dek)?;
                     // should be valid COSE encrypt0 payload
                     try_decode_encrypt0(&input.payload)?;
+                    input.payload.len() + dek.len()
                 }
                 None => {
                     // try to validate plain payload
                     try_decode_payload(ns.max_payload_size, &input.payload)?;
+                    input.payload.len()
                 }
-            }
+            };
 
             let output = CreateSettingOutput {
                 created_at: now_ms,
@@ -672,13 +710,7 @@ pub mod ns {
                 Err(format!("setting {} already exists", spk))?;
             }
 
-            if let Some(dek) = input.dek {
-                // save dek to 0 key for future use
-                PAYLOADS_STORE.with(|r| {
-                    r.borrow_mut().insert(spk.clone(), dek.into_vec());
-                });
-            }
-
+            ns.total_payload_size = ns.total_payload_size.saturating_add(size as u64);
             Ok(output)
         })
     }
@@ -693,49 +725,60 @@ pub mod ns {
             if !ns.can_write_setting(caller, spk) {
                 Err("no permission".to_string())?;
             }
+            let size = input.payload.len();
+            let output = {
+                let max_payload_size = ns.max_payload_size;
+                let setting = ns
+                    .get_setting_mut(spk)
+                    .ok_or_else(|| format!("setting {} not found", spk))?;
+                if setting.version != spk.4 {
+                    Err("version mismatch".to_string())?;
+                }
+                if setting.status == 1 {
+                    Err("readonly setting can not be updated".to_string())?;
+                }
 
-            let max_payload_size = ns.max_payload_size;
-            let setting = ns
-                .get_setting_mut(spk)
-                .ok_or_else(|| format!("setting {} not found", spk))?;
-            if setting.version != spk.4 {
-                Err("version mismatch".to_string())?;
-            }
-            if setting.status == 1 {
-                Err("readonly setting can not be updated".to_string())?;
-            }
-
-            match setting.dek {
-                Some(_) => {
-                    if input.payload.len() as u64 > max_payload_size {
-                        Err("payload size exceeds the limit".to_string())?;
+                match setting.dek {
+                    Some(_) => {
+                        if input.payload.len() as u64 > max_payload_size {
+                            Err("payload size exceeds the limit".to_string())?;
+                        }
+                        // should be valid COSE encrypt0 payload
+                        try_decode_encrypt0(&input.payload)?;
                     }
-                    // should be valid COSE encrypt0 payload
-                    try_decode_encrypt0(&input.payload)?;
+                    None => {
+                        // try to validate plain payload
+                        try_decode_payload(max_payload_size, &input.payload)?;
+                    }
                 }
-                None => {
-                    // try to validate plain payload
-                    try_decode_payload(max_payload_size, &input.payload)?;
+
+                PAYLOADS_STORE.with(|r| {
+                    r.borrow_mut().insert(
+                        spk.clone(),
+                        SettingArchived {
+                            archived_at: now_ms,
+                            deprecated: input.deprecate_current.unwrap_or(false),
+                            payload: setting.payload.clone(),
+                            dek: setting.dek.clone(),
+                        },
+                    );
+                });
+
+                if let Some(status) = input.status {
+                    setting.status = status;
                 }
-            }
+                setting.version = setting.version.saturating_add(1);
+                setting.payload = input.payload;
+                setting.updated_at = now_ms;
+                UpdateSettingOutput {
+                    created_at: setting.created_at,
+                    updated_at: setting.updated_at,
+                    version: setting.version,
+                }
+            };
 
-            PAYLOADS_STORE.with(|r| {
-                r.borrow_mut()
-                    .insert(spk.clone(), setting.payload.clone().into_vec());
-            });
-
-            if let Some(status) = input.status {
-                setting.status = status;
-            }
-            setting.version = setting.version.saturating_add(1);
-            setting.payload = input.payload;
-            setting.updated_at = now_ms;
-
-            Ok(UpdateSettingOutput {
-                created_at: setting.created_at,
-                updated_at: setting.updated_at,
-                version: setting.version,
-            })
+            ns.total_payload_size = ns.total_payload_size.saturating_add(size as u64);
+            Ok(output)
         })
     }
 

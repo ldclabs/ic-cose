@@ -3,7 +3,7 @@ type CosePath = record {
   ns : text;
   key : opt text;
   subject : opt principal;
-  client_owned : bool;
+  user_owned : bool;
 };
 type CreateSettingInput = record {
   dek : opt blob;
@@ -35,9 +35,7 @@ type NamespaceInfo = record {
   key : text;
   status : int8;
   updated_at : nat64;
-  members : vec principal;
   balance : nat;
-  client_settings_count : nat64;
   managers : vec principal;
   desc : text;
   name : text;
@@ -45,21 +43,31 @@ type NamespaceInfo = record {
   created_at : nat64;
   auditors : vec principal;
   settings_count : nat64;
+  users : vec principal;
   visibility : nat8;
   total_payload_size : nat64;
+  user_settings_count : nat64;
 };
 type PublicKeyInput = record { ns : text; derivation_path : vec blob };
 type PublicKeyOutput = record { public_key : blob; chain_code : blob };
 type Result = variant { Ok; Err : text };
 type Result_1 = variant { Ok : CreateSettingOutput; Err : text };
+type Result_10 = variant { Ok : vec NamespaceInfo; Err : text };
 type Result_2 = variant { Ok : ECDHOutput; Err : text };
 type Result_3 = variant { Ok : ECDHOutput_1; Err : text };
 type Result_4 = variant { Ok : PublicKeyOutput; Err : text };
 type Result_5 = variant { Ok : blob; Err : text };
 type Result_6 = variant { Ok : NamespaceInfo; Err : text };
 type Result_7 = variant { Ok : SettingInfo; Err : text };
-type Result_8 = variant { Ok : StateInfo; Err : text };
-type Result_9 = variant { Ok : vec NamespaceInfo; Err : text };
+type Result_8 = variant { Ok : SettingArchivedPayload; Err : text };
+type Result_9 = variant { Ok : StateInfo; Err : text };
+type SettingArchivedPayload = record {
+  dek : opt blob;
+  version : nat32;
+  deprecated : bool;
+  archived_at : nat64;
+  payload : blob;
+};
 type SettingInfo = record {
   dek : opt blob;
   key : text;
@@ -78,7 +86,7 @@ type SettingPath = record {
   key : text;
   subject : opt principal;
   version : nat32;
-  client_owned : bool;
+  user_owned : bool;
 };
 type SignInput = record {
   ns : text;
@@ -86,15 +94,11 @@ type SignInput = record {
   message : blob;
 };
 type StateInfo = record {
-  freezing_threshold : nat;
-  service_fee : nat64;
   namespace_count : nat64;
   ecdsa_key_name : text;
   managers : vec principal;
-  uncollectible_cycles : nat;
   name : text;
   auditors : vec principal;
-  incoming_cycles : nat;
   subnet_size : nat64;
   vetkd_key_name : text;
 };
@@ -103,7 +107,11 @@ type UpdateSettingInfoInput = record {
   desc : opt text;
   tags : opt vec record { text; text };
 };
-type UpdateSettingPayloadInput = record { status : opt int8; payload : blob };
+type UpdateSettingPayloadInput = record {
+  status : opt int8;
+  deprecate_current : opt bool;
+  payload : blob;
+};
 type UpgradeArgs = record {
   service_fee : opt nat64;
   name : opt text;
@@ -121,9 +129,10 @@ service : (opt ChainArgs) -> {
   ecdsa_sign : (SignInput) -> (Result_5);
   get_namespace : (text) -> (Result_6) query;
   get_setting : (SettingPath) -> (Result_7) query;
+  get_setting_archived_payload : (SettingPath) -> (Result_8) query;
   get_setting_info : (SettingPath) -> (Result_7) query;
-  get_state : () -> (Result_8) query;
-  list_namespaces : (opt text, opt nat32) -> (Result_9) query;
+  get_state : () -> (Result_9) query;
+  list_namespaces : (opt text, opt nat32) -> (Result_10) query;
   schnorr_public_key : (text, opt PublicKeyInput) -> (Result_4) query;
   schnorr_sign : (text, SignInput) -> (Result_5);
   sign_identity : (text, text, opt text) -> (Result_5);

@@ -1,6 +1,6 @@
 use ic_cose_types::types::{
     namespace::NamespaceInfo,
-    setting::{SettingInfo, SettingPath},
+    setting::{SettingArchivedPayload, SettingInfo, SettingPath},
     state::StateInfo,
 };
 
@@ -51,4 +51,12 @@ fn get_setting(path: SettingPath) -> Result<SettingInfo, String> {
     let spk = store::SettingPathKey::from_path(path, caller);
     let (info, _) = store::ns::get_setting(&caller, &spk)?;
     Ok(info)
+}
+
+#[ic_cdk::query]
+fn get_setting_archived_payload(path: SettingPath) -> Result<SettingArchivedPayload, String> {
+    path.validate()?;
+    let caller = ic_cdk::caller();
+    let spk = store::SettingPathKey::from_path(path, caller);
+    store::ns::get_setting_archived_payload(&caller, &spk)
 }
