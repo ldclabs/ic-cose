@@ -41,7 +41,7 @@ fn init(args: Option<ChainArgs>) {
                 s.freezing_threshold = if args.freezing_threshold > 0 {
                     args.freezing_threshold
                 } else {
-                    100_000_000
+                    1_000_000_000_000
                 };
             });
         }
@@ -53,7 +53,7 @@ fn init(args: Option<ChainArgs>) {
     }
 
     ic_cdk_timers::set_timer(Duration::from_secs(0), || {
-        ic_cdk::spawn(store::state::init_ecdsa_public_key())
+        ic_cdk::spawn(store::state::init_public_key())
     });
 }
 

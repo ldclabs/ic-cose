@@ -17,20 +17,6 @@ fn state_get_info() -> Result<StateInfo, String> {
 }
 
 #[ic_cdk::query]
-fn namespace_list(prev: Option<String>, take: Option<u32>) -> Result<Vec<NamespaceInfo>, String> {
-    let caller = ic_cdk::caller();
-    let take = take.unwrap_or(10).min(100);
-    store::state::with(|s| {
-        if !s.managers.contains(&caller) && !s.auditors.contains(&caller) {
-            Err("no permission".to_string())?;
-        }
-
-        let namespaces = store::ns::list_namespaces(prev, take as usize);
-        Ok(namespaces)
-    })
-}
-
-#[ic_cdk::query]
 fn namespace_get_info(namespace: String) -> Result<NamespaceInfo, String> {
     let caller = ic_cdk::caller();
     store::ns::get_namespace(&caller, namespace)

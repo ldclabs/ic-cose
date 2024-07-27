@@ -5,7 +5,7 @@ use ic_cose_types::{
     },
     types::{
         CosePath, ECDHInput, ECDHOutput, PublicKeyInput, PublicKeyOutput, SchnorrAlgorithm,
-        SignInput,
+        SignIdentityInput, SignInput,
     },
     validate_key, MILLISECONDS,
 };
@@ -72,22 +72,15 @@ async fn schnorr_sign(algorithm: SchnorrAlgorithm, input: SignInput) -> Result<B
 }
 
 #[ic_cdk::update(guard = "is_authenticated")]
-async fn sign_identity(
-    namespace: String,
-    audience: String,
-    algorithm: Option<SchnorrAlgorithm>,
+async fn schnorr_sign_identity(
+    algorithm: SchnorrAlgorithm,
+    input: SignIdentityInput,
 ) -> Result<ByteBuf, String> {
-    validate_key(&namespace)?;
+    validate_key(&input.ns)?;
+
     let caller = ic_cdk::caller();
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
-    store::ns::sign_identity(
-        &caller,
-        algorithm.unwrap_or(SchnorrAlgorithm::Ed25519),
-        namespace,
-        audience,
-        now_ms,
-    )
-    .await
+    store::ns::sign_identity(&caller, algorithm, input.ns, input.audience, now_ms).await
 }
 
 #[ic_cdk::update(guard = "is_authenticated")]

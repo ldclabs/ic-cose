@@ -54,11 +54,13 @@ impl State {
         StateInfo {
             name: self.name.clone(),
             ecdsa_key_name: self.ecdsa_key_name.clone(),
+            schnorr_key_name: self.schnorr_key_name.clone(),
             vetkd_key_name: self.vetkd_key_name.clone(),
             managers: self.managers.clone(),
             auditors: self.auditors.clone(),
             namespace_total: 0,
             subnet_size: self.subnet_size,
+            freezing_threshold: self.freezing_threshold,
         }
     }
 }
@@ -352,32 +354,39 @@ pub mod state {
         STATE.with(|r| f(&mut r.borrow_mut()))
     }
 
-    pub async fn init_ecdsa_public_key() {
+    pub async fn init_public_key() {
         let (ecdsa_key_name, schnorr_key_name) =
             with(|r| (r.ecdsa_key_name.clone(), r.schnorr_key_name.clone()));
 
         let ecdsa_public_key = ecdsa_public_key(ecdsa_key_name, vec![])
             .await
-            .unwrap_or_else(|err| {
-                ic_cdk::trap(&format!("failed to retrieve ECDSA public key: {err}"))
-            });
+            .map_err(|err| ic_cdk::print(&format!("failed to retrieve ECDSA public key: {err}")))
+            .ok();
+
         let schnorr_ed25519_public_key =
             schnorr_public_key(schnorr_key_name.clone(), SchnorrAlgorithm::Ed25519, vec![])
                 .await
-                .unwrap_or_else(|err| {
-                    ic_cdk::trap(&format!("failed to retrieve ECDSA public key: {err}"))
-                });
+                .map_err(|err| {
+                    ic_cdk::print(&format!(
+                        "failed to retrieve Schnorr Ed25519 public key: {err}"
+                    ))
+                })
+                .ok();
+
         let schnorr_secp256k1_public_key =
             schnorr_public_key(schnorr_key_name, SchnorrAlgorithm::Bip340Secp256k1, vec![])
                 .await
-                .unwrap_or_else(|err| {
-                    ic_cdk::trap(&format!("failed to retrieve ECDSA public key: {err}"))
-                });
+                .map_err(|err| {
+                    ic_cdk::print(&format!(
+                        "failed to retrieve Schnorr Secp256k1 public key: {err}"
+                    ))
+                })
+                .ok();
 
         with_mut(|r| {
-            r.ecdsa_public_key = Some(ecdsa_public_key);
-            r.schnorr_ed25519_public_key = Some(schnorr_ed25519_public_key);
-            r.schnorr_secp256k1_public_key = Some(schnorr_secp256k1_public_key);
+            r.ecdsa_public_key = ecdsa_public_key;
+            r.schnorr_ed25519_public_key = schnorr_ed25519_public_key;
+            r.schnorr_secp256k1_public_key = schnorr_secp256k1_public_key;
         });
     }
 
@@ -674,7 +683,9 @@ pub mod ns {
             Err("no permission".to_string())?;
         }
 
-        let iv: [u8; 12] = rand_bytes().await.try_into().map_err(format_error)?;
+        let mut iv = rand_bytes().await;
+        iv.truncate(12);
+        let iv: [u8; 12] = iv.try_into().map_err(format_error)?;
         NS.with(|r| {
             let mut m = r.borrow_mut();
             if m.contains_key(&input.name) {

@@ -60,11 +60,11 @@ type PublicKeyOutput = record { public_key : blob; chain_code : blob };
 type Result = variant { Ok; Err : text };
 type Result_1 = variant { Ok : NamespaceInfo; Err : text };
 type Result_10 = variant { Ok : StateInfo; Err : text };
-type Result_2 = variant { Ok : ECDHOutput; Err : text };
-type Result_3 = variant { Ok : ECDHOutput_1; Err : text };
-type Result_4 = variant { Ok : PublicKeyOutput; Err : text };
-type Result_5 = variant { Ok : blob; Err : text };
-type Result_6 = variant { Ok : vec NamespaceInfo; Err : text };
+type Result_2 = variant { Ok : vec NamespaceInfo; Err : text };
+type Result_3 = variant { Ok : ECDHOutput; Err : text };
+type Result_4 = variant { Ok : ECDHOutput_1; Err : text };
+type Result_5 = variant { Ok : PublicKeyOutput; Err : text };
+type Result_6 = variant { Ok : blob; Err : text };
 type Result_7 = variant { Ok : CreateSettingOutput; Err : text };
 type Result_8 = variant { Ok : SettingInfo; Err : text };
 type Result_9 = variant { Ok : SettingArchivedPayload; Err : text };
@@ -96,16 +96,19 @@ type SettingPath = record {
   version : nat32;
   user_owned : bool;
 };
+type SignIdentityInput = record { ns : text; audience : text };
 type SignInput = record {
   ns : text;
   derivation_path : vec blob;
   message : blob;
 };
 type StateInfo = record {
+  freezing_threshold : nat64;
   ecdsa_key_name : text;
   managers : vec principal;
   name : text;
   auditors : vec principal;
+  schnorr_key_name : text;
   subnet_size : nat64;
   namespace_total : nat64;
   vetkd_key_name : text;
@@ -136,25 +139,26 @@ service : (opt ChainArgs) -> {
   admin_add_auditors : (vec principal) -> (Result);
   admin_add_managers : (vec principal) -> (Result);
   admin_create_namespace : (CreateNamespaceInput) -> (Result_1);
+  admin_list_namespace : (opt text, opt nat32) -> (Result_2) query;
   admin_remove_auditors : (vec principal) -> (Result);
   admin_remove_managers : (vec principal) -> (Result);
-  ecdh_encrypted_cose_key : (CosePath, ECDHInput) -> (Result_2);
-  ecdh_setting_get : (SettingPath, ECDHInput) -> (Result_3);
-  ecdsa_public_key : (opt PublicKeyInput) -> (Result_4) query;
-  ecdsa_sign : (SignInput) -> (Result_5);
+  ecdh_encrypted_cose_key : (CosePath, ECDHInput) -> (Result_3);
+  ecdh_setting_get : (SettingPath, ECDHInput) -> (Result_4);
+  ecdsa_public_key : (opt PublicKeyInput) -> (Result_5) query;
+  ecdsa_sign : (SignInput) -> (Result_6);
   namespace_add_auditors : (text, vec principal) -> (Result);
   namespace_add_managers : (text, vec principal) -> (Result);
   namespace_add_users : (text, vec principal) -> (Result);
   namespace_get_info : (text) -> (Result_1) query;
-  namespace_list : (opt text, opt nat32) -> (Result_6) query;
   namespace_remove_auditors : (text, vec principal) -> (Result);
   namespace_remove_managers : (text, vec principal) -> (Result);
   namespace_remove_users : (text, vec principal) -> (Result);
   namespace_update_info : (UpdateNamespaceInput) -> (Result);
   schnorr_public_key : (SchnorrAlgorithm, opt PublicKeyInput) -> (
-      Result_4,
+      Result_5,
     ) query;
-  schnorr_sign : (SchnorrAlgorithm, SignInput) -> (Result_5);
+  schnorr_sign : (SchnorrAlgorithm, SignInput) -> (Result_6);
+  schnorr_sign_identity : (SchnorrAlgorithm, SignIdentityInput) -> (Result_6);
   setting_add_readers : (SettingPath, vec principal) -> (Result);
   setting_create : (SettingPath, CreateSettingInput) -> (Result_7);
   setting_get : (SettingPath) -> (Result_8) query;
@@ -162,11 +166,10 @@ service : (opt ChainArgs) -> {
   setting_get_info : (SettingPath) -> (Result_8) query;
   setting_remove_readers : (SettingPath, vec principal) -> (Result);
   setting_update_info : (SettingPath, UpdateSettingInfoInput) -> (Result_7);
-  sign_identity : (text, text, opt SchnorrAlgorithm) -> (Result_5);
-  state_get_info : () -> (Result_10) query;
-  update_setting_payload : (SettingPath, UpdateSettingPayloadInput) -> (
+  setting_update_payload : (SettingPath, UpdateSettingPayloadInput) -> (
       Result_7,
     );
+  state_get_info : () -> (Result_10) query;
   validate_admin_add_auditors : (vec principal) -> (Result);
   validate_admin_add_managers : (vec principal) -> (Result);
   validate_admin_remove_auditors : (vec principal) -> (Result);

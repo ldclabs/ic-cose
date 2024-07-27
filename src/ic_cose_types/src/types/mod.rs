@@ -41,6 +41,12 @@ pub struct SignInput {
 }
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SignIdentityInput {
+    pub ns: String,
+    pub audience: String,
+}
+
+#[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ECDHInput {
     pub nonce: ByteN<12>,               // should be random for each request
     pub public_key: ByteN<32>,          // client side ECDH public key

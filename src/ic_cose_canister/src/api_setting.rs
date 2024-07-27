@@ -106,7 +106,7 @@ async fn setting_update_info(
 }
 
 #[ic_cdk::update(guard = "is_authenticated")]
-async fn update_setting_payload(
+async fn setting_update_payload(
     path: SettingPath,
     input: UpdateSettingPayloadInput,
 ) -> Result<UpdateSettingOutput, String> {
