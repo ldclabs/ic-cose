@@ -23,7 +23,7 @@ fn namespace_get_info(namespace: String) -> Result<NamespaceInfo, String> {
 }
 
 #[ic_cdk::update(guard = "is_authenticated")]
-async fn namespace_update_info(args: UpdateNamespaceInput) -> Result<(), String> {
+fn namespace_update_info(args: UpdateNamespaceInput) -> Result<(), String> {
     args.validate()?;
 
     let caller = ic_cdk::caller();

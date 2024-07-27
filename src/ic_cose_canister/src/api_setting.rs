@@ -76,7 +76,7 @@ async fn ecdh_setting_get(
 }
 
 #[ic_cdk::update(guard = "is_authenticated")]
-async fn setting_create(
+fn setting_create(
     path: SettingPath,
     input: CreateSettingInput,
 ) -> Result<CreateSettingOutput, String> {
@@ -91,7 +91,7 @@ async fn setting_create(
 }
 
 #[ic_cdk::update(guard = "is_authenticated")]
-async fn setting_update_info(
+fn setting_update_info(
     path: SettingPath,
     input: UpdateSettingInfoInput,
 ) -> Result<UpdateSettingOutput, String> {
@@ -106,7 +106,7 @@ async fn setting_update_info(
 }
 
 #[ic_cdk::update(guard = "is_authenticated")]
-async fn setting_update_payload(
+fn setting_update_payload(
     path: SettingPath,
     input: UpdateSettingPayloadInput,
 ) -> Result<UpdateSettingOutput, String> {

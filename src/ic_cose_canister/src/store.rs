@@ -432,7 +432,7 @@ pub mod state {
 }
 
 pub mod ns {
-    use ic_cose_types::cose::iana::Algorithm::EdDSA;
+    use ic_cose_types::cose::{iana::Algorithm::EdDSA, sha256};
 
     use super::*;
 
@@ -568,10 +568,10 @@ pub mod ns {
     const CWT_EXPIRATION_SECONDS: i64 = 3600;
     pub async fn sign_identity(
         caller: &Principal,
-        algorithm: SchnorrAlgorithm,
         namespace: String,
         audience: String,
         now_ms: u64,
+        algorithm: Option<SchnorrAlgorithm>,
     ) -> Result<ByteBuf, String> {
         let permission = with(&namespace, |ns| {
             if ns.managers.contains(caller) {
@@ -611,12 +611,15 @@ pub mod ns {
         };
         let payload = claims.to_vec().map_err(format_error)?;
         let alg = match algorithm {
-            SchnorrAlgorithm::Ed25519 => EdDSA,
-            SchnorrAlgorithm::Bip340Secp256k1 => ES256K,
+            None | Some(SchnorrAlgorithm::Ed25519) => EdDSA,
+            Some(SchnorrAlgorithm::Bip340Secp256k1) => ES256K,
         };
         let mut sign1 = cose_sign1(payload, alg, None)?;
         let tbs_data = sign1.tbs_data(caller.as_slice());
-        let sig = sign_with_schnorr(key_name, algorithm, vec![], tbs_data).await?;
+        let sig = match algorithm {
+            None => sign_with_ecdsa(key_name, vec![], sha256(&tbs_data).to_vec()).await?,
+            Some(alg) => sign_with_schnorr(key_name, alg, vec![], tbs_data).await?,
+        };
         sign1.signature = sig;
         let token = sign1.to_vec().map_err(format_error)?;
         Ok(ByteBuf::from(token))

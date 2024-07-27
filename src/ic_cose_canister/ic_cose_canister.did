@@ -146,6 +146,7 @@ service : (opt ChainArgs) -> {
   ecdh_setting_get : (SettingPath, ECDHInput) -> (Result_4);
   ecdsa_public_key : (opt PublicKeyInput) -> (Result_5) query;
   ecdsa_sign : (SignInput) -> (Result_6);
+  ecdsa_sign_identity : (SignIdentityInput) -> (Result_6);
   namespace_add_auditors : (text, vec principal) -> (Result);
   namespace_add_managers : (text, vec principal) -> (Result);
   namespace_add_users : (text, vec principal) -> (Result);
