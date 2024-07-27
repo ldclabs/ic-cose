@@ -1,5 +1,9 @@
 use candid::Principal;
 use ic_cose_types::validate_principals;
+use ic_cose_types::{
+    types::namespace::{CreateNamespaceInput, NamespaceInfo},
+    MILLISECONDS,
+};
 use std::collections::BTreeSet;
 
 use crate::{is_controller, store};
@@ -38,6 +42,15 @@ fn admin_remove_auditors(args: BTreeSet<Principal>) -> Result<(), String> {
         r.auditors.retain(|p| !args.contains(p));
         Ok(())
     })
+}
+
+#[ic_cdk::update]
+async fn admin_create_namespace(args: CreateNamespaceInput) -> Result<NamespaceInfo, String> {
+    args.validate()?;
+
+    let caller = ic_cdk::caller();
+    let now_ms = ic_cdk::api::time() / MILLISECONDS;
+    store::ns::create_namespace(&caller, args, now_ms).await
 }
 
 #[ic_cdk::update]

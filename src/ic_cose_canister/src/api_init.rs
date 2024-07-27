@@ -14,16 +14,18 @@ pub enum ChainArgs {
 pub struct InitArgs {
     name: String,
     ecdsa_key_name: String, // Use "dfx_test_key" for local replica and "test_key_1" for a testing key for testnet and mainnet
+    // https://internetcomputer.org/docs/current/developer-docs/smart-contracts/signatures/signing-messages-t-schnorr
+    schnorr_key_name: String,
     vetkd_key_name: String,
-    subnet_size: u64, // set to 0 to disable receiving cycles
-    service_fee: u64, // in cycles
+    subnet_size: u64,        // set to 0 to disable receiving cycles
+    freezing_threshold: u64, // in cycles
 }
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
 pub struct UpgradeArgs {
     name: Option<String>, // seconds
     subnet_size: Option<u64>,
-    service_fee: Option<u64>, // in cycles
+    freezing_threshold: Option<u64>, // in cycles
 }
 
 #[ic_cdk::init]
@@ -33,9 +35,11 @@ fn init(args: Option<ChainArgs>) {
             store::state::with_mut(|s| {
                 s.name = args.name;
                 s.ecdsa_key_name = args.ecdsa_key_name;
+                s.schnorr_key_name = args.schnorr_key_name;
+                s.vetkd_key_name = args.vetkd_key_name;
                 s.subnet_size = args.subnet_size;
-                s.service_fee = if args.service_fee > 0 {
-                    args.service_fee
+                s.freezing_threshold = if args.freezing_threshold > 0 {
+                    args.freezing_threshold
                 } else {
                     100_000_000
                 };
@@ -71,8 +75,8 @@ fn post_upgrade(args: Option<ChainArgs>) {
                 if let Some(subnet_size) = args.subnet_size {
                     s.subnet_size = subnet_size;
                 }
-                if let Some(service_fee) = args.service_fee {
-                    s.service_fee = service_fee;
+                if let Some(freezing_threshold) = args.freezing_threshold {
+                    s.freezing_threshold = freezing_threshold;
                 }
             });
         }

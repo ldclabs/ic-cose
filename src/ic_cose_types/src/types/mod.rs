@@ -49,14 +49,14 @@ pub struct CosePath {
     pub ns: String,
     pub user_owned: bool,
     pub subject: Option<Principal>, // default is caller
-    pub key: Option<String>,
+    pub name: Option<String>,       // setting name
 }
 
 impl CosePath {
     pub fn validate(&self) -> Result<(), String> {
         validate_key(&self.ns)?;
-        if let Some(ref key) = self.key {
-            validate_key(key)?;
+        if let Some(ref name) = self.name {
+            validate_key(name)?;
         }
         Ok(())
     }

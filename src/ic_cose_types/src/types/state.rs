@@ -10,6 +10,6 @@ pub struct StateInfo {
     pub managers: BTreeSet<Principal>, // managers can read and write namespaces, not settings
     // auditors can read and list namespaces and settings info even if it is private
     pub auditors: BTreeSet<Principal>,
-    pub namespace_count: u64,
+    pub namespace_total: u64,
     pub subnet_size: u64,
 }

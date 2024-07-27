@@ -8,8 +8,8 @@ use std::collections::BTreeSet;
 mod api_admin;
 mod api_cose;
 mod api_init;
-mod api_query;
-mod api_update;
+mod api_namespace;
+mod api_setting;
 mod ecdsa;
 mod store;
 

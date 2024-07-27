@@ -11,7 +11,7 @@ pub const CHUNK_SIZE: u32 = 256 * 1024;
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SettingInfo {
-    pub key: String,
+    pub name: String,
     pub subject: Principal,
     pub desc: String,
     pub created_at: u64, // unix timestamp in milliseconds
@@ -29,14 +29,14 @@ pub struct SettingPath {
     pub ns: String,
     pub user_owned: bool,
     pub subject: Option<Principal>,
-    pub key: String,
+    pub name: String,
     pub version: u32,
 }
 
 impl SettingPath {
     pub fn validate(&self) -> Result<(), String> {
         validate_key(&self.ns)?;
-        validate_key(&self.key)?;
+        validate_key(&self.name)?;
         Ok(())
     }
 }
@@ -47,7 +47,7 @@ impl From<CosePath> for SettingPath {
             ns: input.ns,
             user_owned: input.user_owned,
             subject: input.subject,
-            key: input.key.unwrap_or_default(),
+            name: input.name.unwrap_or_default(),
             version: 0,
         }
     }

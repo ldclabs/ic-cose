@@ -2,30 +2,30 @@ use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
-use crate::validate_key;
+use crate::{validate_key, validate_principals};
+
+pub const MAX_PAYLOAD_SIZE: u64 = 2_000_000; // 2MB
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct NamespaceInfo {
-    pub key: String,
     pub name: String,
     pub desc: String,
     pub created_at: u64,               // unix timestamp in milliseconds
     pub updated_at: u64,               // unix timestamp in milliseconds
     pub max_payload_size: u64,         // max payload size in bytes
-    pub total_payload_size: u64,       // total payload size in bytes
+    pub payload_bytes_total: u64,      // total payload size in bytes
     pub status: i8,                    // -1: archived; 0: readable and writable; 1: readonly
     pub visibility: u8,                // 0: private; 1: public
     pub managers: BTreeSet<Principal>, // managers can read and write all settings
     pub auditors: BTreeSet<Principal>, // auditors can read all settings
     pub users: BTreeSet<Principal>,    // users can read and write settings they created
-    pub settings_count: u64,           // settings created by managers for users
-    pub user_settings_count: u64,      // settings created by users
-    pub balance: u128,                 // cycles
+    pub settings_total: u64,           // settings created by managers for users
+    pub user_settings_total: u64,      // settings created by users
+    pub gas_balance: u128,             // cycles
 }
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize)]
 pub struct CreateNamespaceInput {
-    pub key: String,
     pub name: String,
     pub visibility: u8, // 0: private; 1: public
     pub desc: Option<String>,
@@ -35,13 +35,17 @@ pub struct CreateNamespaceInput {
 
 impl CreateNamespaceInput {
     pub fn validate(&self) -> Result<(), String> {
-        validate_key(&self.key)?;
-        if self.name.trim().is_empty() {
-            Err("invalid namespace name".to_string())?;
-        }
+        validate_key(&self.name)?;
+        validate_principals(&self.managers)?;
         if let Some(max_payload_size) = self.max_payload_size {
             if max_payload_size == 0 {
                 Err("max_payload_size should be greater than 0".to_string())?;
+            }
+            if max_payload_size > MAX_PAYLOAD_SIZE {
+                Err(format!(
+                    "max_payload_size should be less than or equal to {}",
+                    MAX_PAYLOAD_SIZE
+                ))?;
             }
         }
 
@@ -54,7 +58,7 @@ impl CreateNamespaceInput {
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize)]
 pub struct UpdateNamespaceInput {
-    pub name: Option<String>,
+    pub name: String,
     pub desc: Option<String>,
     pub max_payload_size: Option<u64>,
     pub status: Option<i8>,
@@ -63,14 +67,15 @@ pub struct UpdateNamespaceInput {
 
 impl UpdateNamespaceInput {
     pub fn validate(&self) -> Result<(), String> {
-        if let Some(name) = &self.name {
-            if name.trim().is_empty() {
-                Err("invalid namespace name".to_string())?;
-            }
-        }
         if let Some(max_payload_size) = self.max_payload_size {
             if max_payload_size == 0 {
                 Err("max_payload_size should be greater than 0".to_string())?;
+            }
+            if max_payload_size > MAX_PAYLOAD_SIZE {
+                Err(format!(
+                    "max_payload_size should be less than or equal to {}",
+                    MAX_PAYLOAD_SIZE
+                ))?;
             }
         }
 

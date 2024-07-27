@@ -1,9 +1,16 @@
 type ChainArgs = variant { Upgrade : UpgradeArgs; Init : InitArgs };
 type CosePath = record {
   ns : text;
-  key : opt text;
   subject : opt principal;
+  name : opt text;
   user_owned : bool;
+};
+type CreateNamespaceInput = record {
+  managers : vec principal;
+  desc : opt text;
+  name : text;
+  max_payload_size : opt nat64;
+  visibility : nat8;
 };
 type CreateSettingInput = record {
   dek : opt blob;
@@ -25,42 +32,42 @@ type ECDHInput = record {
 type ECDHOutput = record { public_key : blob; payload : blob };
 type ECDHOutput_1 = record { public_key : blob; payload : SettingInfo };
 type InitArgs = record {
-  service_fee : nat64;
+  freezing_threshold : nat64;
   ecdsa_key_name : text;
   name : text;
+  schnorr_key_name : text;
   subnet_size : nat64;
   vetkd_key_name : text;
 };
 type NamespaceInfo = record {
-  key : text;
   status : int8;
   updated_at : nat64;
-  balance : nat;
   managers : vec principal;
+  payload_bytes_total : nat64;
   desc : text;
   name : text;
   max_payload_size : nat64;
   created_at : nat64;
   auditors : vec principal;
-  settings_count : nat64;
+  settings_total : nat64;
+  user_settings_total : nat64;
   users : vec principal;
   visibility : nat8;
-  total_payload_size : nat64;
-  user_settings_count : nat64;
+  gas_balance : nat;
 };
 type PublicKeyInput = record { ns : text; derivation_path : vec blob };
 type PublicKeyOutput = record { public_key : blob; chain_code : blob };
 type Result = variant { Ok; Err : text };
-type Result_1 = variant { Ok : CreateSettingOutput; Err : text };
-type Result_10 = variant { Ok : vec NamespaceInfo; Err : text };
+type Result_1 = variant { Ok : NamespaceInfo; Err : text };
+type Result_10 = variant { Ok : StateInfo; Err : text };
 type Result_2 = variant { Ok : ECDHOutput; Err : text };
 type Result_3 = variant { Ok : ECDHOutput_1; Err : text };
 type Result_4 = variant { Ok : PublicKeyOutput; Err : text };
 type Result_5 = variant { Ok : blob; Err : text };
-type Result_6 = variant { Ok : NamespaceInfo; Err : text };
-type Result_7 = variant { Ok : SettingInfo; Err : text };
-type Result_8 = variant { Ok : SettingArchivedPayload; Err : text };
-type Result_9 = variant { Ok : StateInfo; Err : text };
+type Result_6 = variant { Ok : vec NamespaceInfo; Err : text };
+type Result_7 = variant { Ok : CreateSettingOutput; Err : text };
+type Result_8 = variant { Ok : SettingInfo; Err : text };
+type Result_9 = variant { Ok : SettingArchivedPayload; Err : text };
 type SettingArchivedPayload = record {
   dek : opt blob;
   version : nat32;
@@ -70,12 +77,12 @@ type SettingArchivedPayload = record {
 };
 type SettingInfo = record {
   dek : opt blob;
-  key : text;
   readers : vec principal;
   status : int8;
   updated_at : nat64;
   subject : principal;
   desc : text;
+  name : text;
   tags : vec record { text; text };
   created_at : nat64;
   version : nat32;
@@ -83,8 +90,8 @@ type SettingInfo = record {
 };
 type SettingPath = record {
   ns : text;
-  key : text;
   subject : opt principal;
+  name : text;
   version : nat32;
   user_owned : bool;
 };
@@ -94,13 +101,20 @@ type SignInput = record {
   message : blob;
 };
 type StateInfo = record {
-  namespace_count : nat64;
   ecdsa_key_name : text;
   managers : vec principal;
   name : text;
   auditors : vec principal;
   subnet_size : nat64;
+  namespace_total : nat64;
   vetkd_key_name : text;
+};
+type UpdateNamespaceInput = record {
+  status : opt int8;
+  desc : opt text;
+  name : text;
+  max_payload_size : opt nat64;
+  visibility : opt nat8;
 };
 type UpdateSettingInfoInput = record {
   status : opt int8;
@@ -113,32 +127,42 @@ type UpdateSettingPayloadInput = record {
   payload : blob;
 };
 type UpgradeArgs = record {
-  service_fee : opt nat64;
+  freezing_threshold : opt nat64;
   name : opt text;
   subnet_size : opt nat64;
 };
 service : (opt ChainArgs) -> {
   admin_add_auditors : (vec principal) -> (Result);
   admin_add_managers : (vec principal) -> (Result);
+  admin_create_namespace : (CreateNamespaceInput) -> (Result_1);
   admin_remove_auditors : (vec principal) -> (Result);
   admin_remove_managers : (vec principal) -> (Result);
-  create_setting : (SettingPath, CreateSettingInput) -> (Result_1);
   ecdh_encrypted_cose_key : (CosePath, ECDHInput) -> (Result_2);
-  ecdh_get_setting : (SettingPath, ECDHInput) -> (Result_3);
+  ecdh_setting_get : (SettingPath, ECDHInput) -> (Result_3);
   ecdsa_public_key : (opt PublicKeyInput) -> (Result_4) query;
   ecdsa_sign : (SignInput) -> (Result_5);
-  get_namespace : (text) -> (Result_6) query;
-  get_setting : (SettingPath) -> (Result_7) query;
-  get_setting_archived_payload : (SettingPath) -> (Result_8) query;
-  get_setting_info : (SettingPath) -> (Result_7) query;
-  get_state : () -> (Result_9) query;
-  list_namespaces : (opt text, opt nat32) -> (Result_10) query;
+  namespace_add_auditors : (text, vec principal) -> (Result);
+  namespace_add_managers : (text, vec principal) -> (Result);
+  namespace_add_users : (text, vec principal) -> (Result);
+  namespace_get_info : (text) -> (Result_1) query;
+  namespace_list : (opt text, opt nat32) -> (Result_6) query;
+  namespace_remove_auditors : (text, vec principal) -> (Result);
+  namespace_remove_managers : (text, vec principal) -> (Result);
+  namespace_remove_users : (text, vec principal) -> (Result);
+  namespace_update_info : (UpdateNamespaceInput) -> (Result);
   schnorr_public_key : (text, opt PublicKeyInput) -> (Result_4) query;
   schnorr_sign : (text, SignInput) -> (Result_5);
+  setting_add_readers : (SettingPath, vec principal) -> (Result);
+  setting_create : (SettingPath, CreateSettingInput) -> (Result_7);
+  setting_get : (SettingPath) -> (Result_8) query;
+  setting_get_archived_payload : (SettingPath) -> (Result_9) query;
+  setting_get_info : (SettingPath) -> (Result_8) query;
+  setting_remove_readers : (SettingPath, vec principal) -> (Result);
+  setting_update_info : (SettingPath, UpdateSettingInfoInput) -> (Result_7);
   sign_identity : (text, text, opt text) -> (Result_5);
-  update_setting_info : (SettingPath, UpdateSettingInfoInput) -> (Result_1);
+  state_get_info : () -> (Result_10) query;
   update_setting_payload : (SettingPath, UpdateSettingPayloadInput) -> (
-      Result_1,
+      Result_7,
     );
   validate_admin_add_auditors : (vec principal) -> (Result);
   validate_admin_add_managers : (vec principal) -> (Result);

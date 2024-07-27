@@ -8,7 +8,7 @@ use ic_cose_types::{
         sign1::{cose_sign1, ES256K},
         CborSerializable,
     },
-    types::{namespace::NamespaceInfo, setting::*, state::StateInfo, PublicKeyOutput},
+    types::{namespace::*, setting::*, state::StateInfo, PublicKeyOutput},
     ByteN,
 };
 use ic_stable_structures::{
@@ -37,12 +37,13 @@ pub struct State {
     pub name: String,
     pub ecdsa_key_name: String,
     pub ecdsa_public_key: Option<ECDSAPublicKey>,
+    pub schnorr_key_name: String,
     pub vetkd_key_name: String,
     pub managers: BTreeSet<Principal>, // managers can read and write namespaces, not settings
     // auditors can read and list namespaces and settings info even if it is private
     pub auditors: BTreeSet<Principal>,
     pub subnet_size: u64,
-    pub service_fee: u64, // in cycles
+    pub freezing_threshold: u64, // freezing writing threshold in cycles
 }
 
 impl State {
@@ -53,7 +54,7 @@ impl State {
             vetkd_key_name: self.vetkd_key_name.clone(),
             managers: self.managers.clone(),
             auditors: self.auditors.clone(),
-            namespace_count: 0,
+            namespace_total: 0,
             subnet_size: self.subnet_size,
         }
     }
@@ -61,13 +62,12 @@ impl State {
 
 #[derive(Clone, Default, Deserialize, Serialize)]
 pub struct Namespace {
-    pub name: String,
     pub desc: String,
     pub iv: ByteN<12>, // Initialization Vector for encryption, permanent with the namespace
     pub created_at: u64, // unix timestamp in milliseconds
     pub updated_at: u64, // unix timestamp in milliseconds
     pub max_payload_size: u64, // max payload size in bytes
-    pub total_payload_size: u64, // total payload size in bytes
+    pub payload_bytes_total: u64, // total payload size in bytes
     pub status: i8,    // -1: archived; 0: readable and writable; 1: readonly
     pub visibility: u8, // 0: private; 1: public
     pub managers: BTreeSet<Principal>, // managers can read and write all settings
@@ -75,42 +75,31 @@ pub struct Namespace {
     pub users: BTreeSet<Principal>, // users can read and write settings they created
     pub settings: BTreeMap<(Principal, String), Setting>, // settings created by managers for users
     pub user_settings: BTreeMap<(Principal, String), Setting>, // settings created by users
-    pub balance: u128, // gas balance, TODO: https://internetcomputer.org/docs/current/developer-docs/gas-cost
+    pub gas_balance: u128, // gas balance, TODO: https://internetcomputer.org/docs/current/developer-docs/gas-cost
 }
 
 impl Namespace {
-    pub fn to_info(&self, key: String) -> NamespaceInfo {
+    pub fn to_info(&self, name: String) -> NamespaceInfo {
         NamespaceInfo {
-            key,
-            name: self.name.clone(),
+            name,
             desc: self.desc.clone(),
             created_at: self.created_at,
             updated_at: self.updated_at,
             max_payload_size: self.max_payload_size,
-            total_payload_size: self.total_payload_size,
+            payload_bytes_total: self.payload_bytes_total,
             status: self.status,
             visibility: self.visibility,
             managers: self.managers.clone(),
             auditors: self.auditors.clone(),
             users: self.users.clone(),
-            settings_count: self.settings.len() as u64,
-            user_settings_count: self.user_settings.len() as u64,
-            balance: self.balance,
+            settings_total: self.settings.len() as u64,
+            user_settings_total: self.user_settings.len() as u64,
+            gas_balance: self.gas_balance,
         }
     }
 
-    pub fn can_write_setting(&self, caller: &Principal, spk: &SettingPathKey) -> bool {
-        if self.status != 0 {
-            return false;
-        }
-
-        // only managers can create server side settings for any subject
-        if spk.1 == 0 {
-            return self.managers.contains(caller);
-        }
-
-        // users can create settings for themselves and update them
-        self.users.contains(caller) && caller == &spk.2
+    pub fn can_write_namespace(&self, caller: &Principal) -> bool {
+        self.status < 1 && self.managers.contains(caller)
     }
 
     pub fn can_read_namespace(&self, caller: &Principal) -> bool {
@@ -125,6 +114,20 @@ impl Namespace {
         self.managers.contains(caller)
             || self.auditors.contains(caller)
             || self.users.contains(caller)
+    }
+
+    pub fn can_write_setting(&self, caller: &Principal, spk: &SettingPathKey) -> bool {
+        if self.status != 0 {
+            return false;
+        }
+
+        // only managers can create server side settings for any subject
+        if spk.1 == 0 {
+            return self.managers.contains(caller);
+        }
+
+        // users can create settings for themselves and update them
+        self.users.contains(caller) && caller == &spk.2
     }
 
     fn partial_can_read_setting(&self, caller: &Principal, spk: &SettingPathKey) -> Option<bool> {
@@ -219,9 +222,9 @@ pub struct Setting {
 }
 
 impl Setting {
-    pub fn to_info(&self, subject: Principal, key: String) -> SettingInfo {
+    pub fn to_info(&self, subject: Principal, name: String) -> SettingInfo {
         SettingInfo {
-            key,
+            name,
             subject,
             desc: self.desc.clone(),
             created_at: self.created_at,
@@ -236,7 +239,7 @@ impl Setting {
     }
 }
 
-// SettingPathKey: (namespace key, 0 or 1, subject, setting key, version)
+// SettingPathKey: (namespace name, 0 or 1, subject, setting name, version)
 #[derive(Clone, Deserialize, Serialize, Ord, PartialOrd, Eq, PartialEq)]
 pub struct SettingPathKey(pub String, pub u8, pub Principal, pub String, pub u32);
 
@@ -246,7 +249,7 @@ impl SettingPathKey {
             val.ns,
             if val.user_owned { 1 } else { 0 },
             val.subject.unwrap_or(caller),
-            val.key,
+            val.name,
             val.version,
         )
     }
@@ -593,6 +596,65 @@ pub mod ns {
         })
     }
 
+    pub async fn create_namespace(
+        caller: &Principal,
+        input: CreateNamespaceInput,
+        now_ms: u64,
+    ) -> Result<NamespaceInfo, String> {
+        if !state::with(|s| s.managers.contains(caller)) {
+            Err("no permission".to_string())?;
+        }
+
+        let iv: [u8; 12] = rand_bytes().await.try_into().map_err(format_error)?;
+        NS.with(|r| {
+            let mut m = r.borrow_mut();
+            if m.contains_key(&input.name) {
+                Err(format!("namespace {} already exists", input.name))?;
+            }
+            let ns = Namespace {
+                desc: input.desc.unwrap_or_default(),
+                iv: iv.into(),
+                created_at: now_ms,
+                updated_at: now_ms,
+                max_payload_size: input.max_payload_size.unwrap_or(MAX_PAYLOAD_SIZE),
+                visibility: input.visibility,
+                managers: input.managers,
+                ..Default::default()
+            };
+
+            let info = ns.to_info(input.name.clone());
+            m.insert(input.name, ns);
+            Ok(info)
+        })
+    }
+
+    pub fn update_namespace_info(
+        caller: &Principal,
+        input: UpdateNamespaceInput,
+        now_ms: u64,
+    ) -> Result<(), String> {
+        with_mut(&input.name, |ns| {
+            if !ns.can_write_namespace(caller) {
+                Err("no permission".to_string())?;
+            }
+
+            if let Some(desc) = input.desc {
+                ns.desc = desc;
+            }
+            if let Some(max_payload_size) = input.max_payload_size {
+                ns.max_payload_size = max_payload_size;
+            }
+            if let Some(status) = input.status {
+                ns.status = status;
+            }
+            if let Some(visibility) = input.visibility {
+                ns.visibility = visibility;
+            }
+            ns.updated_at = now_ms;
+            Ok(())
+        })
+    }
+
     pub fn get_setting_info(
         caller: &Principal,
         spk: &SettingPathKey,
@@ -710,7 +772,7 @@ pub mod ns {
                 Err(format!("setting {} already exists", spk))?;
             }
 
-            ns.total_payload_size = ns.total_payload_size.saturating_add(size as u64);
+            ns.payload_bytes_total = ns.payload_bytes_total.saturating_add(size as u64);
             Ok(output)
         })
     }
@@ -777,17 +839,16 @@ pub mod ns {
                 }
             };
 
-            ns.total_payload_size = ns.total_payload_size.saturating_add(size as u64);
+            ns.payload_bytes_total = ns.payload_bytes_total.saturating_add(size as u64);
             Ok(output)
         })
     }
 
-    pub fn update_setting_info(
+    pub fn with_setting_mut<R>(
         caller: &Principal,
         spk: &SettingPathKey,
-        input: UpdateSettingInfoInput,
-        now_ms: u64,
-    ) -> Result<UpdateSettingOutput, String> {
+        f: impl FnOnce(&mut Setting) -> Result<R, String>,
+    ) -> Result<R, String> {
         with_mut(&spk.0, |ns| {
             if !ns.can_write_setting(caller, spk) {
                 Err("no permission".to_string())?;
@@ -801,7 +862,17 @@ pub mod ns {
             if setting.status == 1 {
                 Err("readonly setting can not be updated".to_string())?;
             }
+            f(setting)
+        })
+    }
 
+    pub fn update_setting_info(
+        caller: &Principal,
+        spk: &SettingPathKey,
+        input: UpdateSettingInfoInput,
+        now_ms: u64,
+    ) -> Result<UpdateSettingOutput, String> {
+        with_setting_mut(caller, spk, |setting| {
             if let Some(status) = input.status {
                 setting.status = status;
             }
