@@ -4,11 +4,11 @@ use ic_cose_types::{
     cose::{
         cwt::{ClaimsSet, Timestamp, SCOPE_NAME},
         encrypt0::try_decode_encrypt0,
-        format_error, sha256, sha3_256_n,
+        format_error, sha3_256_n,
         sign1::{cose_sign1, ES256K},
         CborSerializable,
     },
-    types::{namespace::*, setting::*, state::StateInfo, PublicKeyOutput},
+    types::{namespace::*, setting::*, state::StateInfo, PublicKeyOutput, SchnorrAlgorithm},
     ByteN,
 };
 use ic_stable_structures::{
@@ -26,8 +26,9 @@ use std::{
 };
 
 use crate::{
-    ecdsa::{derive_public_key, public_key_with, sign_with, ECDSAPublicKey},
+    ecdsa::{derive_public_key, ecdsa_public_key, sign_with_ecdsa},
     rand_bytes,
+    schnorr::{derive_schnorr_public_key, schnorr_public_key, sign_with_schnorr},
 };
 
 type Memory = VirtualMemory<DefaultMemoryImpl>;
@@ -36,8 +37,10 @@ type Memory = VirtualMemory<DefaultMemoryImpl>;
 pub struct State {
     pub name: String,
     pub ecdsa_key_name: String,
-    pub ecdsa_public_key: Option<ECDSAPublicKey>,
+    pub ecdsa_public_key: Option<PublicKeyOutput>,
     pub schnorr_key_name: String,
+    pub schnorr_ed25519_public_key: Option<PublicKeyOutput>,
+    pub schnorr_secp256k1_public_key: Option<PublicKeyOutput>,
     pub vetkd_key_name: String,
     pub managers: BTreeSet<Principal>, // managers can read and write namespaces, not settings
     // auditors can read and list namespaces and settings info even if it is private
@@ -350,24 +353,32 @@ pub mod state {
     }
 
     pub async fn init_ecdsa_public_key() {
-        let ecdsa_key_name = with(|r| {
-            if r.ecdsa_public_key.is_none() {
-                Some(r.ecdsa_key_name.clone())
-            } else {
-                None
-            }
-        });
+        let (ecdsa_key_name, schnorr_key_name) =
+            with(|r| (r.ecdsa_key_name.clone(), r.schnorr_key_name.clone()));
 
-        if let Some(ecdsa_key_name) = ecdsa_key_name {
-            let ecdsa_public_key = public_key_with(ecdsa_key_name, vec![])
+        let ecdsa_public_key = ecdsa_public_key(ecdsa_key_name, vec![])
+            .await
+            .unwrap_or_else(|err| {
+                ic_cdk::trap(&format!("failed to retrieve ECDSA public key: {err}"))
+            });
+        let schnorr_ed25519_public_key =
+            schnorr_public_key(schnorr_key_name.clone(), SchnorrAlgorithm::Ed25519, vec![])
                 .await
                 .unwrap_or_else(|err| {
                     ic_cdk::trap(&format!("failed to retrieve ECDSA public key: {err}"))
                 });
-            with_mut(|r| {
-                r.ecdsa_public_key = Some(ecdsa_public_key);
-            });
-        }
+        let schnorr_secp256k1_public_key =
+            schnorr_public_key(schnorr_key_name, SchnorrAlgorithm::Bip340Secp256k1, vec![])
+                .await
+                .unwrap_or_else(|err| {
+                    ic_cdk::trap(&format!("failed to retrieve ECDSA public key: {err}"))
+                });
+
+        with_mut(|r| {
+            r.ecdsa_public_key = Some(ecdsa_public_key);
+            r.schnorr_ed25519_public_key = Some(schnorr_ed25519_public_key);
+            r.schnorr_secp256k1_public_key = Some(schnorr_secp256k1_public_key);
+        });
     }
 
     pub fn load() {
@@ -412,6 +423,8 @@ pub mod state {
 }
 
 pub mod ns {
+    use ic_cose_types::cose::iana::Algorithm::EdDSA;
+
     use super::*;
 
     pub fn namespace_count() -> u64 {
@@ -459,16 +472,12 @@ pub mod ns {
                 path.push(namespace.to_bytes().to_vec());
                 path.push(ns.iv.to_vec());
                 path.extend(derivation_path.into_iter().map(|b| b.into_vec()));
-                let derived_pk = derive_public_key(pk, path);
-                Ok(PublicKeyOutput {
-                    public_key: ByteBuf::from(derived_pk.public_key),
-                    chain_code: ByteBuf::from(derived_pk.chain_code),
-                })
+                derive_public_key(pk, path)
             })
         })
     }
 
-    pub async fn ecdsa_sign(
+    pub async fn ecdsa_sign_with(
         caller: &Principal,
         namespace: String,
         derivation_path: Vec<ByteBuf>,
@@ -487,13 +496,70 @@ pub mod ns {
         path.push(namespace.to_bytes().to_vec());
         path.push(iv);
         path.extend(derivation_path.into_iter().map(|b| b.into_vec()));
-        let sig = sign_with(key_name, path, message.into_vec()).await?;
+        let sig = sign_with_ecdsa(key_name, path, message.into_vec()).await?;
+        Ok(ByteBuf::from(sig))
+    }
+
+    pub fn schnorr_public_key(
+        caller: &Principal,
+        alg: SchnorrAlgorithm,
+        namespace: String,
+        derivation_path: Vec<ByteBuf>,
+    ) -> Result<PublicKeyOutput, String> {
+        with(&namespace, |ns| {
+            if !ns.can_read_namespace(caller) {
+                Err("no permission".to_string())?;
+            }
+
+            state::with(|s| {
+                let pk = match alg {
+                    SchnorrAlgorithm::Bip340Secp256k1 => s
+                        .schnorr_secp256k1_public_key
+                        .as_ref()
+                        .ok_or("no schnorr secp256k1 public key")?,
+                    SchnorrAlgorithm::Ed25519 => s
+                        .schnorr_ed25519_public_key
+                        .as_ref()
+                        .ok_or("no schnorr ed25519 public key")?,
+                };
+                let mut path: Vec<Vec<u8>> = Vec::with_capacity(derivation_path.len() + 3);
+                path.push(b"Schnorr_Signing".to_vec());
+                path.push(namespace.to_bytes().to_vec());
+                path.push(ns.iv.to_vec());
+                path.extend(derivation_path.into_iter().map(|b| b.into_vec()));
+                derive_schnorr_public_key(alg, pk, path)
+            })
+        })
+    }
+
+    pub async fn schnorr_sign_with(
+        caller: &Principal,
+        alg: SchnorrAlgorithm,
+        namespace: String,
+        derivation_path: Vec<ByteBuf>,
+        message: ByteBuf,
+    ) -> Result<ByteBuf, String> {
+        let iv = with(&namespace, |ns| {
+            if !ns.has_ns_signing_permission(caller) {
+                Err("no permission".to_string())?;
+            }
+            Ok(ns.iv.to_vec())
+        })?;
+
+        let key_name = state::with(|s| s.ecdsa_key_name.clone());
+        let mut path: Vec<Vec<u8>> = Vec::with_capacity(derivation_path.len() + 3);
+        path.push(b"Schnorr_Signing".to_vec());
+        path.push(namespace.to_bytes().to_vec());
+        path.push(iv);
+        path.extend(derivation_path.into_iter().map(|b| b.into_vec()));
+        let sig = sign_with_schnorr(key_name, alg, path, message.into_vec()).await?;
         Ok(ByteBuf::from(sig))
     }
 
     const CWT_EXPIRATION_SECONDS: i64 = 3600;
-    pub async fn ecdsa_sign_identity(
+    pub async fn sign_identity(
         caller: &Principal,
+        algorithm: SchnorrAlgorithm,
         namespace: String,
         audience: String,
         now_ms: u64,
@@ -535,10 +601,13 @@ pub mod ns {
             rest: vec![(SCOPE_NAME.clone(), permission.into())],
         };
         let payload = claims.to_vec().map_err(format_error)?;
-        let mut sign1 = cose_sign1(payload, ES256K, None)?;
+        let alg = match algorithm {
+            SchnorrAlgorithm::Ed25519 => EdDSA,
+            SchnorrAlgorithm::Bip340Secp256k1 => ES256K,
+        };
+        let mut sign1 = cose_sign1(payload, alg, None)?;
         let tbs_data = sign1.tbs_data(caller.as_slice());
-        let message_hash = sha256(&tbs_data);
-        let sig = sign_with(key_name, vec![], message_hash.to_vec()).await?;
+        let sig = sign_with_schnorr(key_name, algorithm, vec![], tbs_data).await?;
         sign1.signature = sig;
         let token = sign1.to_vec().map_err(format_error)?;
         Ok(ByteBuf::from(token))
@@ -557,7 +626,7 @@ pub mod ns {
             spk.0.to_bytes().to_vec(),
         ];
         let message_hash = sha3_256_n([iv, partial_key]);
-        let sig = sign_with(key_name, derivation_path, message_hash.to_vec()).await?;
+        let sig = sign_with_ecdsa(key_name, derivation_path, message_hash.to_vec()).await?;
         Ok(sha3_256_n([&sig, partial_key]))
     }
 

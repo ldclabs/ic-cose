@@ -3,7 +3,10 @@ use ic_cose_types::{
         cose_aes256_key, ecdh::ecdh_x25519, encrypt0::cose_encrypt0, format_error, mac3_256,
         CborSerializable,
     },
-    types::{CosePath, ECDHInput, ECDHOutput, PublicKeyInput, PublicKeyOutput, SignInput},
+    types::{
+        CosePath, ECDHInput, ECDHOutput, PublicKeyInput, PublicKeyOutput, SchnorrAlgorithm,
+        SignInput,
+    },
     validate_key, MILLISECONDS,
 };
 use serde_bytes::ByteBuf;
@@ -18,10 +21,7 @@ fn ecdsa_public_key(input: Option<PublicKeyInput>) -> Result<PublicKeyOutput, St
         None => store::state::with(|s| {
             s.ecdsa_public_key
                 .as_ref()
-                .map(|k| PublicKeyOutput {
-                    public_key: ByteBuf::from(k.public_key.clone()),
-                    chain_code: ByteBuf::from(k.chain_code.clone()),
-                })
+                .cloned()
                 .ok_or_else(|| "failed to retrieve ECDSA public key".to_string())
         }),
     }
@@ -30,32 +30,64 @@ fn ecdsa_public_key(input: Option<PublicKeyInput>) -> Result<PublicKeyOutput, St
 #[ic_cdk::update(guard = "is_authenticated")]
 async fn ecdsa_sign(input: SignInput) -> Result<ByteBuf, String> {
     let caller = ic_cdk::caller();
-    store::ns::ecdsa_sign(&caller, input.ns, input.derivation_path, input.message).await
+    store::ns::ecdsa_sign_with(&caller, input.ns, input.derivation_path, input.message).await
 }
 
 #[ic_cdk::query]
 fn schnorr_public_key(
-    _algorithm: String,
-    _input: Option<PublicKeyInput>,
+    algorithm: SchnorrAlgorithm,
+    input: Option<PublicKeyInput>,
 ) -> Result<PublicKeyOutput, String> {
-    Err("not implemented".to_string())
+    let caller = ic_cdk::caller();
+    match input {
+        Some(input) => {
+            store::ns::schnorr_public_key(&caller, algorithm, input.ns, input.derivation_path)
+        }
+        None => store::state::with(|s| match algorithm {
+            SchnorrAlgorithm::Bip340Secp256k1 => s
+                .schnorr_secp256k1_public_key
+                .as_ref()
+                .cloned()
+                .ok_or_else(|| "failed to retrieve schnorr secp256k1 public key".to_string()),
+            SchnorrAlgorithm::Ed25519 => s
+                .schnorr_ed25519_public_key
+                .as_ref()
+                .cloned()
+                .ok_or_else(|| "failed to retrieve schnorr ed25519 public key".to_string()),
+        }),
+    }
 }
 
 #[ic_cdk::update(guard = "is_authenticated")]
-async fn schnorr_sign(_algorithm: String, _input: SignInput) -> Result<ByteBuf, String> {
-    Err("not implemented".to_string())
+async fn schnorr_sign(algorithm: SchnorrAlgorithm, input: SignInput) -> Result<ByteBuf, String> {
+    let caller = ic_cdk::caller();
+    store::ns::schnorr_sign_with(
+        &caller,
+        algorithm,
+        input.ns,
+        input.derivation_path,
+        input.message,
+    )
+    .await
 }
 
 #[ic_cdk::update(guard = "is_authenticated")]
 async fn sign_identity(
     namespace: String,
     audience: String,
-    _algorithm: Option<String>,
+    algorithm: Option<SchnorrAlgorithm>,
 ) -> Result<ByteBuf, String> {
     validate_key(&namespace)?;
     let caller = ic_cdk::caller();
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
-    store::ns::ecdsa_sign_identity(&caller, namespace, audience, now_ms).await
+    store::ns::sign_identity(
+        &caller,
+        algorithm.unwrap_or(SchnorrAlgorithm::Ed25519),
+        namespace,
+        audience,
+        now_ms,
+    )
+    .await
 }
 
 #[ic_cdk::update(guard = "is_authenticated")]

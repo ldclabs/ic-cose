@@ -68,6 +68,7 @@ type Result_6 = variant { Ok : vec NamespaceInfo; Err : text };
 type Result_7 = variant { Ok : CreateSettingOutput; Err : text };
 type Result_8 = variant { Ok : SettingInfo; Err : text };
 type Result_9 = variant { Ok : SettingArchivedPayload; Err : text };
+type SchnorrAlgorithm = variant { ed25519; bip340secp256k1 };
 type SettingArchivedPayload = record {
   dek : opt blob;
   version : nat32;
@@ -150,8 +151,10 @@ service : (opt ChainArgs) -> {
   namespace_remove_managers : (text, vec principal) -> (Result);
   namespace_remove_users : (text, vec principal) -> (Result);
   namespace_update_info : (UpdateNamespaceInput) -> (Result);
-  schnorr_public_key : (text, opt PublicKeyInput) -> (Result_4) query;
-  schnorr_sign : (text, SignInput) -> (Result_5);
+  schnorr_public_key : (SchnorrAlgorithm, opt PublicKeyInput) -> (
+      Result_4,
+    ) query;
+  schnorr_sign : (SchnorrAlgorithm, SignInput) -> (Result_5);
   setting_add_readers : (SettingPath, vec principal) -> (Result);
   setting_create : (SettingPath, CreateSettingInput) -> (Result_7);
   setting_get : (SettingPath) -> (Result_8) query;
@@ -159,7 +162,7 @@ service : (opt ChainArgs) -> {
   setting_get_info : (SettingPath) -> (Result_8) query;
   setting_remove_readers : (SettingPath, vec principal) -> (Result);
   setting_update_info : (SettingPath, UpdateSettingInfoInput) -> (Result_7);
-  sign_identity : (text, text, opt text) -> (Result_5);
+  sign_identity : (text, text, opt SchnorrAlgorithm) -> (Result_5);
   state_get_info : () -> (Result_10) query;
   update_setting_payload : (SettingPath, UpdateSettingPayloadInput) -> (
       Result_7,

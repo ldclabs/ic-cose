@@ -11,6 +11,7 @@ mod api_init;
 mod api_namespace;
 mod api_setting;
 mod ecdsa;
+mod schnorr;
 mod store;
 
 use api_init::ChainArgs;

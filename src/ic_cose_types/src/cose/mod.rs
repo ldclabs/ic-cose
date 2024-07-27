@@ -5,9 +5,9 @@ use sha3::{Digest, Sha3_256};
 pub mod aes;
 pub mod cwt;
 pub mod ecdh;
-pub mod ecdsa;
 pub mod ed25519;
 pub mod encrypt0;
+pub mod k256;
 pub mod sign1;
 
 pub use coset::{iana, CborSerializable, CoseKey};

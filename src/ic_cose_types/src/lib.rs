@@ -11,6 +11,7 @@ pub mod cose;
 pub mod types;
 
 pub use bytes::*;
+pub use cose::format_error;
 
 pub static ANONYMOUS: Principal = Principal::anonymous();
 pub const MILLISECONDS: u64 = 1_000_000u64;

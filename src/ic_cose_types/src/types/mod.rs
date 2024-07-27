@@ -10,7 +10,16 @@ pub mod state;
 use crate::{bytes::ByteN, validate_key};
 
 // should update to ICRC3Map
-pub type MapValue = BTreeMap<String, icrc_ledger_types::icrc::generic_value::Value>;
+pub type MapValue =
+    BTreeMap<String, icrc_ledger_types::icrc::generic_metadata_value::MetadataValue>;
+
+#[derive(CandidType, Deserialize, Serialize, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SchnorrAlgorithm {
+    #[serde(rename = "bip340secp256k1")]
+    Bip340Secp256k1,
+    #[serde(rename = "ed25519")]
+    Ed25519,
+}
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct PublicKeyInput {
