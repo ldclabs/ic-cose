@@ -126,3 +126,23 @@ fn namespace_remove_users(namespace: String, args: BTreeSet<Principal>) -> Resul
         Ok(())
     })
 }
+
+const MIN_CYCLES: u128 = 1_000_000_000_000;
+
+#[ic_cdk::update(guard = "is_authenticated")]
+fn namespace_top_up(namespace: String, cycles: u128) -> Result<u128, String> {
+    if cycles < MIN_CYCLES {
+        Err("cycles should be greater than 1T".to_string())?;
+    }
+    if cycles > ic_cdk::api::call::msg_cycles_available128() {
+        Err("insufficient cycles".to_string())?;
+    }
+
+    let now_ms = ic_cdk::api::time() / MILLISECONDS;
+    store::ns::with_mut(&namespace, |ns| {
+        let received = ic_cdk::api::call::msg_cycles_accept128(cycles);
+        ns.gas_balance = ns.gas_balance.saturating_add(received);
+        ns.updated_at = now_ms;
+        Ok(received)
+    })
+}
