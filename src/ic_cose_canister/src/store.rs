@@ -597,8 +597,7 @@ pub mod ns {
 
         let key_name = state::with(|s| s.ecdsa_key_name.clone());
         let now_sec = (now_ms / 1000) as i64;
-        let mut cwt_id = rand_bytes().await;
-        cwt_id.truncate(16);
+        let cwt_id: [u8; 16] = rand_bytes().await?;
         let claims = ClaimsSet {
             issuer: Some(ic_cdk::id().to_text()),
             subject: Some(caller.to_text()),
@@ -606,7 +605,7 @@ pub mod ns {
             expiration_time: Some(Timestamp::WholeSeconds(now_sec + CWT_EXPIRATION_SECONDS)),
             not_before: Some(Timestamp::WholeSeconds(now_sec)),
             issued_at: Some(Timestamp::WholeSeconds(now_sec)),
-            cwt_id: Some(cwt_id),
+            cwt_id: Some(cwt_id.into()),
             rest: vec![(SCOPE_NAME.clone(), permission.into())],
         };
         let payload = claims.to_vec().map_err(format_error)?;
@@ -686,9 +685,7 @@ pub mod ns {
             Err("no permission".to_string())?;
         }
 
-        let mut iv = rand_bytes().await;
-        iv.truncate(12);
-        let iv: [u8; 12] = iv.try_into().map_err(format_error)?;
+        let iv: [u8; 12] = rand_bytes().await?;
         NS.with(|r| {
             let mut m = r.borrow_mut();
             if m.contains_key(&input.name) {

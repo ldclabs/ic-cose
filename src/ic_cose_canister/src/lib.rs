@@ -1,6 +1,7 @@
 use candid::Principal;
 use ic_cose_types::{
-    types::namespace::*, types::setting::*, types::state::StateInfo, types::*, ANONYMOUS,
+    format_error, types::namespace::*, types::setting::*, types::state::StateInfo, types::*,
+    ANONYMOUS,
 };
 use serde_bytes::ByteBuf;
 use std::collections::BTreeSet;
@@ -33,11 +34,12 @@ fn is_authenticated() -> Result<(), String> {
     }
 }
 
-async fn rand_bytes() -> Vec<u8> {
-    let (rr,) = ic_cdk::api::management_canister::main::raw_rand()
+async fn rand_bytes<const N: usize>() -> Result<[u8; N], String> {
+    let (mut data,) = ic_cdk::api::management_canister::main::raw_rand()
         .await
-        .expect("failed to get random bytes");
-    rr
+        .map_err(format_error)?;
+    data.truncate(N);
+    data.try_into().map_err(format_error)
 }
 
 #[cfg(all(

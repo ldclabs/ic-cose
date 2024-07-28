@@ -64,7 +64,7 @@ async fn ecdh_setting_get(
         }
     };
 
-    let secret_key = rand_bytes().await;
+    let secret_key: [u8; 32] = rand_bytes().await?;
     let secret_key = mac3_256(&secret_key, ecdh.nonce.as_ref());
     let (shared_secret, public_key) = ecdh_x25519(secret_key, *ecdh.public_key);
     let payload = cose_encrypt0(data.as_ref(), shared_secret.as_bytes(), aad, *ecdh.nonce)?;

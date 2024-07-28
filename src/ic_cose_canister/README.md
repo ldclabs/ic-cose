@@ -99,6 +99,8 @@ dfx canister call ic_cose_canister ecdsa_public_key '(opt record {
   ns = "testing";
   derivation_path = vec {};
 })'
+
+dfx canister call ic_cose_canister namespace_add_users "(\"testing\", vec {principal \"hpudd-yqaaa-aaaap-ahnbq-cai\"})"
 ```
 
 ## License

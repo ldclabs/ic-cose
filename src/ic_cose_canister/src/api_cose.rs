@@ -114,7 +114,7 @@ async fn ecdh_encrypted_cose_key(
     let kek = cose_aes256_key(kek);
     let kek = kek.to_vec().map_err(format_error)?;
 
-    let secret_key = rand_bytes().await;
+    let secret_key: [u8; 32] = rand_bytes().await?;
     let secret_key = mac3_256(&secret_key, ecdh.nonce.as_ref());
     let (shared_secret, public_key) = ecdh_x25519(secret_key, *ecdh.public_key);
     let key = cose_encrypt0(&kek, shared_secret.as_bytes(), aad, *ecdh.nonce)?;
