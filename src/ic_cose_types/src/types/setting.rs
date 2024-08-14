@@ -47,7 +47,7 @@ impl From<CosePath> for SettingPath {
             ns: input.ns,
             user_owned: input.user_owned,
             subject: input.subject,
-            name: input.name.unwrap_or_default(),
+            name: "".to_string(),
             version: 0,
         }
     }

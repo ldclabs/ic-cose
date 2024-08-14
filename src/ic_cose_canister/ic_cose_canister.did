@@ -2,7 +2,7 @@ type ChainArgs = variant { Upgrade : UpgradeArgs; Init : InitArgs };
 type CosePath = record {
   ns : text;
   subject : opt principal;
-  name : opt text;
+  key_id : opt blob;
   user_owned : bool;
 };
 type CreateNamespaceInput = record {

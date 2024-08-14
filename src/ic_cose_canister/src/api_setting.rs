@@ -2,7 +2,7 @@ use candid::Principal;
 use ic_cose_types::{
     cose::{
         ecdh::ecdh_x25519,
-        encrypt0::{cose_decrypt0, cose_encrypt0},
+        encrypt0::{cose_decrypt0, cose_encrypt0, decrypt, try_decode_encrypt0},
         format_error, get_cose_key_secret, mac3_256, CborSerializable, CoseKey,
     },
     types::{setting::*, ECDHInput, ECDHOutput},
@@ -55,9 +55,16 @@ async fn ecdh_setting_get(
     let data = match info.dek {
         None => OwnedRef::Ref(payload),
         Some(ref dek) => {
+            let dek = try_decode_encrypt0(dek)?;
             let partial_key = ecdh.partial_key.ok_or("missing partial key")?;
-            let key = store::ns::inner_ecdsa_setting_kek(&spk, &iv, partial_key.as_ref()).await?;
-            let key = cose_decrypt0(dek, &key, aad)?;
+            let key = store::ns::inner_ecdsa_setting_kek(
+                &spk,
+                &iv,
+                partial_key.as_ref(),
+                dek.unprotected.key_id.clone(),
+            )
+            .await?;
+            let key = decrypt(dek, &key, aad)?;
             let key = CoseKey::from_slice(&key).map_err(format_error)?;
             let key = get_cose_key_secret(key)?;
             OwnedRef::Owned(cose_decrypt0(payload, &key, aad)?)
@@ -67,7 +74,13 @@ async fn ecdh_setting_get(
     let secret_key: [u8; 32] = rand_bytes().await?;
     let secret_key = mac3_256(&secret_key, ecdh.nonce.as_ref());
     let (shared_secret, public_key) = ecdh_x25519(secret_key, *ecdh.public_key);
-    let payload = cose_encrypt0(data.as_ref(), shared_secret.as_bytes(), aad, *ecdh.nonce)?;
+    let payload = cose_encrypt0(
+        data.as_ref(),
+        shared_secret.as_bytes(),
+        aad,
+        *ecdh.nonce,
+        None,
+    )?;
     info.payload = Some(payload);
     Ok(ECDHOutput {
         payload: info,

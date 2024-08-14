@@ -575,16 +575,16 @@ pub mod ns {
     ) -> Result<ByteBuf, String> {
         let permission = with(&namespace, |ns| {
             if ns.managers.contains(caller) {
-                Ok(format!("Namespace.All:{}", namespace))
+                Ok(format!("Namespace.*:{}", namespace))
             } else if ns.users.contains(caller) {
                 if ns.auditors.contains(caller) {
                     Ok(format!(
-                        "Namespace.Read:{} Namespace.All.SubjectedSetting:{}",
+                        "Namespace.Read:{} Namespace.*.SubjectedSetting:{}",
                         namespace, namespace
                     ))
                 } else {
                     Ok(format!(
-                        "Namespace.Read.Info:{} Namespace.All.SubjectedSetting:{}",
+                        "Namespace.Read.Info:{} Namespace.*.SubjectedSetting:{}",
                         namespace, namespace
                     ))
                 }
@@ -628,6 +628,7 @@ pub mod ns {
         spk: &SettingPathKey,
         iv: &[u8],
         partial_key: &[u8],
+        key_id: Vec<u8>,
     ) -> Result<[u8; 32], String> {
         let key_name = state::with(|r| r.ecdsa_key_name.clone());
         let derivation_path = vec![
@@ -635,6 +636,7 @@ pub mod ns {
             spk.2.to_bytes().to_vec(),
             vec![spk.1],
             spk.0.to_bytes().to_vec(),
+            key_id,
         ];
         let message_hash = sha3_256_n([iv, partial_key]);
         let sig = sign_with_ecdsa(key_name, derivation_path, message_hash.to_vec()).await?;

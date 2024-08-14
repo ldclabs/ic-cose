@@ -64,15 +64,12 @@ pub struct CosePath {
     pub ns: String,
     pub user_owned: bool,
     pub subject: Option<Principal>, // default is caller
-    pub name: Option<String>,       // setting name
+    pub key_id: Option<ByteBuf>,    // KEK key_id
 }
 
 impl CosePath {
     pub fn validate(&self) -> Result<(), String> {
         validate_key(&self.ns)?;
-        if let Some(ref name) = self.name {
-            validate_key(name)?;
-        }
         Ok(())
     }
 }
