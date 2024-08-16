@@ -7,7 +7,6 @@
 
 A imaginative use case is serving as a state persistence service for enclaves running in Trusted Execution Environments (TEEs), aiding in loading confidential data during startup and persisting confidential data states during runtime.
 
-
 **Online Demo**: https://a4gq6-oaaaa-aaaab-qaa4q-cai.raw.icp0.io/?id=53cyg-yyaaa-aaaap-ahpua-cai
 
 ## Features

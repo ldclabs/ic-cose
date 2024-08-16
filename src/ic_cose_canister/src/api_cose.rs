@@ -33,15 +33,6 @@ async fn ecdsa_sign(input: SignInput) -> Result<ByteBuf, String> {
     store::ns::ecdsa_sign_with(&caller, input.ns, input.derivation_path, input.message).await
 }
 
-#[ic_cdk::update(guard = "is_authenticated")]
-async fn ecdsa_sign_identity(input: SignIdentityInput) -> Result<ByteBuf, String> {
-    validate_key(&input.ns)?;
-
-    let caller = ic_cdk::caller();
-    let now_ms = ic_cdk::api::time() / MILLISECONDS;
-    store::ns::sign_identity(&caller, input.ns, input.audience, now_ms, None).await
-}
-
 #[ic_cdk::query]
 fn schnorr_public_key(
     algorithm: SchnorrAlgorithm,
@@ -89,19 +80,20 @@ async fn schnorr_sign_identity(
 
     let caller = ic_cdk::caller();
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
-    store::ns::sign_identity(&caller, input.ns, input.audience, now_ms, Some(algorithm)).await
+    store::ns::sign_identity(&caller, input.ns, input.audience, now_ms, algorithm).await
 }
 
+/// ecdh_encrypted_cose_key returns a permanent partial KEK encrypted with ECDH.
+/// It should be used with a local partial key to derive a full KEK.
 #[ic_cdk::update(guard = "is_authenticated")]
 async fn ecdh_encrypted_cose_key(
     path: CosePath,
     ecdh: ECDHInput,
 ) -> Result<ECDHOutput<ByteBuf>, String> {
     path.validate()?;
-    let partial_key = ecdh.partial_key.ok_or("missing partial key")?;
 
     let caller = ic_cdk::caller();
-    let key_id = path.key_id.clone().unwrap_or_default().to_vec();
+    let key_id = path.key_id.clone();
     let spk = store::SettingPathKey::from_path(path.into(), caller);
     let iv = store::ns::with(&spk.0, |ns| {
         if !ns.has_setting_kek_permission(&caller, &spk) {
@@ -111,8 +103,8 @@ async fn ecdh_encrypted_cose_key(
     })?;
 
     let aad = spk.2.as_slice();
-    let kek = store::ns::inner_ecdsa_setting_kek(&spk, &iv, partial_key.as_ref(), key_id).await?;
-    let kek = cose_aes256_key(kek);
+    let kek = store::ns::inner_setting_kek(&spk, &iv, &key_id).await?;
+    let kek = cose_aes256_key(kek, key_id.to_vec());
     let kek = kek.to_vec().map_err(format_error)?;
 
     let secret_key: [u8; 32] = rand_bytes().await?;

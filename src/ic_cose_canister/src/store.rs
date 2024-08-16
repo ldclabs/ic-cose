@@ -4,7 +4,7 @@ use ic_cose_types::{
     cose::{
         cwt::{ClaimsSet, Timestamp, SCOPE_NAME},
         encrypt0::try_decode_encrypt0,
-        format_error, sha3_256_n,
+        format_error, mac3_256, sha256,
         sign1::{cose_sign1, ES256K},
         CborSerializable,
     },
@@ -218,7 +218,7 @@ pub struct Setting {
     pub desc: String,
     pub created_at: u64, // unix timestamp in milliseconds
     pub updated_at: u64, // unix timestamp in milliseconds
-    pub status: i8, // -1: archived; 0: readable and writable; 1: readonlypub auditors: BTreeSet<Principal>,
+    pub status: i8,      // -1: archived; 0: readable and writable; 1: readonly
     pub version: u32,
     pub readers: BTreeSet<Principal>, // readers can read the setting
     pub tags: BTreeMap<String, String>, // tags for query
@@ -432,7 +432,7 @@ pub mod state {
 }
 
 pub mod ns {
-    use ic_cose_types::cose::{iana::Algorithm::EdDSA, sha256};
+    use ic_cose_types::cose::iana::Algorithm::EdDSA;
 
     use super::*;
 
@@ -477,9 +477,8 @@ pub mod ns {
             state::with(|s| {
                 let pk = s.ecdsa_public_key.as_ref().ok_or("no ecdsa public key")?;
                 let mut path: Vec<Vec<u8>> = Vec::with_capacity(derivation_path.len() + 3);
-                path.push(b"Secp256k1_Signing".to_vec());
+                path.push(b"ECDSA_Signing".to_vec());
                 path.push(namespace.to_bytes().to_vec());
-                path.push(ns.iv.to_vec());
                 path.extend(derivation_path.into_iter().map(|b| b.into_vec()));
                 derive_public_key(pk, path)
             })
@@ -492,18 +491,17 @@ pub mod ns {
         derivation_path: Vec<ByteBuf>,
         message: ByteBuf,
     ) -> Result<ByteBuf, String> {
-        let iv = with(&namespace, |ns| {
+        with(&namespace, |ns| {
             if !ns.has_ns_signing_permission(caller) {
                 Err("no permission".to_string())?;
             }
-            Ok(ns.iv.to_vec())
+            Ok(())
         })?;
 
         let key_name = state::with(|s| s.ecdsa_key_name.clone());
         let mut path: Vec<Vec<u8>> = Vec::with_capacity(derivation_path.len() + 3);
-        path.push(b"Secp256k1_Signing".to_vec());
+        path.push(b"ECDSA_Signing".to_vec());
         path.push(namespace.to_bytes().to_vec());
-        path.push(iv);
         path.extend(derivation_path.into_iter().map(|b| b.into_vec()));
         let sig = sign_with_ecdsa(key_name, path, message.into_vec()).await?;
         Ok(ByteBuf::from(sig))
@@ -534,7 +532,6 @@ pub mod ns {
                 let mut path: Vec<Vec<u8>> = Vec::with_capacity(derivation_path.len() + 3);
                 path.push(b"Schnorr_Signing".to_vec());
                 path.push(namespace.to_bytes().to_vec());
-                path.push(ns.iv.to_vec());
                 path.extend(derivation_path.into_iter().map(|b| b.into_vec()));
                 derive_schnorr_public_key(alg, pk, path)
             })
@@ -548,18 +545,17 @@ pub mod ns {
         derivation_path: Vec<ByteBuf>,
         message: ByteBuf,
     ) -> Result<ByteBuf, String> {
-        let iv = with(&namespace, |ns| {
+        with(&namespace, |ns| {
             if !ns.has_ns_signing_permission(caller) {
                 Err("no permission".to_string())?;
             }
-            Ok(ns.iv.to_vec())
+            Ok(())
         })?;
 
-        let key_name = state::with(|s| s.ecdsa_key_name.clone());
+        let key_name = state::with(|s| s.schnorr_key_name.clone());
         let mut path: Vec<Vec<u8>> = Vec::with_capacity(derivation_path.len() + 3);
         path.push(b"Schnorr_Signing".to_vec());
         path.push(namespace.to_bytes().to_vec());
-        path.push(iv);
         path.extend(derivation_path.into_iter().map(|b| b.into_vec()));
         let sig = sign_with_schnorr(key_name, alg, path, message.into_vec()).await?;
         Ok(ByteBuf::from(sig))
@@ -571,7 +567,7 @@ pub mod ns {
         namespace: String,
         audience: String,
         now_ms: u64,
-        algorithm: Option<SchnorrAlgorithm>,
+        algorithm: SchnorrAlgorithm,
     ) -> Result<ByteBuf, String> {
         let permission = with(&namespace, |ns| {
             if ns.managers.contains(caller) {
@@ -595,7 +591,7 @@ pub mod ns {
             }
         })?;
 
-        let key_name = state::with(|s| s.ecdsa_key_name.clone());
+        let key_name = state::with(|s| s.schnorr_key_name.clone());
         let now_sec = (now_ms / 1000) as i64;
         let cwt_id: [u8; 16] = rand_bytes().await?;
         let claims = ClaimsSet {
@@ -610,37 +606,41 @@ pub mod ns {
         };
         let payload = claims.to_vec().map_err(format_error)?;
         let alg = match algorithm {
-            None | Some(SchnorrAlgorithm::Ed25519) => EdDSA,
-            Some(SchnorrAlgorithm::Bip340Secp256k1) => ES256K,
+            SchnorrAlgorithm::Ed25519 => EdDSA,
+            SchnorrAlgorithm::Bip340Secp256k1 => ES256K,
         };
         let mut sign1 = cose_sign1(payload, alg, None)?;
-        let tbs_data = sign1.tbs_data(caller.as_slice());
-        let sig = match algorithm {
-            None => sign_with_ecdsa(key_name, vec![], sha256(&tbs_data).to_vec()).await?,
-            Some(alg) => sign_with_schnorr(key_name, alg, vec![], tbs_data).await?,
-        };
+        let mut tbs_data = sign1.tbs_data(caller.as_slice());
+        if algorithm == SchnorrAlgorithm::Bip340Secp256k1 {
+            tbs_data = sha256(&tbs_data).to_vec();
+        }
+        let sig = sign_with_schnorr(key_name, algorithm, vec![], tbs_data).await?;
         sign1.signature = sig;
         let token = sign1.to_vec().map_err(format_error)?;
         Ok(ByteBuf::from(token))
     }
 
-    pub async fn inner_ecdsa_setting_kek(
+    pub async fn inner_setting_kek(
         spk: &SettingPathKey,
         iv: &[u8],
-        partial_key: &[u8],
-        key_id: Vec<u8>,
+        key_id: &[u8],
     ) -> Result<[u8; 32], String> {
-        let key_name = state::with(|r| r.ecdsa_key_name.clone());
+        let key_name = state::with(|r| r.schnorr_key_name.clone());
         let derivation_path = vec![
-            b"COSE_Encrypt0_KEK".to_vec(),
+            b"COSE_Encrypt0_KEY".to_vec(),
             spk.2.to_bytes().to_vec(),
             vec![spk.1],
             spk.0.to_bytes().to_vec(),
-            key_id,
         ];
-        let message_hash = sha3_256_n([iv, partial_key]);
-        let sig = sign_with_ecdsa(key_name, derivation_path, message_hash.to_vec()).await?;
-        Ok(sha3_256_n([&sig, partial_key]))
+        let message = mac3_256(iv, key_id);
+        let sig = sign_with_schnorr(
+            key_name,
+            SchnorrAlgorithm::Ed25519,
+            derivation_path,
+            message.to_vec(),
+        )
+        .await?;
+        Ok(mac3_256(iv, &sig))
     }
 
     pub fn get_namespace(caller: &Principal, namespace: String) -> Result<NamespaceInfo, String> {

@@ -1,16 +1,8 @@
 use candid::Principal;
-use ic_cose_types::{
-    cose::{
-        ecdh::ecdh_x25519,
-        encrypt0::{cose_decrypt0, cose_encrypt0, decrypt, try_decode_encrypt0},
-        format_error, get_cose_key_secret, mac3_256, CborSerializable, CoseKey,
-    },
-    types::{setting::*, ECDHInput, ECDHOutput},
-    validate_principals, OwnedRef, MILLISECONDS,
-};
+use ic_cose_types::{types::setting::*, validate_principals, MILLISECONDS};
 use std::collections::BTreeSet;
 
-use crate::{is_authenticated, rand_bytes, store};
+use crate::{is_authenticated, store};
 
 #[ic_cdk::query]
 fn setting_get_info(path: SettingPath) -> Result<SettingInfo, String> {
@@ -36,56 +28,6 @@ fn setting_get_archived_payload(path: SettingPath) -> Result<SettingArchivedPayl
     let caller = ic_cdk::caller();
     let spk = store::SettingPathKey::from_path(path, caller);
     store::ns::get_setting_archived_payload(&caller, &spk)
-}
-
-#[ic_cdk::update(guard = "is_authenticated")]
-async fn ecdh_setting_get(
-    path: SettingPath,
-    ecdh: ECDHInput,
-) -> Result<ECDHOutput<SettingInfo>, String> {
-    path.validate()?;
-
-    let caller = ic_cdk::caller();
-    let subject = path.subject.unwrap_or(caller);
-    let spk = store::SettingPathKey::from_path(path, subject);
-    let (mut info, iv) = store::ns::get_setting(&caller, &spk)?;
-
-    let aad = spk.2.as_slice();
-    let payload = info.payload.as_ref().ok_or("missing payload")?;
-    let data = match info.dek {
-        None => OwnedRef::Ref(payload),
-        Some(ref dek) => {
-            let dek = try_decode_encrypt0(dek)?;
-            let partial_key = ecdh.partial_key.ok_or("missing partial key")?;
-            let key = store::ns::inner_ecdsa_setting_kek(
-                &spk,
-                &iv,
-                partial_key.as_ref(),
-                dek.unprotected.key_id.clone(),
-            )
-            .await?;
-            let key = decrypt(dek, &key, aad)?;
-            let key = CoseKey::from_slice(&key).map_err(format_error)?;
-            let key = get_cose_key_secret(key)?;
-            OwnedRef::Owned(cose_decrypt0(payload, &key, aad)?)
-        }
-    };
-
-    let secret_key: [u8; 32] = rand_bytes().await?;
-    let secret_key = mac3_256(&secret_key, ecdh.nonce.as_ref());
-    let (shared_secret, public_key) = ecdh_x25519(secret_key, *ecdh.public_key);
-    let payload = cose_encrypt0(
-        data.as_ref(),
-        shared_secret.as_bytes(),
-        aad,
-        *ecdh.nonce,
-        None,
-    )?;
-    info.payload = Some(payload);
-    Ok(ECDHOutput {
-        payload: info,
-        public_key: public_key.to_bytes().into(),
-    })
 }
 
 #[ic_cdk::update(guard = "is_authenticated")]

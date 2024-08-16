@@ -21,7 +21,7 @@ pub struct SettingInfo {
     pub readers: BTreeSet<Principal>, // readers can read the setting
     pub tags: BTreeMap<String, String>, // tags for query
     pub dek: Option<ByteBuf>, // Data Encryption Key that encrypted by BYOK or vetKey in COSE_Encrypt0
-    pub payload: Option<ByteBuf>, // plain payload
+    pub payload: Option<ByteBuf>, // encrypted or plain payload
 }
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]

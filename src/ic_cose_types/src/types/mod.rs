@@ -48,9 +48,8 @@ pub struct SignIdentityInput {
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ECDHInput {
-    pub nonce: ByteN<12>,               // should be random for each request
-    pub public_key: ByteN<32>,          // client side ECDH public key
-    pub partial_key: Option<ByteN<32>>, // should provide for encrypted payload with BYOK
+    pub nonce: ByteN<12>,      // should be random for each request
+    pub public_key: ByteN<32>, // client side ECDH public key
 }
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -64,7 +63,7 @@ pub struct CosePath {
     pub ns: String,
     pub user_owned: bool,
     pub subject: Option<Principal>, // default is caller
-    pub key_id: Option<ByteBuf>,    // KEK key_id
+    pub key_id: ByteBuf,            // KEK key_id
 }
 
 impl CosePath {

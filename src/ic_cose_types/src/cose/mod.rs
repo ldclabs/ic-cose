@@ -63,9 +63,10 @@ pub fn skip_prefix<'a>(tag: &'a [u8], data: &'a [u8]) -> &'a [u8] {
     }
 }
 
-pub fn cose_aes256_key(secret: [u8; 32]) -> CoseKey {
+pub fn cose_aes256_key(secret: [u8; 32], key_id: Vec<u8>) -> CoseKey {
     CoseKeyBuilder::new_symmetric_key(secret.into())
         .algorithm(iana::Algorithm::A256GCM)
+        .key_id(key_id)
         .build()
 }
 
