@@ -137,7 +137,7 @@ service : (opt ChainArgs) -> {
   admin_list_namespace : (opt text, opt nat32) -> (Result_2) query;
   admin_remove_auditors : (vec principal) -> (Result);
   admin_remove_managers : (vec principal) -> (Result);
-  ecdh_encrypted_cose_key : (CosePath, ECDHInput) -> (Result_3);
+  ecdh_cose_encrypted_key : (CosePath, ECDHInput) -> (Result_3);
   ecdsa_public_key : (opt PublicKeyInput) -> (Result_4) query;
   ecdsa_sign : (SignInput) -> (Result_5);
   namespace_add_auditors : (text, vec principal) -> (Result);
@@ -169,4 +169,6 @@ service : (opt ChainArgs) -> {
   validate_admin_add_managers : (vec principal) -> (Result);
   validate_admin_remove_auditors : (vec principal) -> (Result);
   validate_admin_remove_managers : (vec principal) -> (Result);
+  vetkd_encrypted_key : (CosePath, blob) -> (Result_5);
+  vetkd_public_key : (CosePath) -> (Result_5);
 }

@@ -66,7 +66,7 @@ dfx deploy ic_cose_canister --argument "(opt variant {Init =
     name = \"LDC Labs\";
     ecdsa_key_name = \"dfx_test_key\";
     schnorr_key_name = \"dfx_test_key\";
-    vetkd_key_name = \"dfx_test_key\";
+    vetkd_key_name = \"test_key_1\";
     subnet_size = 0;
     freezing_threshold = 1_000_000_000_000;
   }

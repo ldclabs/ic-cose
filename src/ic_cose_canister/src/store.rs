@@ -9,7 +9,6 @@ use ic_cose_types::{
         CborSerializable,
     },
     types::{namespace::*, setting::*, state::StateInfo, PublicKeyOutput, SchnorrAlgorithm},
-    ByteN,
 };
 use ic_stable_structures::{
     memory_manager::{MemoryId, MemoryManager, VirtualMemory},
@@ -29,6 +28,7 @@ use crate::{
     ecdsa::{derive_public_key, ecdsa_public_key, sign_with_ecdsa},
     rand_bytes,
     schnorr::{derive_schnorr_public_key, schnorr_public_key, sign_with_schnorr},
+    vetkd::{vetkd_encrypted_key, vetkd_public_key},
 };
 
 type Memory = VirtualMemory<DefaultMemoryImpl>;
@@ -68,16 +68,15 @@ impl State {
 #[derive(Clone, Default, Deserialize, Serialize)]
 pub struct Namespace {
     pub desc: String,
-    pub iv: ByteN<12>, // Initialization Vector for encryption, permanent with the namespace
-    pub created_at: u64, // unix timestamp in milliseconds
-    pub updated_at: u64, // unix timestamp in milliseconds
-    pub max_payload_size: u64, // max payload size in bytes
-    pub payload_bytes_total: u64, // total payload size in bytes
-    pub status: i8,    // -1: archived; 0: readable and writable; 1: readonly
-    pub visibility: u8, // 0: private; 1: public
+    pub created_at: u64,               // unix timestamp in milliseconds
+    pub updated_at: u64,               // unix timestamp in milliseconds
+    pub max_payload_size: u64,         // max payload size in bytes
+    pub payload_bytes_total: u64,      // total payload size in bytes
+    pub status: i8,                    // -1: archived; 0: readable and writable; 1: readonly
+    pub visibility: u8,                // 0: private; 1: public
     pub managers: BTreeSet<Principal>, // managers can read and write all settings
     pub auditors: BTreeSet<Principal>, // auditors can read all settings
-    pub users: BTreeSet<Principal>, // users can read and write settings they created
+    pub users: BTreeSet<Principal>,    // users can read and write settings they created
     pub settings: BTreeMap<(Principal, String), Setting>, // settings created by managers for users
     pub user_settings: BTreeMap<(Principal, String), Setting>, // settings created by users
     pub gas_balance: u128, // gas balance, TODO: https://internetcomputer.org/docs/current/developer-docs/gas-cost
@@ -477,7 +476,7 @@ pub mod ns {
             state::with(|s| {
                 let pk = s.ecdsa_public_key.as_ref().ok_or("no ecdsa public key")?;
                 let mut path: Vec<Vec<u8>> = Vec::with_capacity(derivation_path.len() + 3);
-                path.push(b"ECDSA_Signing".to_vec());
+                path.push(b"COSE_ECDSA_Signing".to_vec());
                 path.push(namespace.to_bytes().to_vec());
                 path.extend(derivation_path.into_iter().map(|b| b.into_vec()));
                 derive_public_key(pk, path)
@@ -500,7 +499,7 @@ pub mod ns {
 
         let key_name = state::with(|s| s.ecdsa_key_name.clone());
         let mut path: Vec<Vec<u8>> = Vec::with_capacity(derivation_path.len() + 3);
-        path.push(b"ECDSA_Signing".to_vec());
+        path.push(b"COSE_ECDSA_Signing".to_vec());
         path.push(namespace.to_bytes().to_vec());
         path.extend(derivation_path.into_iter().map(|b| b.into_vec()));
         let sig = sign_with_ecdsa(key_name, path, message.into_vec()).await?;
@@ -530,7 +529,7 @@ pub mod ns {
                         .ok_or("no schnorr ed25519 public key")?,
                 };
                 let mut path: Vec<Vec<u8>> = Vec::with_capacity(derivation_path.len() + 3);
-                path.push(b"Schnorr_Signing".to_vec());
+                path.push(b"COSE_Schnorr_Signing".to_vec());
                 path.push(namespace.to_bytes().to_vec());
                 path.extend(derivation_path.into_iter().map(|b| b.into_vec()));
                 derive_schnorr_public_key(alg, pk, path)
@@ -554,7 +553,7 @@ pub mod ns {
 
         let key_name = state::with(|s| s.schnorr_key_name.clone());
         let mut path: Vec<Vec<u8>> = Vec::with_capacity(derivation_path.len() + 3);
-        path.push(b"Schnorr_Signing".to_vec());
+        path.push(b"COSE_Schnorr_Signing".to_vec());
         path.push(namespace.to_bytes().to_vec());
         path.extend(derivation_path.into_iter().map(|b| b.into_vec()));
         let sig = sign_with_schnorr(key_name, alg, path, message.into_vec()).await?;
@@ -612,7 +611,7 @@ pub mod ns {
         let mut sign1 = cose_sign1(payload, alg, None)?;
         let mut tbs_data = sign1.tbs_data(caller.as_slice());
         if algorithm == SchnorrAlgorithm::Bip340Secp256k1 {
-            tbs_data = sha256(&tbs_data).to_vec();
+            tbs_data = sha256(&tbs_data).into();
         }
         let sig = sign_with_schnorr(key_name, algorithm, vec![], tbs_data).await?;
         sign1.signature = sig;
@@ -620,27 +619,53 @@ pub mod ns {
         Ok(ByteBuf::from(token))
     }
 
-    pub async fn inner_setting_kek(
+    pub async fn inner_schnorr_kek(
         spk: &SettingPathKey,
-        iv: &[u8],
         key_id: &[u8],
     ) -> Result<[u8; 32], String> {
         let key_name = state::with(|r| r.schnorr_key_name.clone());
         let derivation_path = vec![
-            b"COSE_Encrypt0_KEY".to_vec(),
+            b"COSE_Symmetric_Key".to_vec(),
             spk.2.to_bytes().to_vec(),
             vec![spk.1],
             spk.0.to_bytes().to_vec(),
         ];
-        let message = mac3_256(iv, key_id);
+        let message = mac3_256(spk.0.as_bytes(), key_id);
         let sig = sign_with_schnorr(
             key_name,
             SchnorrAlgorithm::Ed25519,
             derivation_path,
-            message.to_vec(),
+            message.into(),
         )
         .await?;
-        Ok(mac3_256(iv, &sig))
+        Ok(mac3_256(spk.0.as_bytes(), &sig))
+    }
+
+    pub async fn inner_vetkd_public_key(spk: &SettingPathKey) -> Result<Vec<u8>, String> {
+        let key_name = state::with(|r| r.vetkd_key_name.clone());
+        let derivation_path = vec![
+            b"COSE_Symmetric_Key".to_vec(),
+            spk.2.to_bytes().to_vec(),
+            vec![spk.1],
+            spk.0.to_bytes().to_vec(),
+        ];
+        vetkd_public_key(key_name, derivation_path).await
+    }
+
+    pub async fn inner_vetkd_encrypted_key(
+        spk: &SettingPathKey,
+        key_id: Vec<u8>,
+        encryption_public_key: Vec<u8>,
+    ) -> Result<Vec<u8>, String> {
+        let key_name = state::with(|r| r.vetkd_key_name.clone());
+        let derivation_path = vec![
+            b"COSE_Symmetric_Key".to_vec(),
+            spk.2.to_bytes().to_vec(),
+            vec![spk.1],
+            spk.0.to_bytes().to_vec(),
+        ];
+
+        vetkd_encrypted_key(key_name, key_id, derivation_path, encryption_public_key).await
     }
 
     pub fn get_namespace(caller: &Principal, namespace: String) -> Result<NamespaceInfo, String> {
@@ -687,7 +712,6 @@ pub mod ns {
             Err("no permission".to_string())?;
         }
 
-        let iv: [u8; 12] = rand_bytes().await?;
         NS.with(|r| {
             let mut m = r.borrow_mut();
             if m.contains_key(&input.name) {
@@ -695,7 +719,6 @@ pub mod ns {
             }
             let ns = Namespace {
                 desc: input.desc.unwrap_or_default(),
-                iv: iv.into(),
                 created_at: now_ms,
                 updated_at: now_ms,
                 max_payload_size: input.max_payload_size.unwrap_or(MAX_PAYLOAD_SIZE),
@@ -750,10 +773,7 @@ pub mod ns {
         })
     }
 
-    pub fn get_setting(
-        caller: &Principal,
-        spk: &SettingPathKey,
-    ) -> Result<(SettingInfo, Vec<u8>), String> {
+    pub fn get_setting(caller: &Principal, spk: &SettingPathKey) -> Result<SettingInfo, String> {
         with(&spk.0, |ns| {
             let setting = ns
                 .check_and_get_setting(caller, spk)
@@ -765,7 +785,7 @@ pub mod ns {
 
             let mut res = setting.to_info(spk.2, spk.3.clone());
             res.payload = Some(setting.payload.clone());
-            Ok((res, ns.iv.to_vec()))
+            Ok(res)
         })
     }
 

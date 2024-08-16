@@ -18,8 +18,7 @@ fn setting_get(path: SettingPath) -> Result<SettingInfo, String> {
     path.validate()?;
     let caller = ic_cdk::caller();
     let spk = store::SettingPathKey::from_path(path, caller);
-    let (info, _) = store::ns::get_setting(&caller, &spk)?;
-    Ok(info)
+    store::ns::get_setting(&caller, &spk)
 }
 
 #[ic_cdk::query]

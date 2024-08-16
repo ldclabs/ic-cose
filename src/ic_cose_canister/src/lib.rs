@@ -1,6 +1,6 @@
 use candid::Principal;
 use ic_cose_types::{
-    format_error, types::namespace::*, types::setting::*, types::state::StateInfo, types::*,
+    format_error, types::namespace::*, types::setting::*, types::state::StateInfo, types::*, ByteN,
     ANONYMOUS,
 };
 use serde_bytes::ByteBuf;
@@ -14,6 +14,7 @@ mod api_setting;
 mod ecdsa;
 mod schnorr;
 mod store;
+mod vetkd;
 
 use api_init::ChainArgs;
 

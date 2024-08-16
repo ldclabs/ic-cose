@@ -7,7 +7,7 @@ use ic_cose_types::{
         CosePath, ECDHInput, ECDHOutput, PublicKeyInput, PublicKeyOutput, SchnorrAlgorithm,
         SignIdentityInput, SignInput,
     },
-    validate_key, MILLISECONDS,
+    validate_key, ByteN, MILLISECONDS,
 };
 use serde_bytes::ByteBuf;
 
@@ -86,7 +86,7 @@ async fn schnorr_sign_identity(
 /// ecdh_encrypted_cose_key returns a permanent partial KEK encrypted with ECDH.
 /// It should be used with a local partial key to derive a full KEK.
 #[ic_cdk::update(guard = "is_authenticated")]
-async fn ecdh_encrypted_cose_key(
+async fn ecdh_cose_encrypted_key(
     path: CosePath,
     ecdh: ECDHInput,
 ) -> Result<ECDHOutput<ByteBuf>, String> {
@@ -95,16 +95,16 @@ async fn ecdh_encrypted_cose_key(
     let caller = ic_cdk::caller();
     let key_id = path.key_id.clone();
     let spk = store::SettingPathKey::from_path(path.into(), caller);
-    let iv = store::ns::with(&spk.0, |ns| {
+    store::ns::with(&spk.0, |ns| {
         if !ns.has_setting_kek_permission(&caller, &spk) {
             Err("no permission".to_string())?;
         }
-        Ok(ns.iv.to_vec())
+        Ok(())
     })?;
 
     let aad = spk.2.as_slice();
-    let kek = store::ns::inner_setting_kek(&spk, &iv, &key_id).await?;
-    let kek = cose_aes256_key(kek, key_id.to_vec());
+    let kek = store::ns::inner_schnorr_kek(&spk, &key_id).await?;
+    let kek = cose_aes256_key(kek, key_id.into_vec());
     let kek = kek.to_vec().map_err(format_error)?;
 
     let secret_key: [u8; 32] = rand_bytes().await?;
@@ -115,4 +115,40 @@ async fn ecdh_encrypted_cose_key(
         payload: key,
         public_key: public_key.to_bytes().into(),
     })
+}
+
+#[ic_cdk::update(guard = "is_authenticated")]
+async fn vetkd_public_key(path: CosePath) -> Result<ByteBuf, String> {
+    path.validate()?;
+
+    let caller = ic_cdk::caller();
+    let spk = store::SettingPathKey::from_path(path.into(), caller);
+    store::ns::with(&spk.0, |ns| {
+        if !ns.has_setting_kek_permission(&caller, &spk) {
+            Err("no permission".to_string())?;
+        }
+        Ok(())
+    })?;
+
+    let pk = store::ns::inner_vetkd_public_key(&spk).await?;
+    Ok(ByteBuf::from(pk))
+}
+
+#[ic_cdk::update(guard = "is_authenticated")]
+async fn vetkd_encrypted_key(path: CosePath, public_key: ByteN<48>) -> Result<ByteBuf, String> {
+    path.validate()?;
+
+    let caller = ic_cdk::caller();
+    let key_id = path.key_id.clone();
+    let spk = store::SettingPathKey::from_path(path.into(), caller);
+    store::ns::with(&spk.0, |ns| {
+        if !ns.has_setting_kek_permission(&caller, &spk) {
+            Err("no permission".to_string())?;
+        }
+        Ok(())
+    })?;
+
+    let ek =
+        store::ns::inner_vetkd_encrypted_key(&spk, key_id.into_vec(), public_key.into()).await?;
+    Ok(ByteBuf::from(ek))
 }
