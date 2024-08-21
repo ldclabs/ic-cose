@@ -1,13 +1,13 @@
 use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
-use serde_bytes::ByteBuf;
+use serde_bytes::{ByteArray, ByteBuf};
 use std::collections::BTreeMap;
 
 pub mod namespace;
 pub mod setting;
 pub mod state;
 
-use crate::{bytes::ByteN, validate_key};
+use crate::validate_key;
 
 // should update to ICRC3Map
 pub type MapValue =
@@ -48,14 +48,14 @@ pub struct SignIdentityInput {
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ECDHInput {
-    pub nonce: ByteN<12>,      // should be random for each request
-    pub public_key: ByteN<32>, // client side ECDH public key
+    pub nonce: ByteArray<12>,      // should be random for each request
+    pub public_key: ByteArray<32>, // client side ECDH public key
 }
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ECDHOutput<T> {
-    pub payload: T,            // should be random for each request
-    pub public_key: ByteN<32>, // server side ECDH public key
+    pub payload: T,                // should be random for each request
+    pub public_key: ByteArray<32>, // server side ECDH public key
 }
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]

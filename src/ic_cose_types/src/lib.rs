@@ -6,11 +6,9 @@ use ciborium::into_writer;
 use serde::Serialize;
 use std::{collections::BTreeSet, ops::Deref};
 
-pub mod bytes;
 pub mod cose;
 pub mod types;
 
-pub use bytes::*;
 pub use cose::format_error;
 
 pub static ANONYMOUS: Principal = Principal::anonymous();

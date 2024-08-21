@@ -7,9 +7,9 @@ use ic_cose_types::{
         CosePath, ECDHInput, ECDHOutput, PublicKeyInput, PublicKeyOutput, SchnorrAlgorithm,
         SignIdentityInput, SignInput,
     },
-    validate_key, ByteN, MILLISECONDS,
+    validate_key, MILLISECONDS,
 };
-use serde_bytes::ByteBuf;
+use serde_bytes::{ByteArray, ByteBuf};
 
 use crate::{is_authenticated, rand_bytes, store};
 
@@ -135,7 +135,7 @@ async fn vetkd_public_key(path: CosePath) -> Result<ByteBuf, String> {
 }
 
 #[ic_cdk::update(guard = "is_authenticated")]
-async fn vetkd_encrypted_key(path: CosePath, public_key: ByteN<48>) -> Result<ByteBuf, String> {
+async fn vetkd_encrypted_key(path: CosePath, public_key: ByteArray<48>) -> Result<ByteBuf, String> {
     path.validate()?;
 
     let caller = ic_cdk::caller();
@@ -148,7 +148,11 @@ async fn vetkd_encrypted_key(path: CosePath, public_key: ByteN<48>) -> Result<By
         Ok(())
     })?;
 
-    let ek =
-        store::ns::inner_vetkd_encrypted_key(&spk, key_id.into_vec(), public_key.into()).await?;
+    let ek = store::ns::inner_vetkd_encrypted_key(
+        &spk,
+        key_id.into_vec(),
+        public_key.into_array().into(),
+    )
+    .await?;
     Ok(ByteBuf::from(ek))
 }

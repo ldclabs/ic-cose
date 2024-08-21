@@ -23,12 +23,6 @@ where
     format!("{:?}", err)
 }
 
-pub fn crc32(data: &[u8]) -> u32 {
-    let mut h = crc32fast::Hasher::new();
-    h.update(data);
-    h.finalize()
-}
-
 pub fn sha256(data: &[u8]) -> [u8; 32] {
     let mut hasher = sha2::Sha256::new();
     hasher.update(data);

@@ -1,9 +1,9 @@
 use candid::Principal;
 use ic_cose_types::{
-    format_error, types::namespace::*, types::setting::*, types::state::StateInfo, types::*, ByteN,
+    format_error, types::namespace::*, types::setting::*, types::state::StateInfo, types::*,
     ANONYMOUS,
 };
-use serde_bytes::ByteBuf;
+use serde_bytes::{ByteArray, ByteBuf};
 use std::collections::BTreeSet;
 
 mod api_admin;
