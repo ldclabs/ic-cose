@@ -161,7 +161,9 @@ impl Namespace {
             return false;
         }
 
-        caller == &spk.2 || (spk.1 == 0 && self.managers.contains(caller))
+        caller == &spk.2
+            || self.auditors.contains(caller)
+            || (spk.1 == 0 && self.managers.contains(caller))
     }
 
     pub fn check_and_get_setting(
