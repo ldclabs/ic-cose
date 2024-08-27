@@ -27,7 +27,7 @@ pub fn to_cbor_bytes(obj: &impl Serialize) -> Vec<u8> {
 /// * `s` - A string slice that holds the name to be validated.
 ///
 /// # Returns
-/// * `Ok(())` if the name only contains valid characters (a-z, 0-9, '_').
+/// * `Ok(())` if the name only contains valid characters (a-z, 0-9, '-', '_').
 /// * `Err(String)` if the name is empty or contains invalid characters.
 ///
 pub fn validate_key(s: &str) -> Result<(), String> {
@@ -36,7 +36,7 @@ pub fn validate_key(s: &str) -> Result<(), String> {
     }
 
     for c in s.chars() {
-        if !matches!(c, 'a'..='z' | '0'..='9' | '_' ) {
+        if !matches!(c, 'a'..='z' | '0'..='9' | '-'| '_' ) {
             return Err(format!("invalid character: {}", c));
         }
     }

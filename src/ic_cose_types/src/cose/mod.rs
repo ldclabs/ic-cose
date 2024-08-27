@@ -8,6 +8,7 @@ pub mod ecdh;
 pub mod ed25519;
 pub mod encrypt0;
 pub mod k256;
+pub mod kdf;
 pub mod sign1;
 
 pub use coset::{iana, CborSerializable, CoseKey};
