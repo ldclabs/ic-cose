@@ -77,8 +77,8 @@ pub struct Namespace {
     pub managers: BTreeSet<Principal>, // managers can read and write all settings
     pub auditors: BTreeSet<Principal>, // auditors can read all settings
     pub users: BTreeSet<Principal>,    // users can read and write settings they created
-    pub settings: BTreeMap<(Principal, String), Setting>, // settings created by managers for users
-    pub user_settings: BTreeMap<(Principal, String), Setting>, // settings created by users
+    pub settings: BTreeMap<(Principal, ByteBuf), Setting>, // settings created by managers for users
+    pub user_settings: BTreeMap<(Principal, ByteBuf), Setting>, // settings created by users
     pub gas_balance: u128, // gas balance, TODO: https://internetcomputer.org/docs/current/developer-docs/gas-cost
 }
 
@@ -228,9 +228,9 @@ pub struct Setting {
 }
 
 impl Setting {
-    pub fn to_info(&self, subject: Principal, name: String) -> SettingInfo {
+    pub fn to_info(&self, subject: Principal, key: ByteBuf) -> SettingInfo {
         SettingInfo {
-            name,
+            key,
             subject,
             desc: self.desc.clone(),
             created_at: self.created_at,
@@ -247,7 +247,7 @@ impl Setting {
 
 // SettingPathKey: (namespace name, 0 or 1, subject, setting name, version)
 #[derive(Clone, Deserialize, Serialize, Ord, PartialOrd, Eq, PartialEq)]
-pub struct SettingPathKey(pub String, pub u8, pub Principal, pub String, pub u32);
+pub struct SettingPathKey(pub String, pub u8, pub Principal, pub ByteBuf, pub u32);
 
 impl SettingPathKey {
     pub fn from_path(val: SettingPath, caller: Principal) -> Self {
@@ -255,7 +255,7 @@ impl SettingPathKey {
             val.ns,
             if val.user_owned { 1 } else { 0 },
             val.subject.unwrap_or(caller),
-            val.name,
+            val.key,
             val.version,
         )
     }
@@ -284,7 +284,7 @@ impl fmt::Display for SettingPathKey {
             self.0,
             self.1,
             self.2.to_text(),
-            self.3,
+            const_hex::encode(&self.3),
             self.4
         )
     }

@@ -4,14 +4,13 @@ use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::CosePath;
 use crate::validate_key;
 
 pub const CHUNK_SIZE: u32 = 256 * 1024;
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SettingInfo {
-    pub name: String,
+    pub key: ByteBuf,
     pub subject: Principal,
     pub desc: String,
     pub created_at: u64, // unix timestamp in milliseconds
@@ -28,28 +27,18 @@ pub struct SettingInfo {
 pub struct SettingPath {
     pub ns: String,
     pub user_owned: bool,
-    pub subject: Option<Principal>,
-    pub name: String,
+    pub subject: Option<Principal>, // default to caller
+    pub key: ByteBuf,
     pub version: u32,
 }
 
 impl SettingPath {
     pub fn validate(&self) -> Result<(), String> {
         validate_key(&self.ns)?;
-        validate_key(&self.name)?;
-        Ok(())
-    }
-}
-
-impl From<CosePath> for SettingPath {
-    fn from(input: CosePath) -> Self {
-        Self {
-            ns: input.ns,
-            user_owned: input.user_owned,
-            subject: input.subject,
-            name: "".to_string(),
-            version: 0,
+        if self.key.len() > 64 {
+            return Err("key length exceeds the limit 64".to_string());
         }
+        Ok(())
     }
 }
 

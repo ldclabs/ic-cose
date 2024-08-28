@@ -31,6 +31,8 @@ pub struct CreateNamespaceInput {
     pub desc: Option<String>,
     pub max_payload_size: Option<u64>, // max payload size in bytes
     pub managers: BTreeSet<Principal>, // managers can read and write all settings
+    pub auditors: BTreeSet<Principal>, // auditors can read all settings
+    pub users: BTreeSet<Principal>,    // users can read and write settings they created
 }
 
 impl CreateNamespaceInput {

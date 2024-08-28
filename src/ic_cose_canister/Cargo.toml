@@ -17,12 +17,13 @@ crate-type = ["cdylib"]
 [dependencies]
 candid = { workspace = true }
 ciborium = { workspace = true }
+const-hex = { workspace = true }
 ic-cdk = { workspace = true }
 serde = { workspace = true }
 serde_bytes = { workspace = true }
 ic-cdk-timers = { workspace = true }
 ic-stable-structures = { workspace = true }
 getrandom = { version = "0.2", features = ["custom"] }
-ic_cose_types = { path = "../ic_cose_types", version = "0.1" }
+ic_cose_types = { path = "../ic_cose_types", version = "0.2" }
 ic-crypto-extended-bip32 = { git = "https://github.com/dfinity/ic/", rev = "d19fa446ab35780b2c6d8b82ea32d808cca558d5" }
 ic-crypto-ed25519 = { git = "https://github.com/dfinity/ic/", rev = "d19fa446ab35780b2c6d8b82ea32d808cca558d5" }

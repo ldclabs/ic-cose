@@ -35,6 +35,10 @@ pub fn validate_key(s: &str) -> Result<(), String> {
         return Err("empty string".to_string());
     }
 
+    if s.len() > 64 {
+        return Err("string length exceeds the limit 64".to_string());
+    }
+
     for c in s.chars() {
         if !matches!(c, 'a'..='z' | '0'..='9' | '-'| '_' ) {
             return Err(format!("invalid character: {}", c));

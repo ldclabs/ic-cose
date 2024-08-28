@@ -4,7 +4,7 @@ use ic_cose_types::{
         CborSerializable,
     },
     types::{
-        CosePath, ECDHInput, ECDHOutput, PublicKeyInput, PublicKeyOutput, SchnorrAlgorithm,
+        ECDHInput, ECDHOutput, PublicKeyInput, PublicKeyOutput, SchnorrAlgorithm, SettingPath,
         SignIdentityInput, SignInput,
     },
     validate_key, MILLISECONDS,
@@ -87,14 +87,14 @@ async fn schnorr_sign_identity(
 /// It should be used with a local partial key to derive a full KEK.
 #[ic_cdk::update(guard = "is_authenticated")]
 async fn ecdh_cose_encrypted_key(
-    path: CosePath,
+    path: SettingPath,
     ecdh: ECDHInput,
 ) -> Result<ECDHOutput<ByteBuf>, String> {
     path.validate()?;
 
     let caller = ic_cdk::caller();
-    let key_id = path.key_id.clone();
-    let spk = store::SettingPathKey::from_path(path.into(), caller);
+    let key_id = path.key.clone();
+    let spk = store::SettingPathKey::from_path(path, caller);
     store::ns::with(&spk.0, |ns| {
         if !ns.has_setting_kek_permission(&caller, &spk) {
             Err("no permission".to_string())?;
@@ -118,11 +118,11 @@ async fn ecdh_cose_encrypted_key(
 }
 
 #[ic_cdk::update(guard = "is_authenticated")]
-async fn vetkd_public_key(path: CosePath) -> Result<ByteBuf, String> {
+async fn vetkd_public_key(path: SettingPath) -> Result<ByteBuf, String> {
     path.validate()?;
 
     let caller = ic_cdk::caller();
-    let spk = store::SettingPathKey::from_path(path.into(), caller);
+    let spk = store::SettingPathKey::from_path(path, caller);
     store::ns::with(&spk.0, |ns| {
         if !ns.has_setting_kek_permission(&caller, &spk) {
             Err("no permission".to_string())?;
@@ -135,12 +135,15 @@ async fn vetkd_public_key(path: CosePath) -> Result<ByteBuf, String> {
 }
 
 #[ic_cdk::update(guard = "is_authenticated")]
-async fn vetkd_encrypted_key(path: CosePath, public_key: ByteArray<48>) -> Result<ByteBuf, String> {
+async fn vetkd_encrypted_key(
+    path: SettingPath,
+    public_key: ByteArray<48>,
+) -> Result<ByteBuf, String> {
     path.validate()?;
 
     let caller = ic_cdk::caller();
-    let key_id = path.key_id.clone();
-    let spk = store::SettingPathKey::from_path(path.into(), caller);
+    let key_id = path.key.clone();
+    let spk = store::SettingPathKey::from_path(path, caller);
     store::ns::with(&spk.0, |ns| {
         if !ns.has_setting_kek_permission(&caller, &spk) {
             Err("no permission".to_string())?;

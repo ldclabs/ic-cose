@@ -1,4 +1,4 @@
-use candid::{CandidType, Principal};
+use candid::CandidType;
 use serde::{Deserialize, Serialize};
 use serde_bytes::{ByteArray, ByteBuf};
 use std::collections::BTreeMap;
@@ -7,7 +7,7 @@ pub mod namespace;
 pub mod setting;
 pub mod state;
 
-use crate::validate_key;
+pub use setting::SettingPath;
 
 // should update to ICRC3Map
 pub type MapValue =
@@ -56,19 +56,4 @@ pub struct ECDHInput {
 pub struct ECDHOutput<T> {
     pub payload: T,                // should be random for each request
     pub public_key: ByteArray<32>, // server side ECDH public key
-}
-
-#[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct CosePath {
-    pub ns: String,
-    pub user_owned: bool,
-    pub subject: Option<Principal>, // default is caller
-    pub key_id: ByteBuf,            // KEK key_id
-}
-
-impl CosePath {
-    pub fn validate(&self) -> Result<(), String> {
-        validate_key(&self.ns)?;
-        Ok(())
-    }
 }
