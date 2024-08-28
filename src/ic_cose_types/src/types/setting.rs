@@ -56,7 +56,7 @@ pub fn try_decode_payload(max_size: u64, payload: &[u8]) -> Result<Value, String
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize)]
 pub struct CreateSettingInput {
-    pub payload: ByteBuf,
+    pub payload: Option<ByteBuf>,
     pub desc: Option<String>,
     pub status: Option<i8>,
     pub tags: Option<BTreeMap<String, String>>,

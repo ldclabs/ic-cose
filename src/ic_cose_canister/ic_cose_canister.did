@@ -13,7 +13,7 @@ type CreateSettingInput = record {
   status : opt int8;
   desc : opt text;
   tags : opt vec record { text; text };
-  payload : blob;
+  payload : opt blob;
 };
 type CreateSettingOutput = record {
   updated_at : nat64;

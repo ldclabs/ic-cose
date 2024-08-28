@@ -35,19 +35,30 @@ type Memory = VirtualMemory<DefaultMemoryImpl>;
 
 #[derive(Clone, Default, Deserialize, Serialize)]
 pub struct State {
+    #[serde(rename = "n")]
     pub name: String,
+    #[serde(rename = "ek")]
     pub ecdsa_key_name: String,
+    #[serde(rename = "ep")]
     pub ecdsa_public_key: Option<PublicKeyOutput>,
+    #[serde(rename = "sk")]
     pub schnorr_key_name: String,
+    #[serde(rename = "sep")]
     pub schnorr_ed25519_public_key: Option<PublicKeyOutput>,
+    #[serde(rename = "ssp")]
     pub schnorr_secp256k1_public_key: Option<PublicKeyOutput>,
+    #[serde(rename = "vk")]
     pub vetkd_key_name: String,
+    #[serde(rename = "m")]
     pub managers: BTreeSet<Principal>, // managers can read and write namespaces, not settings
     // auditors can read and list namespaces and settings info even if it is private
+    #[serde(rename = "a")]
     pub auditors: BTreeSet<Principal>,
-    #[serde(default)]
+    #[serde(rename = "aa")]
     pub allowed_apis: BTreeSet<String>, // allowed APIs
+    #[serde(rename = "s")]
     pub subnet_size: u64,
+    #[serde(rename = "f")]
     pub freezing_threshold: u64, // freezing writing threshold in cycles
 }
 
@@ -70,18 +81,31 @@ impl State {
 
 #[derive(Clone, Default, Deserialize, Serialize)]
 pub struct Namespace {
+    #[serde(rename = "d")]
     pub desc: String,
-    pub created_at: u64,               // unix timestamp in milliseconds
-    pub updated_at: u64,               // unix timestamp in milliseconds
-    pub max_payload_size: u64,         // max payload size in bytes
-    pub payload_bytes_total: u64,      // total payload size in bytes
-    pub status: i8,                    // -1: archived; 0: readable and writable; 1: readonly
-    pub visibility: u8,                // 0: private; 1: public
+    #[serde(rename = "ca")]
+    pub created_at: u64, // unix timestamp in milliseconds
+    #[serde(rename = "ua")]
+    pub updated_at: u64, // unix timestamp in milliseconds
+    #[serde(rename = "mp")]
+    pub max_payload_size: u64, // max payload size in bytes
+    #[serde(rename = "pb")]
+    pub payload_bytes_total: u64, // total payload size in bytes
+    #[serde(rename = "s")]
+    pub status: i8, // -1: archived; 0: readable and writable; 1: readonly
+    #[serde(rename = "v")]
+    pub visibility: u8, // 0: private; 1: public
+    #[serde(rename = "m")]
     pub managers: BTreeSet<Principal>, // managers can read and write all settings
+    #[serde(rename = "a")]
     pub auditors: BTreeSet<Principal>, // auditors can read all settings
-    pub users: BTreeSet<Principal>,    // users can read and write settings they created
+    #[serde(rename = "u")]
+    pub users: BTreeSet<Principal>, // users can read and write settings they created
+    #[serde(rename = "ss")]
     pub settings: BTreeMap<(Principal, ByteBuf), Setting>, // settings created by managers for users
+    #[serde(rename = "us")]
     pub user_settings: BTreeMap<(Principal, ByteBuf), Setting>, // settings created by users
+    #[serde(rename = "g")]
     pub gas_balance: u128, // gas balance, TODO: https://internetcomputer.org/docs/current/developer-docs/gas-cost
 }
 
@@ -219,14 +243,23 @@ impl Namespace {
 
 #[derive(Clone, Default, Deserialize, Serialize)]
 pub struct Setting {
+    #[serde(rename = "d")]
     pub desc: String,
+    #[serde(rename = "ca")]
     pub created_at: u64, // unix timestamp in milliseconds
+    #[serde(rename = "ua")]
     pub updated_at: u64, // unix timestamp in milliseconds
-    pub status: i8,      // -1: archived; 0: readable and writable; 1: readonly
+    #[serde(rename = "s")]
+    pub status: i8, // -1: archived; 0: readable and writable; 1: readonly
+    #[serde(rename = "v")]
     pub version: u32,
+    #[serde(rename = "r")]
     pub readers: BTreeSet<Principal>, // readers can read the setting
+    #[serde(rename = "t")]
     pub tags: BTreeMap<String, String>, // tags for query
-    pub payload: ByteBuf,
+    #[serde(rename = "p")]
+    pub payload: Option<ByteBuf>,
+    #[serde(rename = "k")]
     pub dek: Option<ByteBuf>, // Data Encryption Key that encrypted by BYOK or vetKey in COSE_Encrypt0
 }
 
@@ -295,9 +328,13 @@ impl fmt::Display for SettingPathKey {
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct SettingArchived {
+    #[serde(rename = "a")]
     pub archived_at: u64,
+    #[serde(rename = "d")]
     pub deprecated: bool, // true if the payload should not be used for some reason
+    #[serde(rename = "p")]
     pub payload: ByteBuf,
+    #[serde(rename = "k")]
     pub dek: Option<ByteBuf>,
 }
 
@@ -316,8 +353,8 @@ impl Storable for SettingArchived {
 }
 
 const STATE_MEMORY_ID: MemoryId = MemoryId::new(0);
-const NS_MEMORY_ID: MemoryId = MemoryId::new(2);
-const PAYLOADS_MEMORY_ID: MemoryId = MemoryId::new(3);
+const NS_MEMORY_ID: MemoryId = MemoryId::new(1);
+const PAYLOADS_MEMORY_ID: MemoryId = MemoryId::new(2);
 
 thread_local! {
     static STATE: RefCell<State> = RefCell::new(State::default());
@@ -795,7 +832,7 @@ pub mod ns {
 
             let mut res = setting.to_info(spk.2, spk.3);
             res.dek = setting.dek.clone();
-            res.payload = Some(setting.payload.clone());
+            res.payload = setting.payload.clone();
             Ok(res)
         })
     }
@@ -846,19 +883,27 @@ pub mod ns {
 
             let size = match input.dek {
                 Some(ref dek) => {
-                    if input.payload.len() as u64 > ns.max_payload_size {
-                        Err("payload size exceeds the limit".to_string())?;
-                    }
                     // should be valid COSE encrypt0 dek
                     try_decode_encrypt0(dek)?;
                     // should be valid COSE encrypt0 payload
-                    try_decode_encrypt0(&input.payload)?;
-                    input.payload.len() + dek.len()
+                    if let Some(ref payload) = input.payload {
+                        if payload.len() as u64 > ns.max_payload_size {
+                            Err("payload size exceeds the limit".to_string())?;
+                        }
+                        try_decode_encrypt0(payload)?;
+                        payload.len() + dek.len()
+                    } else {
+                        dek.len()
+                    }
                 }
                 None => {
                     // try to validate plain payload
-                    try_decode_payload(ns.max_payload_size, &input.payload)?;
-                    input.payload.len()
+                    if let Some(ref payload) = input.payload {
+                        try_decode_payload(ns.max_payload_size, payload)?;
+                        payload.len()
+                    } else {
+                        0
+                    }
                 }
             };
 
@@ -927,23 +972,25 @@ pub mod ns {
                     }
                 }
 
-                PAYLOADS_STORE.with(|r| {
-                    r.borrow_mut().insert(
-                        spk.clone(),
-                        SettingArchived {
-                            archived_at: now_ms,
-                            deprecated: input.deprecate_current.unwrap_or(false),
-                            payload: setting.payload.clone(),
-                            dek: setting.dek.clone(),
-                        },
-                    );
-                });
+                if let Some(payload) = setting.payload.as_ref() {
+                    PAYLOADS_STORE.with(|r| {
+                        r.borrow_mut().insert(
+                            spk.clone(),
+                            SettingArchived {
+                                archived_at: now_ms,
+                                deprecated: input.deprecate_current.unwrap_or(false),
+                                payload: payload.clone(),
+                                dek: setting.dek.clone(),
+                            },
+                        );
+                    });
+                }
 
                 if let Some(status) = input.status {
                     setting.status = status;
                 }
                 setting.version = setting.version.saturating_add(1);
-                setting.payload = input.payload;
+                setting.payload = Some(input.payload);
                 setting.updated_at = now_ms;
                 UpdateSettingOutput {
                     created_at: setting.created_at,
