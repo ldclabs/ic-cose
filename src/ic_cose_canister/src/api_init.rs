@@ -1,6 +1,6 @@
 use candid::CandidType;
 use serde::Deserialize;
-use std::time::Duration;
+use std::{collections::BTreeSet, time::Duration};
 
 use crate::store;
 
@@ -17,6 +17,7 @@ pub struct InitArgs {
     // https://internetcomputer.org/docs/current/developer-docs/smart-contracts/signatures/signing-messages-t-schnorr
     schnorr_key_name: String,
     vetkd_key_name: String,
+    allowed_apis: BTreeSet<String>,
     subnet_size: u64,        // set to 0 to disable receiving cycles
     freezing_threshold: u64, // in cycles
 }
@@ -37,6 +38,7 @@ fn init(args: Option<ChainArgs>) {
                 s.ecdsa_key_name = args.ecdsa_key_name;
                 s.schnorr_key_name = args.schnorr_key_name;
                 s.vetkd_key_name = args.vetkd_key_name;
+                s.allowed_apis = args.allowed_apis;
                 s.subnet_size = args.subnet_size;
                 s.freezing_threshold = if args.freezing_threshold > 0 {
                     args.freezing_threshold

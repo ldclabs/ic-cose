@@ -45,6 +45,8 @@ pub struct State {
     pub managers: BTreeSet<Principal>, // managers can read and write namespaces, not settings
     // auditors can read and list namespaces and settings info even if it is private
     pub auditors: BTreeSet<Principal>,
+    #[serde(default)]
+    pub allowed_apis: BTreeSet<String>, // allowed APIs
     pub subnet_size: u64,
     pub freezing_threshold: u64, // freezing writing threshold in cycles
 }
@@ -58,6 +60,7 @@ impl State {
             vetkd_key_name: self.vetkd_key_name.clone(),
             managers: self.managers.clone(),
             auditors: self.auditors.clone(),
+            allowed_apis: self.allowed_apis.clone(),
             namespace_total: 0,
             subnet_size: self.subnet_size,
             freezing_threshold: self.freezing_threshold,
@@ -195,8 +198,8 @@ impl Namespace {
         }
     }
 
-    pub fn try_insert_setting(&mut self, spk: &SettingPathKey, setting: Setting) -> bool {
-        let setting_key = (spk.2, spk.3.clone());
+    pub fn try_insert_setting(&mut self, spk: SettingPathKey, setting: Setting) -> bool {
+        let setting_key = (spk.2, spk.3);
         let entry = match spk.1 {
             0 => self.settings.entry(setting_key),
             1 => self.user_settings.entry(setting_key),
@@ -239,7 +242,7 @@ impl Setting {
             version: self.version,
             readers: self.readers.clone(),
             tags: self.tags.clone(),
-            dek: self.dek.clone(),
+            dek: None,
             payload: None,
         }
     }
@@ -353,6 +356,14 @@ pub mod state {
 
     pub fn with_mut<R>(f: impl FnOnce(&mut State) -> R) -> R {
         STATE.with(|r| f(&mut r.borrow_mut()))
+    }
+
+    pub fn allowed_api(api: &str) -> Result<(), String> {
+        if with(|s| s.allowed_apis.is_empty() || s.allowed_apis.contains(api)) {
+            Ok(())
+        } else {
+            Err(format!("API {} not allowed", api))
+        }
     }
 
     pub async fn init_public_key() {
@@ -762,43 +773,41 @@ pub mod ns {
         })
     }
 
-    pub fn get_setting_info(
-        caller: &Principal,
-        spk: &SettingPathKey,
-    ) -> Result<SettingInfo, String> {
-        with(&spk.0, |ns| {
+    pub fn get_setting_info(caller: Principal, spk: SettingPathKey) -> Result<SettingInfo, String> {
+        with(&spk.0.clone(), |ns| {
             let setting = ns
-                .check_and_get_setting(caller, spk)
+                .check_and_get_setting(&caller, &spk)
                 .ok_or_else(|| format!("setting {} not found or no permission", spk))?;
 
-            Ok(setting.to_info(spk.2, spk.3.clone()))
+            Ok(setting.to_info(spk.2, spk.3))
         })
     }
 
-    pub fn get_setting(caller: &Principal, spk: &SettingPathKey) -> Result<SettingInfo, String> {
-        with(&spk.0, |ns| {
+    pub fn get_setting(caller: Principal, spk: SettingPathKey) -> Result<SettingInfo, String> {
+        with(&spk.0.clone(), |ns| {
             let setting = ns
-                .check_and_get_setting(caller, spk)
-                .ok_or_else(|| format!("setting {} not found or no permission", spk))?;
+                .check_and_get_setting(&caller, &spk)
+                .ok_or_else(|| format!("setting {} not found or no permission", &spk))?;
 
             if spk.4 != 0 || spk.4 != setting.version {
                 Err("version mismatch".to_string())?;
             };
 
-            let mut res = setting.to_info(spk.2, spk.3.clone());
+            let mut res = setting.to_info(spk.2, spk.3);
+            res.dek = setting.dek.clone();
             res.payload = Some(setting.payload.clone());
             Ok(res)
         })
     }
 
     pub fn get_setting_archived_payload(
-        caller: &Principal,
-        spk: &SettingPathKey,
+        caller: Principal,
+        spk: SettingPathKey,
     ) -> Result<SettingArchivedPayload, String> {
-        with(&spk.0, |ns| {
+        with(&spk.0.clone(), |ns| {
             let setting = ns
-                .check_and_get_setting(caller, spk)
-                .ok_or_else(|| format!("setting {} not found or no permission", spk))?;
+                .check_and_get_setting(&caller, &spk)
+                .ok_or_else(|| format!("setting {} not found or no permission", &spk))?;
 
             if spk.4 == 0 || spk.4 >= setting.version {
                 Err("version mismatch".to_string())?;
@@ -806,8 +815,8 @@ pub mod ns {
 
             let payload = PAYLOADS_STORE.with(|r| {
                 let m = r.borrow();
-                m.get(spk)
-                    .ok_or_else(|| format!("setting {} payload not found", spk))
+                m.get(&spk)
+                    .ok_or_else(|| format!("setting {} payload not found", &spk))
             })?;
 
             Ok(SettingArchivedPayload {
@@ -821,13 +830,13 @@ pub mod ns {
     }
 
     pub fn create_setting(
-        caller: &Principal,
-        spk: &SettingPathKey,
+        caller: Principal,
+        spk: SettingPathKey,
         input: CreateSettingInput,
         now_ms: u64,
     ) -> Result<CreateSettingOutput, String> {
-        with_mut(&spk.0, |ns| {
-            if !ns.can_write_setting(caller, spk) {
+        with_mut(&spk.0.clone(), |ns| {
+            if !ns.can_write_setting(&caller, &spk) {
                 Err("no permission".to_string())?;
             }
 
@@ -867,13 +876,13 @@ pub mod ns {
                     updated_at: now_ms,
                     status: input.status.unwrap_or(0),
                     tags: input.tags.unwrap_or_default(),
-                    payload: input.payload.clone(),
-                    dek: input.dek.clone(),
+                    payload: input.payload,
+                    dek: input.dek,
                     version: 1,
                     ..Default::default()
                 },
             ) {
-                Err(format!("setting {} already exists", spk))?;
+                Err("setting already exists".to_string())?;
             }
 
             ns.payload_bytes_total = ns.payload_bytes_total.saturating_add(size as u64);
@@ -882,21 +891,21 @@ pub mod ns {
     }
 
     pub fn update_setting_payload(
-        caller: &Principal,
-        spk: &SettingPathKey,
+        caller: Principal,
+        spk: SettingPathKey,
         input: UpdateSettingPayloadInput,
         now_ms: u64,
     ) -> Result<UpdateSettingOutput, String> {
         with_mut(&spk.0, |ns| {
-            if !ns.can_write_setting(caller, spk) {
+            if !ns.can_write_setting(&caller, &spk) {
                 Err("no permission".to_string())?;
             }
             let size = input.payload.len();
             let output = {
                 let max_payload_size = ns.max_payload_size;
                 let setting = ns
-                    .get_setting_mut(spk)
-                    .ok_or_else(|| format!("setting {} not found", spk))?;
+                    .get_setting_mut(&spk)
+                    .ok_or_else(|| format!("setting {} not found", &spk))?;
                 if setting.version != spk.4 {
                     Err("version mismatch".to_string())?;
                 }
@@ -971,12 +980,12 @@ pub mod ns {
     }
 
     pub fn update_setting_info(
-        caller: &Principal,
-        spk: &SettingPathKey,
+        caller: Principal,
+        spk: SettingPathKey,
         input: UpdateSettingInfoInput,
         now_ms: u64,
     ) -> Result<UpdateSettingOutput, String> {
-        with_setting_mut(caller, spk, |setting| {
+        with_setting_mut(&caller, &spk, |setting| {
             if let Some(status) = input.status {
                 setting.status = status;
             }

@@ -29,6 +29,8 @@ fn ecdsa_public_key(input: Option<PublicKeyInput>) -> Result<PublicKeyOutput, St
 
 #[ic_cdk::update(guard = "is_authenticated")]
 async fn ecdsa_sign(input: SignInput) -> Result<ByteBuf, String> {
+    store::state::allowed_api("ecdsa_sign")?;
+
     let caller = ic_cdk::caller();
     store::ns::ecdsa_sign_with(&caller, input.ns, input.derivation_path, input.message).await
 }
@@ -60,6 +62,8 @@ fn schnorr_public_key(
 
 #[ic_cdk::update(guard = "is_authenticated")]
 async fn schnorr_sign(algorithm: SchnorrAlgorithm, input: SignInput) -> Result<ByteBuf, String> {
+    store::state::allowed_api("schnorr_sign")?;
+
     let caller = ic_cdk::caller();
     store::ns::schnorr_sign_with(
         &caller,
@@ -76,6 +80,7 @@ async fn schnorr_sign_identity(
     algorithm: SchnorrAlgorithm,
     input: SignIdentityInput,
 ) -> Result<ByteBuf, String> {
+    store::state::allowed_api("schnorr_sign_identity")?;
     validate_key(&input.ns)?;
 
     let caller = ic_cdk::caller();
@@ -90,6 +95,7 @@ async fn ecdh_cose_encrypted_key(
     path: SettingPath,
     ecdh: ECDHInput,
 ) -> Result<ECDHOutput<ByteBuf>, String> {
+    store::state::allowed_api("ecdh_cose_encrypted_key")?;
     path.validate()?;
 
     let caller = ic_cdk::caller();
@@ -119,6 +125,7 @@ async fn ecdh_cose_encrypted_key(
 
 #[ic_cdk::update(guard = "is_authenticated")]
 async fn vetkd_public_key(path: SettingPath) -> Result<ByteBuf, String> {
+    store::state::allowed_api("vetkd_public_key")?;
     path.validate()?;
 
     let caller = ic_cdk::caller();
@@ -139,6 +146,7 @@ async fn vetkd_encrypted_key(
     path: SettingPath,
     public_key: ByteArray<48>,
 ) -> Result<ByteBuf, String> {
+    store::state::allowed_api("vetkd_encrypted_key")?;
     path.validate()?;
 
     let caller = ic_cdk::caller();

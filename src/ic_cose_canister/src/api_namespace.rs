@@ -24,6 +24,7 @@ fn namespace_get_info(namespace: String) -> Result<NamespaceInfo, String> {
 
 #[ic_cdk::update(guard = "is_authenticated")]
 fn namespace_update_info(args: UpdateNamespaceInput) -> Result<(), String> {
+    store::state::allowed_api("namespace_update_info")?;
     args.validate()?;
 
     let caller = ic_cdk::caller();
@@ -33,6 +34,7 @@ fn namespace_update_info(args: UpdateNamespaceInput) -> Result<(), String> {
 
 #[ic_cdk::update(guard = "is_authenticated")]
 fn namespace_add_managers(namespace: String, mut args: BTreeSet<Principal>) -> Result<(), String> {
+    store::state::allowed_api("namespace_add_managers")?;
     validate_principals(&args)?;
 
     let caller = ic_cdk::caller();
@@ -49,6 +51,7 @@ fn namespace_add_managers(namespace: String, mut args: BTreeSet<Principal>) -> R
 
 #[ic_cdk::update(guard = "is_authenticated")]
 fn namespace_remove_managers(namespace: String, args: BTreeSet<Principal>) -> Result<(), String> {
+    store::state::allowed_api("namespace_remove_managers")?;
     validate_principals(&args)?;
 
     let caller = ic_cdk::caller();
@@ -65,6 +68,7 @@ fn namespace_remove_managers(namespace: String, args: BTreeSet<Principal>) -> Re
 
 #[ic_cdk::update(guard = "is_authenticated")]
 fn namespace_add_auditors(namespace: String, mut args: BTreeSet<Principal>) -> Result<(), String> {
+    store::state::allowed_api("namespace_add_auditors")?;
     validate_principals(&args)?;
 
     let caller = ic_cdk::caller();
@@ -81,6 +85,7 @@ fn namespace_add_auditors(namespace: String, mut args: BTreeSet<Principal>) -> R
 
 #[ic_cdk::update(guard = "is_authenticated")]
 fn namespace_remove_auditors(namespace: String, args: BTreeSet<Principal>) -> Result<(), String> {
+    store::state::allowed_api("namespace_remove_auditors")?;
     validate_principals(&args)?;
 
     let caller = ic_cdk::caller();
@@ -97,6 +102,7 @@ fn namespace_remove_auditors(namespace: String, args: BTreeSet<Principal>) -> Re
 
 #[ic_cdk::update(guard = "is_authenticated")]
 fn namespace_add_users(namespace: String, mut args: BTreeSet<Principal>) -> Result<(), String> {
+    store::state::allowed_api("namespace_add_users")?;
     validate_principals(&args)?;
 
     let caller = ic_cdk::caller();
@@ -113,6 +119,7 @@ fn namespace_add_users(namespace: String, mut args: BTreeSet<Principal>) -> Resu
 
 #[ic_cdk::update(guard = "is_authenticated")]
 fn namespace_remove_users(namespace: String, args: BTreeSet<Principal>) -> Result<(), String> {
+    store::state::allowed_api("namespace_remove_users")?;
     validate_principals(&args)?;
 
     let caller = ic_cdk::caller();
@@ -131,6 +138,8 @@ const MIN_CYCLES: u128 = 1_000_000_000_000;
 
 #[ic_cdk::update(guard = "is_authenticated")]
 fn namespace_top_up(namespace: String, cycles: u128) -> Result<u128, String> {
+    store::state::allowed_api("namespace_top_up")?;
+
     if cycles < MIN_CYCLES {
         Err("cycles should be greater than 1T".to_string())?;
     }

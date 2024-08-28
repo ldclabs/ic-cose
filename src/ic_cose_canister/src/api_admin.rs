@@ -11,8 +11,8 @@ use crate::{is_controller, store};
 #[ic_cdk::update(guard = "is_controller")]
 fn admin_add_managers(mut args: BTreeSet<Principal>) -> Result<(), String> {
     validate_principals(&args)?;
-    store::state::with_mut(|r| {
-        r.managers.append(&mut args);
+    store::state::with_mut(|s| {
+        s.managers.append(&mut args);
         Ok(())
     })
 }
@@ -20,8 +20,8 @@ fn admin_add_managers(mut args: BTreeSet<Principal>) -> Result<(), String> {
 #[ic_cdk::update(guard = "is_controller")]
 fn admin_remove_managers(args: BTreeSet<Principal>) -> Result<(), String> {
     validate_principals(&args)?;
-    store::state::with_mut(|r| {
-        r.managers.retain(|p| !args.contains(p));
+    store::state::with_mut(|s| {
+        s.managers.retain(|v| !args.contains(v));
         Ok(())
     })
 }
@@ -29,8 +29,8 @@ fn admin_remove_managers(args: BTreeSet<Principal>) -> Result<(), String> {
 #[ic_cdk::update(guard = "is_controller")]
 fn admin_add_auditors(mut args: BTreeSet<Principal>) -> Result<(), String> {
     validate_principals(&args)?;
-    store::state::with_mut(|r| {
-        r.auditors.append(&mut args);
+    store::state::with_mut(|s| {
+        s.auditors.append(&mut args);
         Ok(())
     })
 }
@@ -38,14 +38,31 @@ fn admin_add_auditors(mut args: BTreeSet<Principal>) -> Result<(), String> {
 #[ic_cdk::update(guard = "is_controller")]
 fn admin_remove_auditors(args: BTreeSet<Principal>) -> Result<(), String> {
     validate_principals(&args)?;
-    store::state::with_mut(|r| {
-        r.auditors.retain(|p| !args.contains(p));
+    store::state::with_mut(|s| {
+        s.auditors.retain(|v| !args.contains(v));
+        Ok(())
+    })
+}
+
+#[ic_cdk::update(guard = "is_controller")]
+fn admin_add_allowed_apis(mut args: BTreeSet<String>) -> Result<(), String> {
+    store::state::with_mut(|s| {
+        s.allowed_apis.append(&mut args);
+        Ok(())
+    })
+}
+
+#[ic_cdk::update(guard = "is_controller")]
+fn admin_remove_allowed_apis(args: BTreeSet<String>) -> Result<(), String> {
+    store::state::with_mut(|s| {
+        s.allowed_apis.retain(|v| !args.contains(v));
         Ok(())
     })
 }
 
 #[ic_cdk::update]
 async fn admin_create_namespace(args: CreateNamespaceInput) -> Result<NamespaceInfo, String> {
+    store::state::allowed_api("admin_create_namespace")?;
     args.validate()?;
 
     let caller = ic_cdk::caller();
@@ -91,5 +108,15 @@ fn validate_admin_add_auditors(args: BTreeSet<Principal>) -> Result<(), String> 
 #[ic_cdk::update]
 fn validate_admin_remove_auditors(args: BTreeSet<Principal>) -> Result<(), String> {
     validate_principals(&args)?;
+    Ok(())
+}
+
+#[ic_cdk::update]
+fn validate_admin_add_allowed_apis(_args: BTreeSet<String>) -> Result<(), String> {
+    Ok(())
+}
+
+#[ic_cdk::update]
+fn validate_admin_remove_allowed_apis(_args: BTreeSet<String>) -> Result<(), String> {
     Ok(())
 }

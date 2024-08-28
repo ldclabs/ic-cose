@@ -27,6 +27,7 @@ type InitArgs = record {
   ecdsa_key_name : text;
   name : text;
   schnorr_key_name : text;
+  allowed_apis : vec text;
   subnet_size : nat64;
   vetkd_key_name : text;
 };
@@ -100,6 +101,7 @@ type StateInfo = record {
   name : text;
   auditors : vec principal;
   schnorr_key_name : text;
+  allowed_apis : vec text;
   subnet_size : nat64;
   namespace_total : nat64;
   vetkd_key_name : text;
@@ -127,10 +129,12 @@ type UpgradeArgs = record {
   subnet_size : opt nat64;
 };
 service : (opt ChainArgs) -> {
+  admin_add_allowed_apis : (vec text) -> (Result);
   admin_add_auditors : (vec principal) -> (Result);
   admin_add_managers : (vec principal) -> (Result);
   admin_create_namespace : (CreateNamespaceInput) -> (Result_1);
   admin_list_namespace : (opt text, opt nat32) -> (Result_2) query;
+  admin_remove_allowed_apis : (vec text) -> (Result);
   admin_remove_auditors : (vec principal) -> (Result);
   admin_remove_managers : (vec principal) -> (Result);
   ecdh_cose_encrypted_key : (SettingPath, ECDHInput) -> (Result_3);
@@ -161,8 +165,10 @@ service : (opt ChainArgs) -> {
       Result_7,
     );
   state_get_info : () -> (Result_10) query;
+  validate_admin_add_allowed_apis : (vec text) -> (Result);
   validate_admin_add_auditors : (vec principal) -> (Result);
   validate_admin_add_managers : (vec principal) -> (Result);
+  validate_admin_remove_allowed_apis : (vec text) -> (Result);
   validate_admin_remove_auditors : (vec principal) -> (Result);
   validate_admin_remove_managers : (vec principal) -> (Result);
   vetkd_encrypted_key : (SettingPath, blob) -> (Result_5);
