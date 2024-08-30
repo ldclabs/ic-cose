@@ -777,6 +777,8 @@ pub mod ns {
                 max_payload_size: input.max_payload_size.unwrap_or(MAX_PAYLOAD_SIZE),
                 visibility: input.visibility,
                 managers: input.managers,
+                auditors: input.auditors,
+                users: input.users,
                 ..Default::default()
             };
 
