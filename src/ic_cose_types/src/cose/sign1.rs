@@ -45,3 +45,28 @@ pub fn cose_sign1_from(
     }
     Ok(cs1)
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use candid::Principal;
+    use const_hex::decode;
+
+    #[test]
+    fn cose_sign1_from_works() {
+        // root public key
+        let pk =
+            decode("8fbb003d3f662fa0ea23b27681f53ef46cd5ba4ce887f569e9c60342cc766642").unwrap();
+        let pk: [u8; 32] = pk.try_into().unwrap();
+        let pk = ed25519::VerifyingKey::from_bytes(&pk).unwrap();
+        let subject =
+            Principal::from_text("i2gam-uue3y-uxwyd-mzyhb-nirhd-hz3l4-2hw3f-4fzvw-lpvvc-dqdrg-7qe")
+                .unwrap();
+        // from schnorr_sign_identity API
+        let data = decode("8443a10127a0589ca801781b35336379672d79796161612d61616161702d61687075612d63616902783f693267616d2d75756533792d75787779642d6d7a7968622d6e697268642d687a336c342d32687733662d34667a76772d6c707676632d64716472672d3771650366746573746572041a66d11526051a66d10716061a66d10716075029420f3d16231d2de11fb7c33bbe971e096d4e616d6573706163652e2a3a5f5840bc6f9f4305a19a4a3952388cb8667e340ead39878d1ada1b671fe9b81f1c2db1c479508e5c9c20e17f5168a0587f5c049047317f4bb5c8b8f2c84e05fce6c806").unwrap();
+        let res = cose_sign1_from(&data, subject.as_slice(), &[], &[pk]).unwrap();
+        println!("{:?}", res);
+
+        assert_eq!(res.payload, Some(decode("a801781b35336379672d79796161612d61616161702d61687075612d63616902783f693267616d2d75756533792d75787779642d6d7a7968622d6e697268642d687a336c342d32687733662d34667a76772d6c707676632d64716472672d3771650366746573746572041a66d11526051a66d10716061a66d10716075029420f3d16231d2de11fb7c33bbe971e096d4e616d6573706163652e2a3a5f").unwrap()));
+    }
+}

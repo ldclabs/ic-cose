@@ -109,7 +109,7 @@ async fn ecdh_cose_encrypted_key(
     })?;
 
     let aad = spk.2.as_slice();
-    let kek = store::ns::inner_schnorr_kek(&spk, &key_id).await?;
+    let kek = store::ns::inner_derive_kek(&spk, &key_id)?;
     let kek = cose_aes256_key(kek, key_id.into_vec());
     let kek = kek.to_vec().map_err(format_error)?;
 
@@ -118,7 +118,7 @@ async fn ecdh_cose_encrypted_key(
     let (shared_secret, public_key) = ecdh_x25519(secret_key, *ecdh.public_key);
     let key = cose_encrypt0(&kek, shared_secret.as_bytes(), aad, *ecdh.nonce, None)?;
     Ok(ECDHOutput {
-        payload: key,
+        payload: key.into(),
         public_key: public_key.to_bytes().into(),
     })
 }

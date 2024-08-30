@@ -2,7 +2,6 @@ use coset::{
     iana, CborSerializable, CoseEncrypt0, CoseEncrypt0Builder, HeaderBuilder,
     TaggedCborSerializable,
 };
-use serde_bytes::ByteBuf;
 
 use super::{
     aes::{aes256_gcm_decrypt, aes256_gcm_encrypt},
@@ -19,7 +18,7 @@ pub fn cose_encrypt0(
     aad: &[u8],
     nonce: [u8; 12],
     key_id: Option<Vec<u8>>,
-) -> Result<ByteBuf, String> {
+) -> Result<Vec<u8>, String> {
     let protected = HeaderBuilder::new()
         .algorithm(iana::Algorithm::A256GCM)
         .build();
@@ -35,15 +34,14 @@ pub fn cose_encrypt0(
             aes256_gcm_encrypt(secret, &nonce, enc, plain_data).unwrap()
         })
         .build();
-    let payload = e0.to_tagged_vec().map_err(format_error)?;
-    Ok(ByteBuf::from(payload))
+    e0.to_tagged_vec().map_err(format_error)
 }
 
 pub fn cose_decrypt0(
     payload: &[u8], // COSE_Encrypt0 item
     secret: &[u8; 32],
     aad: &[u8],
-) -> Result<ByteBuf, String> {
+) -> Result<Vec<u8>, String> {
     let e0 = CoseEncrypt0::from_slice(skip_prefix(&ENCRYPT0_TAG, payload)).map_err(format_error)?;
     let nonce = e0.unprotected.iv.first_chunk::<12>().ok_or_else(|| {
         format!(
@@ -51,21 +49,19 @@ pub fn cose_decrypt0(
             e0.unprotected.iv.len()
         )
     })?;
-    let plain_data = e0.decrypt(aad, |cipher_data, enc| {
+    e0.decrypt(aad, |cipher_data, enc| {
         aes256_gcm_decrypt(secret, nonce, enc, cipher_data)
-    })?;
-    Ok(ByteBuf::from(plain_data))
+    })
 }
 
-pub fn decrypt(item: CoseEncrypt0, secret: &[u8; 32], aad: &[u8]) -> Result<ByteBuf, String> {
+pub fn decrypt(item: CoseEncrypt0, secret: &[u8; 32], aad: &[u8]) -> Result<Vec<u8>, String> {
     let nonce = item.unprotected.iv.first_chunk::<12>().ok_or_else(|| {
         format!(
             "invalid nonce length, expected 12, got {}",
             item.unprotected.iv.len()
         )
     })?;
-    let plain_data = item.decrypt(aad, |cipher_data, enc| {
+    item.decrypt(aad, |cipher_data, enc| {
         aes256_gcm_decrypt(secret, nonce, enc, cipher_data)
-    })?;
-    Ok(ByteBuf::from(plain_data))
+    })
 }

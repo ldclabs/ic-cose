@@ -16,7 +16,7 @@ use ic_stable_structures::{
     DefaultMemoryImpl, StableBTreeMap, StableCell, Storable,
 };
 use serde::{Deserialize, Serialize};
-use serde_bytes::ByteBuf;
+use serde_bytes::{ByteArray, ByteBuf};
 use std::{
     borrow::Cow,
     cell::RefCell,
@@ -60,6 +60,8 @@ pub struct State {
     pub subnet_size: u64,
     #[serde(rename = "f")]
     pub freezing_threshold: u64, // freezing writing threshold in cycles
+    #[serde(default, rename = "iv")]
+    pub init_vector: ByteArray<32>, // should not be exposed
 }
 
 impl State {
@@ -432,10 +434,13 @@ pub mod state {
                 })
                 .ok();
 
+        let iv: [u8; 32] = rand_bytes().await.expect("failed to generate IV");
+
         with_mut(|r| {
             r.ecdsa_public_key = ecdsa_public_key;
             r.schnorr_ed25519_public_key = schnorr_ed25519_public_key;
             r.schnorr_secp256k1_public_key = schnorr_secp256k1_public_key;
+            r.init_vector = iv.into();
         });
     }
 
@@ -669,26 +674,24 @@ pub mod ns {
         Ok(ByteBuf::from(token))
     }
 
-    pub async fn inner_schnorr_kek(
-        spk: &SettingPathKey,
-        key_id: &[u8],
-    ) -> Result<[u8; 32], String> {
-        let key_name = state::with(|r| r.schnorr_key_name.clone());
-        let derivation_path = vec![
-            b"COSE_Symmetric_Key".to_vec(),
-            spk.2.to_bytes().to_vec(),
-            vec![spk.1],
-            spk.0.to_bytes().to_vec(),
-        ];
-        let message = mac3_256(spk.0.as_bytes(), key_id);
-        let sig = sign_with_schnorr(
-            key_name,
-            SchnorrAlgorithm::Ed25519,
-            derivation_path,
-            message.into(),
-        )
-        .await?;
-        Ok(mac3_256(spk.0.as_bytes(), &sig))
+    pub fn inner_derive_kek(spk: &SettingPathKey, key_id: &[u8]) -> Result<[u8; 32], String> {
+        state::with(|s| {
+            let pk = s
+                .schnorr_secp256k1_public_key
+                .as_ref()
+                .ok_or("no schnorr secp256k1 public key")?;
+
+            let derivation_path = vec![
+                b"COSE_Symmetric_Key".to_vec(),
+                s.init_vector.to_vec(),
+                spk.2.to_bytes().to_vec(),
+                vec![spk.1],
+                spk.0.to_bytes().to_vec(),
+            ];
+            let pk =
+                derive_schnorr_public_key(SchnorrAlgorithm::Bip340Secp256k1, pk, derivation_path)?;
+            Ok(mac3_256(&pk.public_key, key_id))
+        })
     }
 
     pub async fn inner_vetkd_public_key(spk: &SettingPathKey) -> Result<Vec<u8>, String> {

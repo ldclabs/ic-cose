@@ -31,3 +31,36 @@ pub fn ed25519_verify_any(
         false => Err("ed25519 signature verification failed".to_string()),
     }
 }
+
+#[cfg(test)]
+mod test {
+    use const_hex::decode;
+
+    use super::*;
+
+    #[test]
+    fn ed25519_verify_works() {
+        // generated with:
+        // dfx canister call ic_cose_canister schnorr_public_key '(variant { ed25519 }, opt record {
+        //     ns = "_";
+        //     derivation_path = vec {};
+        //   })' --ic
+        let pk =
+            decode("dded78d6f1087ebe259f8dadd83f5bce72cbd5d95aa93fe237bb6f53b05fe809").unwrap();
+        let pk: [u8; 32] = pk.try_into().unwrap();
+
+        // generated with:
+        // dfx canister call ic_cose_canister schnorr_sign '(variant { ed25519 }, record {
+        //     ns = "_";
+        //     derivation_path = vec {};
+        //     message = blob "\62\33\97\68\50\d2\fc\6a\b6\53\30\6b\33\2d\de\43\89\a4\e8\7b\79\d5\21\a3\31\68\3c\f9\01\02\c4\78";
+        //   })' --ic
+        let message =
+            decode("6233976850d2fc6ab653306b332dde4389a4e87b79d521a331683cf90102c478").unwrap();
+        let signature = decode("aba0f24e4c025e136adc6928b2ea736d1621c3b307f9283756240180a0b9dd0a504cc70b79f3c44c5c894c3105281e73035fe551f3c9ef964beb8548b3e63b03").unwrap();
+        assert!(ed25519_verify(&pk, &message, &signature).is_ok());
+
+        let signature = decode("96ea613d0a26f3812bdee85b262c898393b063b56379d6e9d75e0ab28be820cd4f42fdfb60f8a6fc081393b9407be9387d7f68fe6dec4699dc69b7ace6990303").unwrap();
+        assert!(ed25519_verify(&pk, &message, &signature).is_ok());
+    }
+}

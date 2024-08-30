@@ -65,7 +65,7 @@ pub fn cose_aes256_key(secret: [u8; 32], key_id: Vec<u8>) -> CoseKey {
         .build()
 }
 
-pub fn get_cose_key_secret(key: CoseKey) -> Result<[u8; 32], String> {
+pub fn get_cose_key_secret(key: CoseKey) -> Result<Vec<u8>, String> {
     let key_label = match key.kty {
         RegisteredLabel::Assigned(iana::KeyType::Symmetric) => {
             Label::Int(iana::SymmetricKeyParameter::K as i64)
@@ -83,12 +83,9 @@ pub fn get_cose_key_secret(key: CoseKey) -> Result<[u8; 32], String> {
 
     for (label, value) in key.params {
         if label == key_label {
-            let val: [u8; 32] = value
+            return value
                 .into_bytes()
-                .map_err(|_| "invalid secret key".to_string())?
-                .try_into()
-                .map_err(|_| "invalid secret key".to_string())?;
-            return Ok(val);
+                .map_err(|_| "invalid secret key".to_string());
         }
     }
     Err("missing secret key".to_string())
