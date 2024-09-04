@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::validate_key;
 
 pub const CHUNK_SIZE: u32 = 256 * 1024;
+pub const MAX_DEK_SIZE: u64 = 3 * 1024;
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SettingInfo {
@@ -42,15 +43,7 @@ impl SettingPath {
     }
 }
 
-pub fn try_decode_payload(max_size: u64, payload: &[u8]) -> Result<Value, String> {
-    if max_size > 0 && payload.len() as u64 > max_size {
-        return Err(format!(
-            "payload size {} exceeds the limit {}",
-            payload.len(),
-            max_size
-        ));
-    }
-
+pub fn try_decode_payload(payload: &[u8]) -> Result<Value, String> {
     from_reader(payload).map_err(|err| format!("decode CBOR payload failed: {:?}", err))
 }
 
@@ -73,6 +66,11 @@ impl CreateSettingInput {
         if let Some(ref tags) = self.tags {
             for (k, _) in tags.iter() {
                 validate_key(k)?;
+            }
+        }
+        if let Some(ref dek) = self.dek {
+            if dek.len() > MAX_DEK_SIZE as usize {
+                Err("DEK size exceeds the limit".to_string())?;
             }
         }
         Ok(())
@@ -111,9 +109,10 @@ impl UpdateSettingInfoInput {
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize)]
 pub struct UpdateSettingPayloadInput {
-    pub payload: ByteBuf, // plain or encrypted payload
+    pub payload: Option<ByteBuf>, // plain or encrypted payload
     pub status: Option<i8>,
     pub deprecate_current: Option<bool>, // deprecate the current version
+    pub dek: Option<ByteBuf>,
 }
 
 impl UpdateSettingPayloadInput {
@@ -121,6 +120,14 @@ impl UpdateSettingPayloadInput {
         if let Some(status) = self.status {
             if !(-1i8..=1i8).contains(&status) {
                 Err("status should be -1, 0 or 1".to_string())?;
+            }
+        }
+        if self.payload.is_none() && self.dek.is_none() {
+            Err("payload or dek should be provided".to_string())?;
+        }
+        if let Some(ref dek) = self.dek {
+            if dek.len() > MAX_DEK_SIZE as usize {
+                Err("DEK size exceeds the limit".to_string())?;
             }
         }
         Ok(())
@@ -134,6 +141,6 @@ pub struct SettingArchivedPayload {
     pub version: u32,
     pub archived_at: u64,
     pub deprecated: bool, // true if the payload should not be used for some reason
-    pub payload: ByteBuf,
+    pub payload: Option<ByteBuf>,
     pub dek: Option<ByteBuf>, // exist if the payload is encrypted
 }

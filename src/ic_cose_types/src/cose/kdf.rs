@@ -12,7 +12,7 @@ pub fn hkdf256<const N: usize>(secret: &[u8], salt: Option<&[u8]>, info: &[u8]) 
 
 // HKDF-SHA-256 with Context Information Structure
 // https://datatracker.ietf.org/doc/html/rfc9053#name-context-information-structu
-pub fn hkdf256_context(secret: &[u8], salt: Option<&[u8]>, ecdh: bool) -> [u8; 32] {
+pub fn derive_aesgcm256_secret(secret: &[u8], salt: Option<&[u8]>) -> [u8; 32] {
     let ctx = CoseKdfContextBuilder::new()
         .algorithm(iana::Algorithm::A256GCM)
         .supp_pub_info(
@@ -20,11 +20,7 @@ pub fn hkdf256_context(secret: &[u8], salt: Option<&[u8]>, ecdh: bool) -> [u8; 3
                 .key_data_length(256)
                 .protected(
                     HeaderBuilder::new()
-                        .algorithm(if ecdh {
-                            iana::Algorithm::ECDH_ES_HKDF_256
-                        } else {
-                            iana::Algorithm::Direct_HKDF_SHA_256
-                        })
+                        .algorithm(iana::Algorithm::Direct_HKDF_SHA_256)
                         .build(),
                 )
                 .build(),

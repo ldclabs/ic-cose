@@ -335,7 +335,7 @@ pub struct SettingArchived {
     #[serde(rename = "d")]
     pub deprecated: bool, // true if the payload should not be used for some reason
     #[serde(rename = "p")]
-    pub payload: ByteBuf,
+    pub payload: Option<ByteBuf>,
     #[serde(rename = "k")]
     pub dek: Option<ByteBuf>,
 }
@@ -345,12 +345,12 @@ impl Storable for SettingArchived {
 
     fn to_bytes(&self) -> Cow<[u8]> {
         let mut buf = vec![];
-        into_writer(self, &mut buf).expect("failed to encode SettingArchivedPayload data");
+        into_writer(self, &mut buf).expect("failed to encode SettingArchived data");
         Cow::Owned(buf)
     }
 
     fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
-        from_reader(&bytes[..]).expect("failed to decode SettingArchivedPayload data")
+        from_reader(&bytes[..]).expect("failed to decode SettingArchived data")
     }
 }
 
@@ -831,7 +831,7 @@ pub mod ns {
                 .check_and_get_setting(&caller, &spk)
                 .ok_or_else(|| format!("setting {} not found or no permission", &spk))?;
 
-            if spk.4 != 0 || spk.4 != setting.version {
+            if spk.4 != 0 && spk.4 != setting.version {
                 Err("version mismatch".to_string())?;
             };
 
@@ -886,6 +886,12 @@ pub mod ns {
                 Err("version mismatch".to_string())?;
             }
 
+            if let Some(ref payload) = input.payload {
+                if payload.len() as u64 > ns.max_payload_size {
+                    Err("payload size exceeds the limit".to_string())?;
+                }
+            }
+
             let size = match input.dek {
                 Some(ref dek) => {
                     // should be valid COSE encrypt0 dek
@@ -904,7 +910,7 @@ pub mod ns {
                 None => {
                     // try to validate plain payload
                     if let Some(ref payload) = input.payload {
-                        try_decode_payload(ns.max_payload_size, payload)?;
+                        try_decode_payload(payload)?;
                         payload.len()
                     } else {
                         0
@@ -950,9 +956,20 @@ pub mod ns {
             if !ns.can_write_setting(&caller, &spk) {
                 Err("no permission".to_string())?;
             }
-            let size = input.payload.len();
+
+            let mut size = if let Some(ref payload) = input.payload {
+                payload.len()
+            } else {
+                0
+            };
+            if size as u64 > ns.max_payload_size {
+                Err("payload size exceeds the limit".to_string())?;
+            }
+            if let Some(ref dek) = input.dek {
+                size += dek.len();
+            }
+
             let output = {
-                let max_payload_size = ns.max_payload_size;
                 let setting = ns
                     .get_setting_mut(&spk)
                     .ok_or_else(|| format!("setting {} not found", &spk))?;
@@ -963,18 +980,14 @@ pub mod ns {
                     Err("readonly setting can not be updated".to_string())?;
                 }
 
-                match setting.dek {
-                    Some(_) => {
-                        if input.payload.len() as u64 > max_payload_size {
-                            Err("payload size exceeds the limit".to_string())?;
-                        }
+                if setting.dek.is_some() || input.dek.is_some() {
+                    if let Some(ref payload) = input.payload {
                         // should be valid COSE encrypt0 payload
-                        try_decode_encrypt0(&input.payload)?;
+                        try_decode_encrypt0(payload)?;
                     }
-                    None => {
-                        // try to validate plain payload
-                        try_decode_payload(max_payload_size, &input.payload)?;
-                    }
+                } else if let Some(ref payload) = input.payload {
+                    // try to validate plain payload
+                    try_decode_payload(payload)?;
                 }
 
                 if let Some(payload) = setting.payload.as_ref() {
@@ -984,19 +997,24 @@ pub mod ns {
                             SettingArchived {
                                 archived_at: now_ms,
                                 deprecated: input.deprecate_current.unwrap_or(false),
-                                payload: payload.clone(),
+                                payload: Some(payload.clone()),
                                 dek: setting.dek.clone(),
                             },
                         );
                     });
                 }
 
+                setting.version = setting.version.saturating_add(1);
+                setting.updated_at = now_ms;
                 if let Some(status) = input.status {
                     setting.status = status;
                 }
-                setting.version = setting.version.saturating_add(1);
-                setting.payload = Some(input.payload);
-                setting.updated_at = now_ms;
+                if let Some(payload) = input.payload {
+                    setting.payload = Some(payload);
+                }
+                if let Some(dek) = input.dek {
+                    setting.dek = Some(dek);
+                }
                 UpdateSettingOutput {
                     created_at: setting.created_at,
                     updated_at: setting.updated_at,
