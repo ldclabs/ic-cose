@@ -3,10 +3,11 @@
 
 ## Features
 
-- [x] Supports large file uploads and downloads through file sharding, concurrent high-speed uploads, resumable uploads, and segmented downloads.
-- [x] Provides data verification based on ICP's verification mechanisms to ensure file integrity during reading.
-- [x] Supports file directory tree.
-- [x] Access control with permissions for public, private, read-only, and write-only for files, folders, and buckets.
+- [x] Supports message signing and configuration data encryption (COSE, Threshold ECDSA, Threshold Schnorr, VetKeys (TODO)).
+- [x] Organizes configuration data by namespaces and client subjects with fine-grained access control.
+- [ ] Supports horizontal scalability, WASM upgrade management, and Cycles recharge management.
+- [ ] Serve as a state persistence service for enclaves, aiding in loading and persisting confidential data during startup and runtime.
+- [ ] Can be used as a cluster management center for both Web3 and Web2 services.
 
 ## Candid API
 
@@ -97,6 +98,8 @@ dfx canister call ic_cose_canister admin_create_namespace "(record {
   desc = null;
   max_payload_size = opt 1_000_000;
   managers = vec {principal \"$MYID\"};
+  auditors = {};
+  users = {};
 })"
 
 dfx canister call ic_cose_canister admin_list_namespace "(null, null)"
