@@ -1,5 +1,8 @@
 # `IC-COSE`
+
 ⚙️ A decentralized COnfiguration service with Signing and Encryption on the Internet Computer.
+
+💝 This project received a **$25k Developer Grant** from the [DFINITY Foundation](https://dfinity.org/grants).
 
 ## Overview
 
@@ -16,6 +19,12 @@ A imaginative use case is serving as a state persistence service for enclaves ru
 - [ ] Supports horizontal scalability, WASM upgrade management, and Cycles recharge management.
 - [ ] Serve as a state persistence service for enclaves, aiding in loading and persisting confidential data during startup and runtime.
 - [ ] Can be used as a cluster management center for both Web3 and Web2 services.
+
+## Who's using?
+
+- [ICPanda](https://github.com/ldclabs/ic-panda): A decentralized Panda meme platform featuring E2E encrypted messaging, lucky draws, airdrops.
+
+If you plan to use this project and have any questions, feel free to open an issue. I will address it as soon as possible.
 
 ## License
 Copyright © 2024 [LDC Labs](https://github.com/ldclabs).
