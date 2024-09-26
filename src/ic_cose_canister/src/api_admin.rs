@@ -87,36 +87,72 @@ fn admin_list_namespace(
     })
 }
 
-#[ic_cdk::update]
+// ----- Use validate2_xxxxxx instead of validate_xxxxxx -----
+
+#[ic_cdk::update(hidden = true)]
 fn validate_admin_add_managers(args: BTreeSet<Principal>) -> Result<(), String> {
     validate_principals(&args)?;
     Ok(())
 }
 
 #[ic_cdk::update]
+fn validate2_admin_add_managers(args: BTreeSet<Principal>) -> Result<String, String> {
+    validate_principals(&args)?;
+    Ok("ok".to_string())
+}
+
+#[ic_cdk::update(hidden = true)]
 fn validate_admin_remove_managers(args: BTreeSet<Principal>) -> Result<(), String> {
     validate_principals(&args)?;
     Ok(())
 }
 
 #[ic_cdk::update]
+fn validate2_admin_remove_managers(args: BTreeSet<Principal>) -> Result<String, String> {
+    validate_principals(&args)?;
+    Ok("ok".to_string())
+}
+
+#[ic_cdk::update(hidden = true)]
 fn validate_admin_add_auditors(args: BTreeSet<Principal>) -> Result<(), String> {
     validate_principals(&args)?;
     Ok(())
 }
 
 #[ic_cdk::update]
+fn validate2_admin_add_auditors(args: BTreeSet<Principal>) -> Result<String, String> {
+    validate_principals(&args)?;
+    Ok("ok".to_string())
+}
+
+#[ic_cdk::update(hidden = true)]
 fn validate_admin_remove_auditors(args: BTreeSet<Principal>) -> Result<(), String> {
     validate_principals(&args)?;
     Ok(())
 }
 
 #[ic_cdk::update]
+fn validate2_admin_remove_auditors(args: BTreeSet<Principal>) -> Result<String, String> {
+    validate_principals(&args)?;
+    Ok("ok".to_string())
+}
+
+#[ic_cdk::update(hidden = true)]
 fn validate_admin_add_allowed_apis(_args: BTreeSet<String>) -> Result<(), String> {
     Ok(())
 }
 
 #[ic_cdk::update]
+fn validate2_admin_add_allowed_apis(_args: BTreeSet<String>) -> Result<String, String> {
+    Ok("ok".to_string())
+}
+
+#[ic_cdk::update(hidden = true)]
 fn validate_admin_remove_allowed_apis(_args: BTreeSet<String>) -> Result<(), String> {
     Ok(())
+}
+
+#[ic_cdk::update]
+fn validate2_admin_remove_allowed_apis(_args: BTreeSet<String>) -> Result<String, String> {
+    Ok("ok".to_string())
 }
