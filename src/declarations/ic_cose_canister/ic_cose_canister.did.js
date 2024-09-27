@@ -157,6 +157,7 @@ export const idlFactory = ({ IDL }) => {
     'vetkd_key_name' : IDL.Text,
   });
   const Result_10 = IDL.Variant({ 'Ok' : StateInfo, 'Err' : IDL.Text });
+  const Result_11 = IDL.Variant({ 'Ok' : IDL.Text, 'Err' : IDL.Text });
   return IDL.Service({
     'admin_add_allowed_apis' : IDL.Func([IDL.Vec(IDL.Text)], [Result], []),
     'admin_add_auditors' : IDL.Func([IDL.Vec(IDL.Principal)], [Result], []),
@@ -258,6 +259,36 @@ export const idlFactory = ({ IDL }) => {
         [],
       ),
     'state_get_info' : IDL.Func([], [Result_10], ['query']),
+    'validate2_admin_add_allowed_apis' : IDL.Func(
+        [IDL.Vec(IDL.Text)],
+        [Result_11],
+        [],
+      ),
+    'validate2_admin_add_auditors' : IDL.Func(
+        [IDL.Vec(IDL.Principal)],
+        [Result_11],
+        [],
+      ),
+    'validate2_admin_add_managers' : IDL.Func(
+        [IDL.Vec(IDL.Principal)],
+        [Result_11],
+        [],
+      ),
+    'validate2_admin_remove_allowed_apis' : IDL.Func(
+        [IDL.Vec(IDL.Text)],
+        [Result_11],
+        [],
+      ),
+    'validate2_admin_remove_auditors' : IDL.Func(
+        [IDL.Vec(IDL.Principal)],
+        [Result_11],
+        [],
+      ),
+    'validate2_admin_remove_managers' : IDL.Func(
+        [IDL.Vec(IDL.Principal)],
+        [Result_11],
+        [],
+      ),
     'validate_admin_add_allowed_apis' : IDL.Func(
         [IDL.Vec(IDL.Text)],
         [Result],

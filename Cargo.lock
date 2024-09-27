@@ -1177,7 +1177,7 @@ checksum = "8de254dd67bbd58073e23dc1c8553ba12fa1dc610a19de94ad2bbcd0460c067f"
 
 [[package]]
 name = "ic_cose_canister"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "candid",
  "ciborium",
@@ -1195,7 +1195,7 @@ dependencies = [
 
 [[package]]
 name = "ic_cose_types"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "aes-gcm",
  "candid",

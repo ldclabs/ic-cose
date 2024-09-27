@@ -173,6 +173,12 @@ service : (opt ChainArgs) -> {
   validate2_admin_remove_allowed_apis : (vec text) -> (Result_11);
   validate2_admin_remove_auditors : (vec principal) -> (Result_11);
   validate2_admin_remove_managers : (vec principal) -> (Result_11);
+  validate_admin_add_allowed_apis : (vec text) -> (Result);
+  validate_admin_add_auditors : (vec principal) -> (Result);
+  validate_admin_add_managers : (vec principal) -> (Result);
+  validate_admin_remove_allowed_apis : (vec text) -> (Result);
+  validate_admin_remove_auditors : (vec principal) -> (Result);
+  validate_admin_remove_managers : (vec principal) -> (Result);
   vetkd_encrypted_key : (SettingPath, blob) -> (Result_5);
   vetkd_public_key : (SettingPath) -> (Result_5);
 }

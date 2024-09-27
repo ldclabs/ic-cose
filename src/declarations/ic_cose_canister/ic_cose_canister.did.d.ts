@@ -72,6 +72,8 @@ export type Result_1 = { 'Ok' : NamespaceInfo } |
   { 'Err' : string };
 export type Result_10 = { 'Ok' : StateInfo } |
   { 'Err' : string };
+export type Result_11 = { 'Ok' : string } |
+  { 'Err' : string };
 export type Result_2 = { 'Ok' : Array<NamespaceInfo> } |
   { 'Err' : string };
 export type Result_3 = { 'Ok' : ECDHOutput } |
@@ -209,6 +211,21 @@ export interface _SERVICE {
     Result_7
   >,
   'state_get_info' : ActorMethod<[], Result_10>,
+  'validate2_admin_add_allowed_apis' : ActorMethod<[Array<string>], Result_11>,
+  'validate2_admin_add_auditors' : ActorMethod<[Array<Principal>], Result_11>,
+  'validate2_admin_add_managers' : ActorMethod<[Array<Principal>], Result_11>,
+  'validate2_admin_remove_allowed_apis' : ActorMethod<
+    [Array<string>],
+    Result_11
+  >,
+  'validate2_admin_remove_auditors' : ActorMethod<
+    [Array<Principal>],
+    Result_11
+  >,
+  'validate2_admin_remove_managers' : ActorMethod<
+    [Array<Principal>],
+    Result_11
+  >,
   'validate_admin_add_allowed_apis' : ActorMethod<[Array<string>], Result>,
   'validate_admin_add_auditors' : ActorMethod<[Array<Principal>], Result>,
   'validate_admin_add_managers' : ActorMethod<[Array<Principal>], Result>,

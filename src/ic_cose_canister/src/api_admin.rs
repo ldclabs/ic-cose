@@ -89,7 +89,7 @@ fn admin_list_namespace(
 
 // ----- Use validate2_xxxxxx instead of validate_xxxxxx -----
 
-#[ic_cdk::update(hidden = true)]
+#[ic_cdk::update]
 fn validate_admin_add_managers(args: BTreeSet<Principal>) -> Result<(), String> {
     validate_principals(&args)?;
     Ok(())
@@ -101,7 +101,7 @@ fn validate2_admin_add_managers(args: BTreeSet<Principal>) -> Result<String, Str
     Ok("ok".to_string())
 }
 
-#[ic_cdk::update(hidden = true)]
+#[ic_cdk::update]
 fn validate_admin_remove_managers(args: BTreeSet<Principal>) -> Result<(), String> {
     validate_principals(&args)?;
     Ok(())
@@ -113,7 +113,7 @@ fn validate2_admin_remove_managers(args: BTreeSet<Principal>) -> Result<String, 
     Ok("ok".to_string())
 }
 
-#[ic_cdk::update(hidden = true)]
+#[ic_cdk::update]
 fn validate_admin_add_auditors(args: BTreeSet<Principal>) -> Result<(), String> {
     validate_principals(&args)?;
     Ok(())
@@ -125,7 +125,7 @@ fn validate2_admin_add_auditors(args: BTreeSet<Principal>) -> Result<String, Str
     Ok("ok".to_string())
 }
 
-#[ic_cdk::update(hidden = true)]
+#[ic_cdk::update]
 fn validate_admin_remove_auditors(args: BTreeSet<Principal>) -> Result<(), String> {
     validate_principals(&args)?;
     Ok(())
@@ -137,7 +137,7 @@ fn validate2_admin_remove_auditors(args: BTreeSet<Principal>) -> Result<String, 
     Ok("ok".to_string())
 }
 
-#[ic_cdk::update(hidden = true)]
+#[ic_cdk::update]
 fn validate_admin_add_allowed_apis(_args: BTreeSet<String>) -> Result<(), String> {
     Ok(())
 }
@@ -147,7 +147,7 @@ fn validate2_admin_add_allowed_apis(_args: BTreeSet<String>) -> Result<String, S
     Ok("ok".to_string())
 }
 
-#[ic_cdk::update(hidden = true)]
+#[ic_cdk::update]
 fn validate_admin_remove_allowed_apis(_args: BTreeSet<String>) -> Result<(), String> {
     Ok(())
 }
