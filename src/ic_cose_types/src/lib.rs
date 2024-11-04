@@ -49,7 +49,7 @@ pub fn validate_key(s: &str) -> Result<(), String> {
 
 pub fn validate_principals(principals: &BTreeSet<Principal>) -> Result<(), String> {
     if principals.is_empty() {
-        return Err("managers cannot be empty".to_string());
+        return Err("principals cannot be empty".to_string());
     }
     if principals.contains(&ANONYMOUS) {
         return Err("anonymous user is not allowed".to_string());

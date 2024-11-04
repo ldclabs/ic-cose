@@ -190,9 +190,21 @@ impl Namespace {
             return false;
         }
 
-        caller == &spk.2
+        if caller == &spk.2
             || self.auditors.contains(caller)
             || (spk.1 == 0 && self.managers.contains(caller))
+        {
+            return true;
+        }
+
+        let setting_key = (spk.2, spk.3.clone());
+        let setting = match spk.1 {
+            0 => self.settings.get(&setting_key),
+            1 => self.user_settings.get(&setting_key),
+            _ => None,
+        };
+
+        setting.map_or(false, |s| s.readers.contains(caller))
     }
 
     pub fn check_and_get_setting(
@@ -411,14 +423,14 @@ pub mod state {
 
         let ecdsa_public_key = ecdsa_public_key(ecdsa_key_name, vec![])
             .await
-            .map_err(|err| ic_cdk::print(&format!("failed to retrieve ECDSA public key: {err}")))
+            .map_err(|err| ic_cdk::print(format!("failed to retrieve ECDSA public key: {err}")))
             .ok();
 
         let schnorr_ed25519_public_key =
             schnorr_public_key(schnorr_key_name.clone(), SchnorrAlgorithm::Ed25519, vec![])
                 .await
                 .map_err(|err| {
-                    ic_cdk::print(&format!(
+                    ic_cdk::print(format!(
                         "failed to retrieve Schnorr Ed25519 public key: {err}"
                     ))
                 })
@@ -428,7 +440,7 @@ pub mod state {
             schnorr_public_key(schnorr_key_name, SchnorrAlgorithm::Bip340Secp256k1, vec![])
                 .await
                 .map_err(|err| {
-                    ic_cdk::print(&format!(
+                    ic_cdk::print(format!(
                         "failed to retrieve Schnorr Secp256k1 public key: {err}"
                     ))
                 })
@@ -688,8 +700,7 @@ pub mod ns {
                 vec![spk.1],
                 spk.0.to_bytes().to_vec(),
             ];
-            let pk =
-                derive_schnorr_public_key(SchnorrAlgorithm::Bip340Secp256k1, pk, derivation_path)?;
+            let pk = derive_schnorr_public_key(SchnorrAlgorithm::Ed25519, pk, derivation_path)?;
             Ok(mac3_256(&pk.public_key, key_id))
         })
     }
