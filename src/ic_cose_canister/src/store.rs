@@ -296,7 +296,7 @@ impl Setting {
 }
 
 // SettingPathKey: (namespace name, 0 or 1, subject, setting name, version)
-#[derive(Clone, Deserialize, Serialize, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, Ord, PartialOrd, Eq, PartialEq)]
 pub struct SettingPathKey(pub String, pub u8, pub Principal, pub ByteBuf, pub u32);
 
 impl SettingPathKey {
@@ -689,9 +689,9 @@ pub mod ns {
     pub fn inner_derive_kek(spk: &SettingPathKey, key_id: &[u8]) -> Result<[u8; 32], String> {
         state::with(|s| {
             let pk = s
-                .schnorr_secp256k1_public_key
+                .schnorr_ed25519_public_key
                 .as_ref()
-                .ok_or("no schnorr secp256k1 public key")?;
+                .ok_or("no schnorr ed25519 public key")?;
 
             let derivation_path = vec![
                 b"COSE_Symmetric_Key".to_vec(),

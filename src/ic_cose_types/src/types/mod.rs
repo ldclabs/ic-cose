@@ -9,7 +9,6 @@ pub mod state;
 
 pub use setting::SettingPath;
 
-// should update to ICRC3Map
 pub type MapValue =
     BTreeMap<String, icrc_ledger_types::icrc::generic_metadata_value::MetadataValue>;
 

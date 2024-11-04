@@ -24,7 +24,7 @@ pub struct NamespaceInfo {
     pub gas_balance: u128,             // cycles
 }
 
-#[derive(CandidType, Clone, Debug, Deserialize, Serialize)]
+#[derive(CandidType, Clone, Debug, Default, Deserialize, Serialize)]
 pub struct CreateNamespaceInput {
     pub name: String,
     pub visibility: u8, // 0: private; 1: public
@@ -58,7 +58,7 @@ impl CreateNamespaceInput {
     }
 }
 
-#[derive(CandidType, Clone, Debug, Deserialize, Serialize)]
+#[derive(CandidType, Clone, Debug, Default, Deserialize, Serialize)]
 pub struct UpdateNamespaceInput {
     pub name: String,
     pub desc: Option<String>,

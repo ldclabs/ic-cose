@@ -24,7 +24,7 @@ pub struct SettingInfo {
     pub payload: Option<ByteBuf>, // encrypted or plain payload
 }
 
-#[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(CandidType, Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SettingPath {
     pub ns: String,
     pub user_owned: bool,
@@ -47,7 +47,7 @@ pub fn try_decode_payload(payload: &[u8]) -> Result<Value, String> {
     from_reader(payload).map_err(|err| format!("decode CBOR payload failed: {:?}", err))
 }
 
-#[derive(CandidType, Clone, Debug, Deserialize, Serialize)]
+#[derive(CandidType, Clone, Debug, Default, Deserialize, Serialize)]
 pub struct CreateSettingInput {
     pub payload: Option<ByteBuf>,
     pub desc: Option<String>,
@@ -84,7 +84,7 @@ pub struct CreateSettingOutput {
     pub version: u32,
 }
 
-#[derive(CandidType, Clone, Debug, Deserialize, Serialize)]
+#[derive(CandidType, Clone, Debug, Default, Deserialize, Serialize)]
 pub struct UpdateSettingInfoInput {
     pub desc: Option<String>,
     pub status: Option<i8>,
@@ -107,7 +107,7 @@ impl UpdateSettingInfoInput {
     }
 }
 
-#[derive(CandidType, Clone, Debug, Deserialize, Serialize)]
+#[derive(CandidType, Clone, Debug, Default, Deserialize, Serialize)]
 pub struct UpdateSettingPayloadInput {
     pub payload: Option<ByteBuf>, // plain or encrypted payload
     pub status: Option<i8>,
