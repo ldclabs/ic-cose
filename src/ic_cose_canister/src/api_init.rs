@@ -1,4 +1,4 @@
-use candid::CandidType;
+use candid::{CandidType, Principal};
 use serde::Deserialize;
 use std::{collections::BTreeSet, time::Duration};
 
@@ -20,6 +20,7 @@ pub struct InitArgs {
     allowed_apis: BTreeSet<String>,
     subnet_size: u64,        // set to 0 to disable receiving cycles
     freezing_threshold: u64, // in cycles
+    governance_canister: Option<Principal>,
 }
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
@@ -27,6 +28,7 @@ pub struct UpgradeArgs {
     name: Option<String>, // seconds
     subnet_size: Option<u64>,
     freezing_threshold: Option<u64>, // in cycles
+    governance_canister: Option<Principal>,
 }
 
 #[ic_cdk::init]
@@ -45,6 +47,7 @@ fn init(args: Option<ChainArgs>) {
                 } else {
                     1_000_000_000_000
                 };
+                s.governance_canister = args.governance_canister;
             });
         }
         ChainArgs::Upgrade(_) => {
@@ -79,6 +82,9 @@ fn post_upgrade(args: Option<ChainArgs>) {
                 }
                 if let Some(freezing_threshold) = args.freezing_threshold {
                     s.freezing_threshold = freezing_threshold;
+                }
+                if let Some(governance_canister) = args.governance_canister {
+                    s.governance_canister = Some(governance_canister);
                 }
             });
         }

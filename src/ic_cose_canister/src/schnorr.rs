@@ -3,7 +3,6 @@ use ic_cose_types::{
     format_error,
     types::{PublicKeyOutput, SchnorrAlgorithm},
 };
-use ic_crypto_extended_bip32::{DerivationIndex, DerivationPath, ExtendedBip32DerivationOutput};
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
 
@@ -16,14 +15,25 @@ pub fn derive_schnorr_public_key(
 ) -> Result<PublicKeyOutput, String> {
     match alg {
         SchnorrAlgorithm::Bip340Secp256k1 => {
-            let ExtendedBip32DerivationOutput {
-                derived_public_key,
-                derived_chain_code,
-            } = DerivationPath::new(derivation_path.into_iter().map(DerivationIndex).collect())
-                .public_key_derivation(&public_key.public_key, &public_key.chain_code)
+            let path = ic_crypto_secp256k1::DerivationPath::new(
+                derivation_path
+                    .into_iter()
+                    .map(ic_crypto_secp256k1::DerivationIndex)
+                    .collect(),
+            );
+
+            let chain_code: [u8; 32] = public_key
+                .chain_code
+                .to_vec()
+                .try_into()
                 .map_err(format_error)?;
+            let pk = ic_crypto_secp256k1::PublicKey::deserialize_sec1(&public_key.public_key)
+                .map_err(format_error)?;
+            let (derived_public_key, derived_chain_code) =
+                pk.derive_subkey_with_chain_code(&path, &chain_code);
+
             Ok(PublicKeyOutput {
-                public_key: ByteBuf::from(derived_public_key),
+                public_key: ByteBuf::from(derived_public_key.serialize_sec1(true)),
                 chain_code: ByteBuf::from(derived_chain_code),
             })
         }

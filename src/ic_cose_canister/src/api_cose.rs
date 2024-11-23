@@ -103,7 +103,11 @@ async fn ecdh_cose_encrypted_key(
     let spk = store::SettingPathKey::from_path(path, caller);
     store::ns::with(&spk.0, |ns| {
         if !ns.has_setting_kek_permission(&caller, &spk) {
-            Err("no permission".to_string())?;
+            Err(format!(
+                "ecdh_cose_encrypted_key: {} has no permission for {}",
+                caller.to_text(),
+                spk
+            ))?;
         }
         Ok(())
     })?;
@@ -132,7 +136,11 @@ async fn vetkd_public_key(path: SettingPath) -> Result<ByteBuf, String> {
     let spk = store::SettingPathKey::from_path(path, caller);
     store::ns::with(&spk.0, |ns| {
         if !ns.has_setting_kek_permission(&caller, &spk) {
-            Err("no permission".to_string())?;
+            Err(format!(
+                "vetkd_public_key: {} has no permission for {}",
+                caller.to_text(),
+                spk
+            ))?;
         }
         Ok(())
     })?;
@@ -154,7 +162,11 @@ async fn vetkd_encrypted_key(
     let spk = store::SettingPathKey::from_path(path, caller);
     store::ns::with(&spk.0, |ns| {
         if !ns.has_setting_kek_permission(&caller, &spk) {
-            Err("no permission".to_string())?;
+            Err(format!(
+                "vetkd_encrypted_key: {} has no permission for {}",
+                caller.to_text(),
+                spk
+            ))?;
         }
         Ok(())
     })?;

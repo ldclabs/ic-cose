@@ -21,7 +21,8 @@ use std::{
     borrow::Cow,
     cell::RefCell,
     collections::{btree_map::Entry, BTreeMap, BTreeSet},
-    fmt, ops,
+    fmt::{self, Debug},
+    ops,
 };
 
 use crate::{
@@ -62,10 +63,12 @@ pub struct State {
     pub freezing_threshold: u64, // freezing writing threshold in cycles
     #[serde(default, rename = "iv")]
     pub init_vector: ByteArray<32>, // should not be exposed
+    #[serde(default, rename = "gov")]
+    pub governance_canister: Option<Principal>,
 }
 
 impl State {
-    pub fn to_info(&self) -> StateInfo {
+    pub fn to_info(&self, with_keys: bool) -> StateInfo {
         StateInfo {
             name: self.name.clone(),
             ecdsa_key_name: self.ecdsa_key_name.clone(),
@@ -77,6 +80,21 @@ impl State {
             namespace_total: 0,
             subnet_size: self.subnet_size,
             freezing_threshold: self.freezing_threshold,
+            ecdsa_public_key: if with_keys {
+                self.ecdsa_public_key.clone()
+            } else {
+                None
+            },
+            schnorr_ed25519_public_key: if with_keys {
+                self.schnorr_ed25519_public_key.clone()
+            } else {
+                None
+            },
+            schnorr_secp256k1_public_key: if with_keys {
+                self.schnorr_secp256k1_public_key.clone()
+            } else {
+                None
+            },
         }
     }
 }
@@ -402,11 +420,23 @@ pub mod state {
     use super::*;
 
     pub fn with<R>(f: impl FnOnce(&State) -> R) -> R {
-        STATE.with(|r| f(&r.borrow()))
+        STATE.with_borrow(f)
     }
 
     pub fn with_mut<R>(f: impl FnOnce(&mut State) -> R) -> R {
-        STATE.with(|r| f(&mut r.borrow_mut()))
+        STATE.with_borrow_mut(f)
+    }
+
+    pub fn is_controller(caller: &Principal) -> bool {
+        STATE.with_borrow(|s| {
+            s.governance_canister
+                .as_ref()
+                .map_or(false, |p| p == caller)
+        })
+    }
+
+    pub fn is_manager(caller: &Principal) -> bool {
+        STATE.with_borrow(|s| s.managers.contains(caller))
     }
 
     pub fn allowed_api(api: &str) -> Result<(), String> {

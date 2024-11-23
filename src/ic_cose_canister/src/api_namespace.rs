@@ -5,12 +5,13 @@ use ic_cose_types::{
 };
 use std::collections::BTreeSet;
 
-use crate::{is_authenticated, store};
+use crate::{is_authenticated, is_controller_or_manager, store};
 
 #[ic_cdk::query]
 fn state_get_info() -> Result<StateInfo, String> {
     store::state::with(|s| {
-        let mut info = s.to_info();
+        let with_keys = is_controller_or_manager().is_ok();
+        let mut info = s.to_info(with_keys);
         info.namespace_total = store::ns::namespace_count();
         Ok(info)
     })

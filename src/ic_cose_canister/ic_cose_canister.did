@@ -25,6 +25,7 @@ type ECDHOutput = record { public_key : blob; payload : blob };
 type InitArgs = record {
   freezing_threshold : nat64;
   ecdsa_key_name : text;
+  governance_canister : opt principal;
   name : text;
   schnorr_key_name : text;
   allowed_apis : vec text;
@@ -101,7 +102,10 @@ type StateInfo = record {
   managers : vec principal;
   name : text;
   auditors : vec principal;
+  schnorr_secp256k1_public_key : opt PublicKeyOutput;
+  ecdsa_public_key : opt PublicKeyOutput;
   schnorr_key_name : text;
+  schnorr_ed25519_public_key : opt PublicKeyOutput;
   allowed_apis : vec text;
   subnet_size : nat64;
   namespace_total : nat64;
@@ -127,6 +131,7 @@ type UpdateSettingPayloadInput = record {
 };
 type UpgradeArgs = record {
   freezing_threshold : opt nat64;
+  governance_canister : opt principal;
   name : opt text;
   subnet_size : opt nat64;
 };
