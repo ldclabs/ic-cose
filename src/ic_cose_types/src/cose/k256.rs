@@ -102,5 +102,29 @@ mod test {
 
         let signature = decode("6d8983dbeaf2977d2a41d69e0a6fb46b51fb7c1616a8ddd8bb948e1b08bb10e31eee92ef0f8b44ff62f231e6afd7f443a132414d431b57a6ce6dd23ffac8f878").unwrap();
         assert!(secp256k1_verify(&pk, &message, &signature).is_ok());
+        assert!(schnorr_secp256k1_verify(&pk, &message, &signature).is_err());
+    }
+
+    #[test]
+    fn schnorr_secp256k1_verify_works() {
+        // generated with:
+        // dfx canister call ic_cose_canister schnorr_public_key '(variant { bip340secp256k1 }, opt record {
+        //     ns = "_";
+        //     derivation_path = vec {};
+        //   })' --ic
+        let pk =
+            decode("0387f4b6c52971d340eade21f7d73a65111f5345ade1b13cac845a93bb87255129").unwrap();
+
+        // generated with:
+        // dfx canister call ic_cose_canister schnorr_sign '(variant { bip340secp256k1 }, record {
+        //     ns = "_";
+        //     derivation_path = vec {};
+        //     message = blob "\62\33\97\68\50\d2\fc\6a\b6\53\30\6b\33\2d\de\43\89\a4\e8\7b\79\d5\21\a3\31\68\3c\f9\01\02\c4\78";
+        //   })' --ic
+        let message =
+            decode("6233976850d2fc6ab653306b332dde4389a4e87b79d521a331683cf90102c478").unwrap();
+        let signature = decode("a45e4cb08af0dd0eecc1afe26d6d65fc86de0fac1a5e81fb9e85f776afafb3165278ca25ddc3f53114bae8e42938cedbc3bdcbd423ce5cb8104a8c0c46b4c17b").unwrap();
+        assert!(schnorr_secp256k1_verify(&pk, &message, &signature).is_ok());
+        assert!(secp256k1_verify(&pk, &message, &signature).is_err());
     }
 }

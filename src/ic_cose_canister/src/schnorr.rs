@@ -1,20 +1,14 @@
-use candid::{CandidType, Principal};
-use ic_cose_types::{
-    format_error,
-    types::{PublicKeyOutput, SchnorrAlgorithm},
-};
-use serde::{Deserialize, Serialize};
+use ic_cdk::api::management_canister::schnorr;
+use ic_cose_types::{format_error, types::PublicKeyOutput};
 use serde_bytes::ByteBuf;
 
-const MAX_SIGN_WITH_SCHNORR_FEE: u128 = 26_153_846_153;
-
 pub fn derive_schnorr_public_key(
-    alg: SchnorrAlgorithm,
+    alg: schnorr::SchnorrAlgorithm,
     public_key: &PublicKeyOutput,
     derivation_path: Vec<Vec<u8>>,
 ) -> Result<PublicKeyOutput, String> {
     match alg {
-        SchnorrAlgorithm::Bip340Secp256k1 => {
+        schnorr::SchnorrAlgorithm::Bip340secp256k1 => {
             let path = ic_crypto_secp256k1::DerivationPath::new(
                 derivation_path
                     .into_iter()
@@ -38,7 +32,7 @@ pub fn derive_schnorr_public_key(
             })
         }
 
-        SchnorrAlgorithm::Ed25519 => {
+        schnorr::SchnorrAlgorithm::Ed25519 => {
             let path = ic_crypto_ed25519::DerivationPath::new(
                 derivation_path
                     .into_iter()
@@ -64,78 +58,47 @@ pub fn derive_schnorr_public_key(
     }
 }
 
-#[derive(CandidType, Deserialize, Serialize, Debug)]
-pub struct SignWithSchnorrArgs {
-    pub message: Vec<u8>,
-    pub derivation_path: Vec<Vec<u8>>,
-    pub key_id: SchnorrKeyId,
-}
-
-#[derive(CandidType, Deserialize, Serialize, Debug)]
-pub struct SignWithSchnorrResult {
-    pub signature: Vec<u8>,
-}
-
 pub async fn sign_with_schnorr(
     key_name: String,
-    alg: SchnorrAlgorithm,
+    alg: schnorr::SchnorrAlgorithm,
     derivation_path: Vec<Vec<u8>>,
     message: Vec<u8>,
 ) -> Result<Vec<u8>, String> {
-    let args = SignWithSchnorrArgs {
+    let args = schnorr::SignWithSchnorrArgument {
         message,
         derivation_path,
-        key_id: SchnorrKeyId {
+        key_id: schnorr::SchnorrKeyId {
             algorithm: alg,
             name: key_name,
         },
     };
 
-    let (res,): (SignWithSchnorrResult,) = ic_cdk::api::call::call_with_payment128(
-        Principal::management_canister(),
-        "sign_with_schnorr",
-        (args,),
-        MAX_SIGN_WITH_SCHNORR_FEE,
-    )
-    .await
-    .map_err(|err| format!("sign_with_ecdsa failed {:?}", err))?;
+    let (res,): (schnorr::SignWithSchnorrResponse,) = schnorr::sign_with_schnorr(args)
+        .await
+        .map_err(|err| format!("sign_with_ecdsa failed: {:?}", err))?;
 
     Ok(res.signature)
 }
 
-#[derive(CandidType, Deserialize, Serialize, Debug)]
-pub struct SchnorrPublicKeyArgs {
-    pub canister_id: Option<Principal>,
-    pub derivation_path: Vec<Vec<u8>>,
-    pub key_id: SchnorrKeyId,
-}
-
-#[derive(CandidType, Deserialize, Serialize, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct SchnorrKeyId {
-    algorithm: SchnorrAlgorithm,
-    name: String,
-}
-
 pub async fn schnorr_public_key(
     key_name: String,
-    alg: SchnorrAlgorithm,
+    alg: schnorr::SchnorrAlgorithm,
     derivation_path: Vec<Vec<u8>>,
 ) -> Result<PublicKeyOutput, String> {
-    let args = SchnorrPublicKeyArgs {
+    let args = schnorr::SchnorrPublicKeyArgument {
         canister_id: None,
         derivation_path,
-        key_id: SchnorrKeyId {
+        key_id: schnorr::SchnorrKeyId {
             algorithm: alg,
             name: key_name,
         },
     };
 
-    let (res,): (PublicKeyOutput,) = ic_cdk::call(
-        Principal::management_canister(),
-        "schnorr_public_key",
-        (args,),
-    )
-    .await
-    .map_err(|err| format!("schnorr_public_key failed {:?}", err))?;
-    Ok(res)
+    let (res,): (schnorr::SchnorrPublicKeyResponse,) = schnorr::schnorr_public_key(args)
+        .await
+        .map_err(|err| format!("schnorr_public_key failed {:?}", err))?;
+    Ok(PublicKeyOutput {
+        public_key: ByteBuf::from(res.public_key),
+        chain_code: ByteBuf::from(res.chain_code),
+    })
 }

@@ -46,7 +46,7 @@ fn schnorr_public_key(
             store::ns::schnorr_public_key(&caller, algorithm, input.ns, input.derivation_path)
         }
         None => store::state::with(|s| match algorithm {
-            SchnorrAlgorithm::Bip340Secp256k1 => s
+            SchnorrAlgorithm::Bip340secp256k1 => s
                 .schnorr_secp256k1_public_key
                 .as_ref()
                 .cloned()

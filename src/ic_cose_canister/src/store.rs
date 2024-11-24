@@ -467,7 +467,7 @@ pub mod state {
                 .ok();
 
         let schnorr_secp256k1_public_key =
-            schnorr_public_key(schnorr_key_name, SchnorrAlgorithm::Bip340Secp256k1, vec![])
+            schnorr_public_key(schnorr_key_name, SchnorrAlgorithm::Bip340secp256k1, vec![])
                 .await
                 .map_err(|err| {
                     ic_cdk::print(format!(
@@ -616,7 +616,7 @@ pub mod ns {
 
             state::with(|s| {
                 let pk = match alg {
-                    SchnorrAlgorithm::Bip340Secp256k1 => s
+                    SchnorrAlgorithm::Bip340secp256k1 => s
                         .schnorr_secp256k1_public_key
                         .as_ref()
                         .ok_or("no schnorr secp256k1 public key")?,
@@ -703,11 +703,11 @@ pub mod ns {
         let payload = claims.to_vec().map_err(format_error)?;
         let alg = match algorithm {
             SchnorrAlgorithm::Ed25519 => EdDSA,
-            SchnorrAlgorithm::Bip340Secp256k1 => ES256K,
+            SchnorrAlgorithm::Bip340secp256k1 => ES256K,
         };
         let mut sign1 = cose_sign1(payload, alg, None)?;
         let mut tbs_data = sign1.tbs_data(caller.as_slice());
-        if algorithm == SchnorrAlgorithm::Bip340Secp256k1 {
+        if algorithm == SchnorrAlgorithm::Bip340secp256k1 {
             tbs_data = sha256(&tbs_data).into();
         }
         let sig = sign_with_schnorr(key_name, algorithm, vec![], tbs_data).await?;

@@ -16,6 +16,7 @@ serde_bytes = { workspace = true }
 num-traits = { workspace = true }
 ciborium = { workspace = true }
 icrc-ledger-types = { workspace = true }
+ic-cdk = { workspace = true }
 k256 = { workspace = true }
 ed25519-dalek = { workspace = true }
 x25519-dalek = { workspace = true }

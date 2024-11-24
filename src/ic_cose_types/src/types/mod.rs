@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_bytes::{ByteArray, ByteBuf};
 use std::collections::BTreeMap;
 
+pub use ic_cdk::api::management_canister::schnorr::SchnorrAlgorithm;
 pub mod namespace;
 pub mod setting;
 pub mod state;
@@ -11,14 +12,6 @@ pub use setting::SettingPath;
 
 pub type MapValue =
     BTreeMap<String, icrc_ledger_types::icrc::generic_metadata_value::MetadataValue>;
-
-#[derive(CandidType, Deserialize, Serialize, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum SchnorrAlgorithm {
-    #[serde(rename = "bip340secp256k1")]
-    Bip340Secp256k1,
-    #[serde(rename = "ed25519")]
-    Ed25519,
-}
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct PublicKeyInput {
