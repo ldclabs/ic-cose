@@ -110,3 +110,14 @@ fn setting_remove_readers(path: SettingPath, input: BTreeSet<Principal>) -> Resu
         Ok(())
     })
 }
+
+#[ic_cdk::update(guard = "is_authenticated")]
+fn setting_delete(path: SettingPath) -> Result<(), String> {
+    store::state::allowed_api("setting_delete")?;
+    path.validate()?;
+
+    let caller = ic_cdk::caller();
+    let subject = path.subject.unwrap_or(caller);
+    let spk = store::SettingPathKey::from_path(path, subject);
+    store::ns::delete_setting(&caller, &spk)
+}

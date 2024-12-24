@@ -50,12 +50,12 @@ fn namespace_add_delegator(
     input.validate()?;
 
     let caller = ic_cdk::caller();
-    store::ns::with_mut(&input.ns, |ns| {
+    store::ns::with_mut(input.ns, |ns| {
         if !ns.can_write_namespace(&caller) {
             return Err("no permission".to_string());
         }
         let name = input.name.to_ascii_lowercase();
-        let delegators = ns.fixed_id_names.entry(name).or_insert_with(BTreeSet::new);
+        let delegators = ns.fixed_id_names.entry(name).or_default();
         delegators.append(&mut input.delegators);
         Ok(delegators.clone())
     })
@@ -67,7 +67,7 @@ fn namespace_remove_delegator(input: NamespaceDelegatorsInput) -> Result<(), Str
     input.validate()?;
 
     let caller = ic_cdk::caller();
-    store::ns::with_mut(&input.ns, |ns| {
+    store::ns::with_mut(input.ns, |ns| {
         if !ns.can_write_namespace(&caller) {
             return Err("no permission".to_string());
         }

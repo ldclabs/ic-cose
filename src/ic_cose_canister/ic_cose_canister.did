@@ -54,9 +54,7 @@ type NamespaceInfo = record {
   max_payload_size : nat64;
   created_at : nat64;
   auditors : vec principal;
-  settings_total : nat64;
   fixed_id_names : vec record { text; vec principal };
-  user_settings_total : nat64;
   users : vec principal;
   visibility : nat8;
   gas_balance : nat;
@@ -183,11 +181,11 @@ service : (opt InstallArgs) -> {
   namespace_add_delegator : (NamespaceDelegatorsInput) -> (Result_7);
   namespace_add_managers : (text, vec principal) -> (Result);
   namespace_add_users : (text, vec principal) -> (Result);
+  namespace_delete : (text) -> (Result);
   namespace_get_delegators : (text, text) -> (Result_7) query;
   namespace_get_fixed_identity : (text, text) -> (Result_8) query;
   namespace_get_info : (text) -> (Result_1) query;
-  namespace_list_setting_keys : (text) -> (Result_9) query;
-  namespace_list_user_setting_keys : (text) -> (Result_9) query;
+  namespace_list_setting_keys : (text, bool, opt principal) -> (Result_9) query;
   namespace_remove_auditors : (text, vec principal) -> (Result);
   namespace_remove_delegator : (NamespaceDelegatorsInput) -> (Result);
   namespace_remove_managers : (text, vec principal) -> (Result);
@@ -202,6 +200,7 @@ service : (opt InstallArgs) -> {
   schnorr_sign_identity : (SchnorrAlgorithm, SignIdentityInput) -> (Result_5);
   setting_add_readers : (SettingPath, vec principal) -> (Result);
   setting_create : (SettingPath, CreateSettingInput) -> (Result_12);
+  setting_delete : (SettingPath) -> (Result);
   setting_get : (SettingPath) -> (Result_13) query;
   setting_get_archived_payload : (SettingPath) -> (Result_14) query;
   setting_get_info : (SettingPath) -> (Result_13) query;

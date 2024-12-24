@@ -36,6 +36,9 @@ pub struct SettingPath {
 impl SettingPath {
     pub fn validate(&self) -> Result<(), String> {
         validate_key(&self.ns)?;
+        if self.key.is_empty() {
+            return Err("key should not be empty".to_string());
+        }
         if self.key.len() > 64 {
             return Err("key length exceeds the limit 64".to_string());
         }

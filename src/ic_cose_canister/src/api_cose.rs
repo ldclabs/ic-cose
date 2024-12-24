@@ -101,16 +101,13 @@ async fn ecdh_cose_encrypted_key(
     let caller = ic_cdk::caller();
     let key_id = path.key.clone();
     let spk = store::SettingPathKey::from_path(path, caller);
-    store::ns::with(&spk.0, |ns| {
-        if !ns.has_setting_kek_permission(&caller, &spk) {
-            Err(format!(
-                "ecdh_cose_encrypted_key: {} has no permission for {}",
-                caller.to_text(),
-                spk
-            ))?;
-        }
-        Ok(())
-    })?;
+    if !store::ns::has_kek_permission(&caller, &spk) {
+        Err(format!(
+            "ecdh_cose_encrypted_key: {} has no permission for {}",
+            caller.to_text(),
+            spk
+        ))?;
+    }
 
     let aad = spk.2.as_slice();
     let kek = store::ns::inner_derive_kek(&spk, &key_id)?;
@@ -134,16 +131,13 @@ async fn vetkd_public_key(path: SettingPath) -> Result<ByteBuf, String> {
 
     let caller = ic_cdk::caller();
     let spk = store::SettingPathKey::from_path(path, caller);
-    store::ns::with(&spk.0, |ns| {
-        if !ns.has_setting_kek_permission(&caller, &spk) {
-            Err(format!(
-                "vetkd_public_key: {} has no permission for {}",
-                caller.to_text(),
-                spk
-            ))?;
-        }
-        Ok(())
-    })?;
+    if !store::ns::has_kek_permission(&caller, &spk) {
+        Err(format!(
+            "vetkd_public_key: {} has no permission for {}",
+            caller.to_text(),
+            spk
+        ))?;
+    }
 
     let pk = store::ns::inner_vetkd_public_key(&spk).await?;
     Ok(ByteBuf::from(pk))
@@ -160,16 +154,13 @@ async fn vetkd_encrypted_key(
     let caller = ic_cdk::caller();
     let key_id = path.key.clone();
     let spk = store::SettingPathKey::from_path(path, caller);
-    store::ns::with(&spk.0, |ns| {
-        if !ns.has_setting_kek_permission(&caller, &spk) {
-            Err(format!(
-                "vetkd_encrypted_key: {} has no permission for {}",
-                caller.to_text(),
-                spk
-            ))?;
-        }
-        Ok(())
-    })?;
+    if !store::ns::has_kek_permission(&caller, &spk) {
+        Err(format!(
+            "vetkd_encrypted_key: {} has no permission for {}",
+            caller.to_text(),
+            spk
+        ))?;
+    }
 
     let ek = store::ns::inner_vetkd_encrypted_key(
         &spk,

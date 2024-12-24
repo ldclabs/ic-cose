@@ -19,8 +19,6 @@ pub struct NamespaceInfo {
     pub managers: BTreeSet<Principal>, // managers can read and write all settings
     pub auditors: BTreeSet<Principal>, // auditors can read all settings
     pub users: BTreeSet<Principal>,    // users can read and write settings they created
-    pub settings_total: u64,           // settings created by managers for users
-    pub user_settings_total: u64,      // settings created by users
     pub gas_balance: u128,             // cycles
     pub fixed_id_names: BTreeMap<String, BTreeSet<Principal>>, // fixed identity names
     pub session_expires_in_ms: u64,    // session expiration in milliseconds for fixed identity

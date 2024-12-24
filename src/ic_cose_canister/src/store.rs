@@ -1,5 +1,5 @@
 use candid::Principal;
-use ciborium::{from_reader, from_reader_with_buffer, into_writer};
+use ciborium::{from_reader, into_writer};
 use ic_canister_sig_creation::{
     signature_map::{CanisterSigInputs, SignatureMap, LABEL_SIG},
     DELEGATION_SIG_DOMAIN,
@@ -26,7 +26,7 @@ use serde_bytes::{ByteArray, ByteBuf};
 use std::{
     borrow::Cow,
     cell::RefCell,
-    collections::{btree_map::Entry, BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet},
     fmt::{self, Debug},
     ops,
 };
@@ -108,7 +108,7 @@ impl State {
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
-pub struct Namespace {
+pub struct NamespaceLegacy {
     #[serde(rename = "d")]
     pub desc: String,
     #[serde(rename = "ca")]
@@ -141,25 +141,73 @@ pub struct Namespace {
     pub session_expires_in_ms: u64, // session expires in milliseconds
 }
 
+#[derive(Clone, Default, Deserialize, Serialize)]
+pub struct Namespace {
+    #[serde(rename = "d")]
+    pub desc: String,
+    #[serde(rename = "ca")]
+    pub created_at: u64, // unix timestamp in milliseconds
+    #[serde(rename = "ua")]
+    pub updated_at: u64, // unix timestamp in milliseconds
+    #[serde(rename = "mp")]
+    pub max_payload_size: u64, // max payload size in bytes
+    #[serde(rename = "pb")]
+    pub payload_bytes_total: u64, // total payload size in bytes
+    #[serde(rename = "s")]
+    pub status: i8, // -1: archived; 0: readable and writable; 1: readonly
+    #[serde(rename = "v")]
+    pub visibility: u8, // 0: private; 1: public
+    #[serde(rename = "m")]
+    pub managers: BTreeSet<Principal>, // managers can read and write all settings
+    #[serde(rename = "a")]
+    pub auditors: BTreeSet<Principal>, // auditors can read all settings
+    #[serde(rename = "u")]
+    pub users: BTreeSet<Principal>, // users can read and write settings they created
+    #[serde(rename = "g")]
+    pub gas_balance: u128, // gas balance, TODO: https://internetcomputer.org/docs/current/developer-docs/gas-cost
+    #[serde(default, rename = "f")]
+    pub fixed_id_names: BTreeMap<String, BTreeSet<Principal>>, // fixed_id_name -> users
+    #[serde(default, rename = "se")]
+    pub session_expires_in_ms: u64, // session expires in milliseconds
+}
+
+pub enum NamespaceReadPermission {
+    Full,
+    User,
+    None,
+}
+
 impl Namespace {
-    pub fn to_info(&self, name: String) -> NamespaceInfo {
+    pub fn into_info(self, name: String) -> NamespaceInfo {
         NamespaceInfo {
             name,
-            desc: self.desc.clone(),
+            desc: self.desc,
             created_at: self.created_at,
             updated_at: self.updated_at,
             max_payload_size: self.max_payload_size,
             payload_bytes_total: self.payload_bytes_total,
             status: self.status,
             visibility: self.visibility,
-            managers: self.managers.clone(),
-            auditors: self.auditors.clone(),
-            users: self.users.clone(),
-            settings_total: self.settings.len() as u64,
-            user_settings_total: self.user_settings.len() as u64,
+            managers: self.managers,
+            auditors: self.auditors,
+            users: self.users,
             gas_balance: self.gas_balance,
-            fixed_id_names: self.fixed_id_names.clone(),
+            fixed_id_names: self.fixed_id_names,
             session_expires_in_ms: self.session_expires_in_ms,
+        }
+    }
+
+    pub fn read_permission(&self, caller: &Principal) -> NamespaceReadPermission {
+        if self.visibility == 1 {
+            return NamespaceReadPermission::Full;
+        }
+
+        if self.managers.contains(caller) || self.auditors.contains(caller) {
+            NamespaceReadPermission::Full
+        } else if self.status >= 0 && self.users.contains(caller) {
+            NamespaceReadPermission::User
+        } else {
+            NamespaceReadPermission::None
         }
     }
 
@@ -216,74 +264,19 @@ impl Namespace {
         }
         self.managers.contains(caller) || self.users.contains(caller)
     }
+}
 
-    pub fn has_setting_kek_permission(&self, caller: &Principal, spk: &SettingPathKey) -> bool {
-        if self.status < 0 && !self.managers.contains(caller) {
-            return false;
-        }
+impl Storable for Namespace {
+    const BOUND: Bound = Bound::Unbounded;
 
-        if caller == &spk.2
-            || self.auditors.contains(caller)
-            || (spk.1 == 0 && self.managers.contains(caller))
-        {
-            return true;
-        }
-
-        let setting_key = (spk.2, spk.3.clone());
-        let setting = match spk.1 {
-            0 => self.settings.get(&setting_key),
-            1 => self.user_settings.get(&setting_key),
-            _ => None,
-        };
-
-        setting.map_or(false, |s| s.readers.contains(caller))
+    fn to_bytes(&self) -> Cow<[u8]> {
+        let mut buf = vec![];
+        into_writer(self, &mut buf).expect("failed to encode Namespace data");
+        Cow::Owned(buf)
     }
 
-    pub fn check_and_get_setting(
-        &self,
-        caller: &Principal,
-        spk: &SettingPathKey,
-    ) -> Option<&Setting> {
-        let can = self.partial_can_read_setting(caller, spk);
-        if can == Some(false) {
-            return None;
-        }
-
-        let setting_key = (spk.2, spk.3.clone());
-        let setting = match spk.1 {
-            0 => self.settings.get(&setting_key),
-            1 => self.user_settings.get(&setting_key),
-            _ => None,
-        };
-
-        setting.filter(|s| spk.4 <= s.version && (can == Some(true) || s.readers.contains(caller)))
-    }
-
-    pub fn get_setting_mut(&mut self, spk: &SettingPathKey) -> Option<&mut Setting> {
-        let setting_key = (spk.2, spk.3.clone());
-        match spk.1 {
-            0 => self.settings.get_mut(&setting_key),
-            1 => self.user_settings.get_mut(&setting_key),
-            _ => None,
-        }
-    }
-
-    pub fn try_insert_setting(&mut self, spk: SettingPathKey, setting: Setting) -> bool {
-        let setting_key = (spk.2, spk.3);
-        let entry = match spk.1 {
-            0 => self.settings.entry(setting_key),
-            1 => self.user_settings.entry(setting_key),
-            _ => {
-                return false;
-            }
-        };
-        match entry {
-            Entry::Vacant(e) => {
-                e.insert(setting);
-                true
-            }
-            Entry::Occupied(_) => false,
-        }
+    fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
+        from_reader(&bytes[..]).expect("failed to decode Namespace data")
     }
 }
 
@@ -310,20 +303,34 @@ pub struct Setting {
 }
 
 impl Setting {
-    pub fn to_info(&self, subject: Principal, key: ByteBuf) -> SettingInfo {
+    pub fn into_info(self, subject: Principal, key: ByteBuf, with_payload: bool) -> SettingInfo {
         SettingInfo {
             key,
             subject,
-            desc: self.desc.clone(),
+            desc: self.desc,
             created_at: self.created_at,
             updated_at: self.updated_at,
             status: self.status,
             version: self.version,
-            readers: self.readers.clone(),
-            tags: self.tags.clone(),
-            dek: None,
-            payload: None,
+            readers: self.readers,
+            tags: self.tags,
+            dek: if with_payload { self.dek } else { None },
+            payload: if with_payload { self.payload } else { None },
         }
+    }
+}
+
+impl Storable for Setting {
+    const BOUND: Bound = Bound::Unbounded;
+
+    fn to_bytes(&self) -> Cow<[u8]> {
+        let mut buf = vec![];
+        into_writer(self, &mut buf).expect("failed to encode Setting data");
+        Cow::Owned(buf)
+    }
+
+    fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
+        from_reader(&bytes[..]).expect("failed to decode Setting data")
     }
 }
 
@@ -399,13 +406,15 @@ impl Storable for SettingArchived {
 }
 
 const STATE_MEMORY_ID: MemoryId = MemoryId::new(0);
-const NS_MEMORY_ID: MemoryId = MemoryId::new(1);
+const NSLEGACY_MEMORY_ID: MemoryId = MemoryId::new(1);
 const PAYLOADS_MEMORY_ID: MemoryId = MemoryId::new(2);
+const NAMESPACES_MEMORY_ID: MemoryId = MemoryId::new(3);
+const SETTINGS_MEMORY_ID: MemoryId = MemoryId::new(4);
 
 thread_local! {
     static SIGNATURES : RefCell<SignatureMap> = RefCell::new(SignatureMap::default());
     static STATE: RefCell<State> = RefCell::new(State::default());
-    static NS: RefCell<BTreeMap<String, Namespace>> = const { RefCell::new(BTreeMap::new()) };
+    static NS: RefCell<BTreeMap<String, NamespaceLegacy>> = const { RefCell::new(BTreeMap::new()) };
 
     static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
         RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
@@ -417,9 +426,9 @@ thread_local! {
         ).expect("failed to init STATE_STORE store")
     );
 
-    static NS_STORE: RefCell<StableCell<Vec<u8>, Memory>> = RefCell::new(
+    static NSLEGACY_STORE: RefCell<StableCell<Vec<u8>, Memory>> = RefCell::new(
         StableCell::init(
-            MEMORY_MANAGER.with_borrow(|m| m.get(NS_MEMORY_ID)),
+            MEMORY_MANAGER.with_borrow(|m| m.get(NSLEGACY_MEMORY_ID)),
             Vec::new()
         ).expect("failed to init NS_STORE store")
     );
@@ -427,6 +436,18 @@ thread_local! {
     static PAYLOADS_STORE: RefCell<StableBTreeMap<SettingPathKey, SettingArchived, Memory>> = RefCell::new(
         StableBTreeMap::init(
             MEMORY_MANAGER.with_borrow(|m| m.get(PAYLOADS_MEMORY_ID)),
+        )
+    );
+
+    static NAMESPACES_STORE: RefCell<StableBTreeMap<String, Namespace, Memory>> = RefCell::new(
+        StableBTreeMap::init(
+            MEMORY_MANAGER.with_borrow(|m| m.get(NAMESPACES_MEMORY_ID)),
+        )
+    );
+
+    static SETTINGS_STORE: RefCell<StableBTreeMap<SettingPathKey, Setting, Memory>> = RefCell::new(
+        StableBTreeMap::init(
+            MEMORY_MANAGER.with_borrow(|m| m.get(SETTINGS_MEMORY_ID)),
         )
     );
 }
@@ -527,41 +548,35 @@ pub mod state {
     }
 
     pub fn load() {
-        let mut scratch = [0; 4096];
-        STATE_STORE.with(|r| {
-            STATE.with(|h| {
-                let v: State = from_reader_with_buffer(&r.borrow().get()[..], &mut scratch)
-                    .expect("failed to decode STATE_STORE data");
-                *h.borrow_mut() = v;
+        STATE_STORE.with_borrow(|r| {
+            STATE.with_borrow_mut(|h| {
+                let v: State =
+                    from_reader(&r.get()[..]).expect("failed to decode STATE_STORE data");
+                *h = v;
             });
         });
-        NS_STORE.with(|r| {
-            NS.with(|h| {
-                let v: BTreeMap<String, Namespace> =
-                    from_reader_with_buffer(&r.borrow().get()[..], &mut scratch)
-                        .expect("failed to decode NS_STORE data");
-                *h.borrow_mut() = v;
-            });
+
+        let count = NAMESPACES_STORE.with_borrow(|r| r.len());
+        if count > 0 {
+            return; // already migrated
+        }
+        NSLEGACY_STORE.with_borrow(|r| {
+            let data = r.get();
+            if data.is_empty() {
+                return;
+            }
+            let m: BTreeMap<String, NamespaceLegacy> =
+                from_reader(&data[..]).expect("failed to decode NS_STORE data");
+            ns::migrate(m);
         });
     }
 
     pub fn save() {
-        STATE.with(|h| {
-            STATE_STORE.with(|r| {
+        STATE.with_borrow(|h| {
+            STATE_STORE.with_borrow_mut(|r| {
                 let mut buf = vec![];
-                into_writer(&(*h.borrow()), &mut buf).expect("failed to encode STATE_STORE data");
-                r.borrow_mut()
-                    .set(buf)
-                    .expect("failed to set STATE_STORE data");
-            });
-        });
-        NS.with(|h| {
-            NS_STORE.with(|r| {
-                let mut buf = vec![];
-                into_writer(&(*h.borrow()), &mut buf).expect("failed to encode NS_STORE data");
-                r.borrow_mut()
-                    .set(buf)
-                    .expect("failed to set NS_STORE data");
+                into_writer(h, &mut buf).expect("failed to encode STATE_STORE data");
+                r.set(buf).expect("failed to set STATE_STORE data");
             });
         });
     }
@@ -572,32 +587,137 @@ pub mod ns {
 
     use super::*;
 
+    pub fn migrate(m: BTreeMap<String, NamespaceLegacy>) {
+        if m.is_empty() {
+            return;
+        }
+
+        NAMESPACES_STORE.with_borrow_mut(|r| {
+            SETTINGS_STORE.with_borrow_mut(|rs| {
+                for (name, ns) in m {
+                    let nns = Namespace {
+                        desc: ns.desc,
+                        created_at: ns.created_at,
+                        updated_at: ns.updated_at,
+                        max_payload_size: ns.max_payload_size,
+                        payload_bytes_total: ns.payload_bytes_total,
+                        status: ns.status,
+                        visibility: ns.visibility,
+                        managers: ns.managers,
+                        auditors: ns.auditors,
+                        users: ns.users,
+                        gas_balance: ns.gas_balance,
+                        fixed_id_names: ns.fixed_id_names,
+                        session_expires_in_ms: ns.session_expires_in_ms,
+                    };
+                    r.insert(name.clone(), nns);
+                    for (k, setting) in ns.settings {
+                        let spk = SettingPathKey(name.clone(), 0, k.0, k.1, 0);
+                        rs.insert(spk, setting);
+                    }
+                    for (k, setting) in ns.user_settings {
+                        let spk = SettingPathKey(name.clone(), 1, k.0, k.1, 0);
+                        rs.insert(spk, setting);
+                    }
+                }
+            })
+        });
+    }
+
     pub fn namespace_count() -> u64 {
-        NS.with(|r| r.borrow().len() as u64)
+        NAMESPACES_STORE.with_borrow(|r| r.len())
+    }
+
+    const MAX_KEY: [u8; 64] = [255u8; 64];
+    pub fn list_setting_keys(
+        namespace: &str,
+        user_owned: bool,
+        subject: Option<Principal>,
+    ) -> Vec<(Principal, ByteBuf)> {
+        SETTINGS_STORE.with_borrow(|r| {
+            let range = if let Some(subject) = subject {
+                ops::Range {
+                    start: &SettingPathKey(
+                        namespace.to_owned(),
+                        if user_owned { 1 } else { 0 },
+                        subject,
+                        ByteBuf::new(),
+                        0,
+                    ),
+                    end: &SettingPathKey(
+                        namespace.to_owned(),
+                        if user_owned { 1 } else { 0 },
+                        subject,
+                        ByteBuf::from(MAX_KEY.as_ref()),
+                        0,
+                    ),
+                }
+            } else {
+                ops::Range {
+                    start: &SettingPathKey(
+                        namespace.to_owned(),
+                        if user_owned { 1 } else { 0 },
+                        Principal::anonymous(),
+                        ByteBuf::new(),
+                        0,
+                    ),
+                    end: &SettingPathKey(
+                        namespace.to_owned(),
+                        if user_owned { 2 } else { 1 },
+                        Principal::management_canister(),
+                        ByteBuf::new(),
+                        u32::MAX,
+                    ),
+                }
+            };
+            r.keys_range(range).map(|k| (k.2, k.3)).collect()
+        })
     }
 
     pub fn with<R>(
-        namespace: &str,
-        f: impl FnOnce(&Namespace) -> Result<R, String>,
+        namespace: &String,
+        f: impl FnOnce(Namespace) -> Result<R, String>,
     ) -> Result<R, String> {
-        NS.with(|r| {
-            r.borrow()
-                .get(namespace)
+        NAMESPACES_STORE.with_borrow(|r| {
+            r.get(namespace)
                 .map(f)
                 .unwrap_or_else(|| Err(format!("namespace {} not found", namespace)))
         })
     }
 
     pub fn with_mut<R>(
-        namespace: &str,
+        namespace: String,
         f: impl FnOnce(&mut Namespace) -> Result<R, String>,
     ) -> Result<R, String> {
-        NS.with(|r| {
-            r.borrow_mut()
-                .get_mut(namespace)
-                .map(f)
-                .unwrap_or_else(|| Err(format!("namespace {} not found", namespace)))
+        NAMESPACES_STORE.with_borrow_mut(|r| match r.get(&namespace) {
+            Some(mut ns) => match f(&mut ns) {
+                Ok(rt) => {
+                    r.insert(namespace, ns);
+                    Ok(rt)
+                }
+                Err(err) => Err(err),
+            },
+            None => Err(format!("namespace {} not found", namespace)),
         })
+    }
+
+    pub fn has_kek_permission(caller: &Principal, spk: &SettingPathKey) -> bool {
+        with(&spk.0, |ns| {
+            if ns.status < 0 && !ns.managers.contains(caller) {
+                return Ok(false);
+            }
+
+            if caller == &spk.2
+                || ns.auditors.contains(caller)
+                || (spk.1 == 0 && ns.managers.contains(caller))
+            {
+                return Ok(true);
+            }
+
+            let setting = SETTINGS_STORE.with_borrow(|m| m.get(spk));
+            Ok(setting.map_or(false, |s| s.readers.contains(caller)))
+        })
+        .unwrap_or(false)
     }
 
     pub fn ecdsa_public_key(
@@ -807,26 +927,25 @@ pub mod ns {
             if !ns.can_read_namespace(caller) {
                 Err("no permission".to_string())?;
             }
-            Ok(ns.to_info(namespace.clone()))
+            Ok(ns.into_info(namespace.clone()))
         })
     }
 
     pub fn list_namespaces(prev: Option<String>, take: usize) -> Vec<NamespaceInfo> {
-        NS.with(|r| {
-            let m = r.borrow();
+        NAMESPACES_STORE.with_borrow(|r| {
             let mut res = Vec::with_capacity(take);
             match prev {
                 Some(p) => {
-                    for (k, v) in m.range(ops::RangeTo { end: p }).rev() {
-                        res.push(v.to_info(k.clone()));
+                    for (k, v) in r.range(ops::RangeTo { end: p }).rev() {
+                        res.push(v.into_info(k.clone()));
                         if res.len() >= take {
                             break;
                         }
                     }
                 }
                 None => {
-                    for (k, v) in m.iter().rev() {
-                        res.push(v.to_info(k.clone()));
+                    for (k, v) in r.iter().rev() {
+                        res.push(v.into_info(k.clone()));
                         if res.len() >= take {
                             break;
                         }
@@ -846,9 +965,8 @@ pub mod ns {
             Err("no permission".to_string())?;
         }
 
-        NS.with(|r| {
-            let mut m = r.borrow_mut();
-            if m.contains_key(&input.name) {
+        NAMESPACES_STORE.with_borrow_mut(|r| {
+            if r.contains_key(&input.name) {
                 Err(format!("namespace {} already exists", input.name))?;
             }
             let ns = Namespace {
@@ -864,8 +982,8 @@ pub mod ns {
                 ..Default::default()
             };
 
-            let info = ns.to_info(input.name.clone());
-            m.insert(input.name, ns);
+            let info = ns.clone().into_info(input.name.clone());
+            r.insert(input.name, ns);
             Ok(info)
         })
     }
@@ -875,7 +993,7 @@ pub mod ns {
         input: UpdateNamespaceInput,
         now_ms: u64,
     ) -> Result<(), String> {
-        with_mut(&input.name, |ns| {
+        with_mut(input.name, |ns| {
             if !ns.can_write_namespace(caller) {
                 Err("no permission".to_string())?;
             }
@@ -900,59 +1018,89 @@ pub mod ns {
         })
     }
 
-    pub fn get_setting_info(caller: Principal, spk: SettingPathKey) -> Result<SettingInfo, String> {
-        with(&spk.0.clone(), |ns| {
-            let setting = ns
-                .check_and_get_setting(&caller, &spk)
-                .ok_or_else(|| format!("setting {} not found or no permission", spk))?;
-
-            Ok(setting.to_info(spk.2, spk.3))
+    pub fn delete_namespace(caller: &Principal, namespace: String) -> Result<(), String> {
+        NAMESPACES_STORE.with_borrow_mut(|r| match r.get(&namespace) {
+            Some(ns) => {
+                if !ns.can_write_namespace(caller) {
+                    Err("no permission".to_string())?;
+                }
+                SETTINGS_STORE.with_borrow(|rr| {
+                    let mut iter = rr.keys_range(ops::RangeFrom {
+                        start: &SettingPathKey(
+                            namespace.clone(),
+                            0,
+                            Principal::anonymous(),
+                            ByteBuf::new(),
+                            0,
+                        ),
+                    });
+                    if iter.next().is_some() {
+                        return Err(format!("namespace {} is not empty", namespace));
+                    }
+                    Ok(())
+                })?;
+                r.remove(&namespace);
+                Ok(())
+            }
+            None => Err(format!("namespace {} not found", namespace)),
         })
     }
 
-    pub fn get_setting(caller: Principal, spk: SettingPathKey) -> Result<SettingInfo, String> {
-        with(&spk.0.clone(), |ns| {
-            let setting = ns
-                .check_and_get_setting(&caller, &spk)
-                .ok_or_else(|| format!("setting {} not found or no permission", &spk))?;
+    pub fn try_get_setting(caller: &Principal, spk: &SettingPathKey) -> Option<Setting> {
+        with(&spk.0, |ns| {
+            let can = ns.partial_can_read_setting(caller, spk);
+            if can == Some(false) {
+                return Ok(None);
+            }
 
-            if spk.4 != 0 && spk.4 != setting.version {
-                Err("version mismatch".to_string())?;
-            };
-
-            let mut res = setting.to_info(spk.2, spk.3);
-            res.dek = setting.dek.clone();
-            res.payload = setting.payload.clone();
-            Ok(res)
+            let setting = SETTINGS_STORE.with_borrow(|m| m.get(spk));
+            Ok(setting.filter(|s| {
+                spk.4 <= s.version && (can == Some(true) || s.readers.contains(caller))
+            }))
         })
+        .unwrap_or(None)
+    }
+
+    pub fn get_setting_info(caller: Principal, spk: SettingPathKey) -> Result<SettingInfo, String> {
+        let setting = try_get_setting(&caller, &spk)
+            .ok_or_else(|| format!("setting {} not found or no permission", spk))?;
+
+        Ok(setting.into_info(spk.2, spk.3, false))
+    }
+
+    pub fn get_setting(caller: Principal, spk: SettingPathKey) -> Result<SettingInfo, String> {
+        let setting = try_get_setting(&caller, &spk)
+            .ok_or_else(|| format!("setting {} not found or no permission", &spk))?;
+
+        if spk.4 != 0 && spk.4 != setting.version {
+            Err("version mismatch".to_string())?;
+        };
+
+        Ok(setting.into_info(spk.2, spk.3, true))
     }
 
     pub fn get_setting_archived_payload(
         caller: Principal,
         spk: SettingPathKey,
     ) -> Result<SettingArchivedPayload, String> {
-        with(&spk.0.clone(), |ns| {
-            let setting = ns
-                .check_and_get_setting(&caller, &spk)
-                .ok_or_else(|| format!("setting {} not found or no permission", &spk))?;
+        let setting = try_get_setting(&caller, &spk)
+            .ok_or_else(|| format!("setting {} not found or no permission", &spk))?;
 
-            if spk.4 == 0 || spk.4 >= setting.version {
-                Err("version mismatch".to_string())?;
-            };
+        if spk.4 == 0 || spk.4 >= setting.version {
+            Err("version mismatch".to_string())?;
+        };
 
-            let payload = PAYLOADS_STORE.with(|r| {
-                let m = r.borrow();
-                m.get(&spk)
-                    .ok_or_else(|| format!("setting {} payload not found", &spk))
-            })?;
+        let payload = PAYLOADS_STORE.with_borrow(|r| {
+            r.get(&spk)
+                .ok_or_else(|| format!("setting {} payload not found", &spk))
+        })?;
 
-            Ok(SettingArchivedPayload {
-                version: spk.4,
-                archived_at: payload.archived_at,
-                deprecated: payload.deprecated,
-                payload: payload.payload,
-                dek: payload.dek,
-            })
+        Ok(SettingArchivedPayload {
+            version: spk.4,
+            archived_at: payload.archived_at,
+            deprecated: payload.deprecated,
+            payload: payload.payload,
+            dek: payload.dek,
         })
     }
 
@@ -962,7 +1110,7 @@ pub mod ns {
         input: CreateSettingInput,
         now_ms: u64,
     ) -> Result<CreateSettingOutput, String> {
-        with_mut(&spk.0.clone(), |ns| {
+        with_mut(spk.0.clone(), |ns| {
             if !ns.can_write_setting(&caller, &spk) {
                 Err("no permission".to_string())?;
             }
@@ -1003,31 +1151,100 @@ pub mod ns {
                 }
             };
 
-            let output = CreateSettingOutput {
-                created_at: now_ms,
-                updated_at: now_ms,
-                version: 1,
-            };
+            let output = SETTINGS_STORE.with_borrow_mut(|m| {
+                if m.contains_key(&spk) {
+                    return Err(format!("setting {} already exists", &spk));
+                }
 
-            if !ns.try_insert_setting(
-                spk,
-                Setting {
-                    desc: input.desc.unwrap_or_default(),
+                m.insert(
+                    spk.clone(),
+                    Setting {
+                        desc: input.desc.unwrap_or_default(),
+                        created_at: now_ms,
+                        updated_at: now_ms,
+                        status: input.status.unwrap_or(0),
+                        tags: input.tags.unwrap_or_default(),
+                        payload: input.payload,
+                        dek: input.dek,
+                        version: 1,
+                        ..Default::default()
+                    },
+                );
+
+                Ok(CreateSettingOutput {
                     created_at: now_ms,
                     updated_at: now_ms,
-                    status: input.status.unwrap_or(0),
-                    tags: input.tags.unwrap_or_default(),
-                    payload: input.payload,
-                    dek: input.dek,
                     version: 1,
-                    ..Default::default()
-                },
-            ) {
-                Err("setting already exists".to_string())?;
-            }
+                })
+            })?;
 
             ns.payload_bytes_total = ns.payload_bytes_total.saturating_add(size as u64);
             Ok(output)
+        })
+    }
+
+    pub fn with_setting_mut<R>(
+        caller: &Principal,
+        spk: &SettingPathKey,
+        f: impl FnOnce(&mut Setting) -> Result<R, String>,
+    ) -> Result<R, String> {
+        with(&spk.0, |ns| {
+            if !ns.can_write_setting(caller, spk) {
+                Err("no permission".to_string())?;
+            }
+
+            SETTINGS_STORE.with_borrow_mut(|r| match r.get(spk) {
+                Some(mut setting) => {
+                    if setting.version != spk.4 {
+                        Err("version mismatch".to_string())?;
+                    }
+                    if setting.status == 1 {
+                        Err("readonly setting can not be updated".to_string())?;
+                    }
+
+                    match f(&mut setting) {
+                        Ok(rt) => {
+                            r.insert(spk.clone(), setting);
+                            Ok(rt)
+                        }
+                        Err(err) => Err(err),
+                    }
+                }
+                None => Err(format!("setting {} not found", &spk)),
+            })
+        })
+    }
+
+    pub fn delete_setting(caller: &Principal, spk: &SettingPathKey) -> Result<(), String> {
+        with(&spk.0, |ns| {
+            if !ns.can_write_setting(caller, spk) {
+                Err("no permission".to_string())?;
+            }
+
+            SETTINGS_STORE.with_borrow_mut(|r| match r.get(spk) {
+                Some(setting) => {
+                    if setting.version != spk.4 {
+                        Err("version mismatch".to_string())?;
+                    }
+                    if setting.status == 1 {
+                        Err("readonly setting can not be deleted".to_string())?;
+                    }
+
+                    r.remove(spk);
+                    if spk.4 > 1 {
+                        PAYLOADS_STORE.with_borrow_mut(|rr| {
+                            let mut pk = spk.clone();
+                            for v in 1..spk.4 {
+                                pk.4 = v;
+                                rr.remove(&pk);
+                            }
+                        });
+                    }
+
+                    Ok(())
+                }
+                None => Err(format!("setting {} not found", &spk)),
+            })
         })
     }
 
@@ -1037,7 +1254,7 @@ pub mod ns {
         input: UpdateSettingPayloadInput,
         now_ms: u64,
     ) -> Result<UpdateSettingOutput, String> {
-        with_mut(&spk.0, |ns| {
+        with_mut(spk.0.clone(), |ns| {
             if !ns.can_write_setting(&caller, &spk) {
                 Err("no permission".to_string())?;
             }
@@ -1054,83 +1271,62 @@ pub mod ns {
                 size += dek.len();
             }
 
-            let output = {
-                let setting = ns
-                    .get_setting_mut(&spk)
-                    .ok_or_else(|| format!("setting {} not found", &spk))?;
-                if setting.version != spk.4 {
-                    Err("version mismatch".to_string())?;
-                }
-                if setting.status == 1 {
-                    Err("readonly setting can not be updated".to_string())?;
-                }
-
-                if setting.dek.is_some() || input.dek.is_some() {
-                    if let Some(ref payload) = input.payload {
-                        // should be valid COSE encrypt0 payload
-                        try_decode_encrypt0(payload)?;
+            let output = SETTINGS_STORE.with_borrow_mut(|r| match r.get(&spk) {
+                Some(mut setting) => {
+                    if setting.version != spk.4 {
+                        Err("version mismatch".to_string())?;
                     }
-                } else if let Some(ref payload) = input.payload {
-                    // try to validate plain payload
-                    try_decode_payload(payload)?;
-                }
+                    if setting.status == 1 {
+                        Err("readonly setting can not be updated".to_string())?;
+                    }
 
-                if let Some(payload) = setting.payload.as_ref() {
-                    PAYLOADS_STORE.with(|r| {
-                        r.borrow_mut().insert(
-                            spk.clone(),
-                            SettingArchived {
-                                archived_at: now_ms,
-                                deprecated: input.deprecate_current.unwrap_or(false),
-                                payload: Some(payload.clone()),
-                                dek: setting.dek.clone(),
-                            },
-                        );
-                    });
-                }
+                    if setting.dek.is_some() || input.dek.is_some() {
+                        if let Some(ref payload) = input.payload {
+                            // should be valid COSE encrypt0 payload
+                            try_decode_encrypt0(payload)?;
+                        }
+                    } else if let Some(ref payload) = input.payload {
+                        // try to validate plain payload
+                        try_decode_payload(payload)?;
+                    }
 
-                setting.version = setting.version.saturating_add(1);
-                setting.updated_at = now_ms;
-                if let Some(status) = input.status {
-                    setting.status = status;
+                    if let Some(payload) = setting.payload.as_ref() {
+                        PAYLOADS_STORE.with(|r| {
+                            r.borrow_mut().insert(
+                                spk.clone(),
+                                SettingArchived {
+                                    archived_at: now_ms,
+                                    deprecated: input.deprecate_current.unwrap_or(false),
+                                    payload: Some(payload.clone()),
+                                    dek: setting.dek.clone(),
+                                },
+                            );
+                        });
+                    }
+
+                    setting.version = setting.version.saturating_add(1);
+                    setting.updated_at = now_ms;
+                    if let Some(status) = input.status {
+                        setting.status = status;
+                    }
+                    if let Some(payload) = input.payload {
+                        setting.payload = Some(payload);
+                    }
+                    if let Some(dek) = input.dek {
+                        setting.dek = Some(dek);
+                    }
+
+                    Ok(UpdateSettingOutput {
+                        created_at: setting.created_at,
+                        updated_at: setting.updated_at,
+                        version: setting.version,
+                    })
                 }
-                if let Some(payload) = input.payload {
-                    setting.payload = Some(payload);
-                }
-                if let Some(dek) = input.dek {
-                    setting.dek = Some(dek);
-                }
-                UpdateSettingOutput {
-                    created_at: setting.created_at,
-                    updated_at: setting.updated_at,
-                    version: setting.version,
-                }
-            };
+                None => Err(format!("setting {} not found", &spk)),
+            })?;
 
             ns.payload_bytes_total = ns.payload_bytes_total.saturating_add(size as u64);
             Ok(output)
-        })
-    }
-
-    pub fn with_setting_mut<R>(
-        caller: &Principal,
-        spk: &SettingPathKey,
-        f: impl FnOnce(&mut Setting) -> Result<R, String>,
-    ) -> Result<R, String> {
-        with_mut(&spk.0, |ns| {
-            if !ns.can_write_setting(caller, spk) {
-                Err("no permission".to_string())?;
-            }
-            let setting = ns
-                .get_setting_mut(spk)
-                .ok_or_else(|| format!("setting {} not found", spk))?;
-            if setting.version != spk.4 {
-                Err("version mismatch".to_string())?;
-            }
-            if setting.status == 1 {
-                Err("readonly setting can not be updated".to_string())?;
-            }
-            f(setting)
         })
     }
 
@@ -1158,5 +1354,133 @@ pub mod ns {
                 version: setting.version,
             })
         })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_list_setting_keys() {
+        let n1 = "namespace1".to_string();
+        let n2 = "namespace2".to_string();
+        let p0 = Principal::anonymous();
+        let p1 = Principal::from_slice(&[1, 1, 1, 1]);
+        let p2 = Principal::from_slice(&[1, 1, 1, 1, 1]);
+        let p3 = Principal::from_slice(&[1, 1, 1, 1, 2]);
+        assert!(p0 > Principal::management_canister());
+        assert!(p0 < p1);
+        assert!(p1 < p2);
+        assert!(p2 < p3);
+
+        SETTINGS_STORE.with_borrow_mut(|r| {
+            for (i, n) in (&[n1.clone(), n2.clone()]).iter().enumerate() {
+                for p in &[p0, p1, p2, p3] {
+                    r.insert(
+                        SettingPathKey(n.clone(), 0, p.clone(), ByteBuf::from([i as u8]), 0),
+                        Setting::default(),
+                    );
+                    r.insert(
+                        SettingPathKey(n.clone(), 0, p.clone(), ByteBuf::from(p.as_slice()), 0),
+                        Setting::default(),
+                    );
+                    r.insert(
+                        SettingPathKey(n.clone(), 1, p.clone(), ByteBuf::from([i as u8 + 1]), 0),
+                        Setting::default(),
+                    );
+                    r.insert(
+                        SettingPathKey(n.clone(), 1, p.clone(), ByteBuf::from(p.as_slice()), 0),
+                        Setting::default(),
+                    );
+                    r.insert(
+                        SettingPathKey(n.clone(), 2, p.clone(), ByteBuf::from([0]), 0),
+                        Setting::default(),
+                    );
+                }
+            }
+        });
+
+        {
+            let keys = ns::list_setting_keys(&n1, false, None);
+            assert_eq!(
+                keys,
+                vec![
+                    (p0, ByteBuf::from([0])),
+                    (p0, ByteBuf::from(p0.as_slice())),
+                    (p1, ByteBuf::from([0])),
+                    (p1, ByteBuf::from(p1.as_slice())),
+                    (p2, ByteBuf::from([0])),
+                    (p2, ByteBuf::from(p2.as_slice())),
+                    (p3, ByteBuf::from([0])),
+                    (p3, ByteBuf::from(p3.as_slice())),
+                ]
+            );
+            let keys = ns::list_setting_keys(&n1, true, None);
+            assert_eq!(
+                keys,
+                vec![
+                    (p0, ByteBuf::from([1])),
+                    (p0, ByteBuf::from(p0.as_slice())),
+                    (p1, ByteBuf::from([1])),
+                    (p1, ByteBuf::from(p1.as_slice())),
+                    (p2, ByteBuf::from([1])),
+                    (p2, ByteBuf::from(p2.as_slice())),
+                    (p3, ByteBuf::from([1])),
+                    (p3, ByteBuf::from(p3.as_slice())),
+                ]
+            );
+            let keys = ns::list_setting_keys(&n1, false, Some(p1));
+            assert_eq!(
+                keys,
+                vec![(p1, ByteBuf::from([0])), (p1, ByteBuf::from(p1.as_slice())),]
+            );
+            let keys = ns::list_setting_keys(&n1, true, Some(p2));
+            assert_eq!(
+                keys,
+                vec![(p2, ByteBuf::from([1])), (p2, ByteBuf::from(p2.as_slice())),]
+            );
+        }
+
+        {
+            let keys = ns::list_setting_keys(&n2, false, None);
+            assert_eq!(
+                keys,
+                vec![
+                    (p0, ByteBuf::from([1])),
+                    (p0, ByteBuf::from(p0.as_slice())),
+                    (p1, ByteBuf::from([1])),
+                    (p1, ByteBuf::from(p1.as_slice())),
+                    (p2, ByteBuf::from([1])),
+                    (p2, ByteBuf::from(p2.as_slice())),
+                    (p3, ByteBuf::from([1])),
+                    (p3, ByteBuf::from(p3.as_slice())),
+                ]
+            );
+            let keys = ns::list_setting_keys(&n2, true, None);
+            assert_eq!(
+                keys,
+                vec![
+                    (p0, ByteBuf::from([2])),
+                    (p0, ByteBuf::from(p0.as_slice())),
+                    (p1, ByteBuf::from(p1.as_slice())),
+                    (p1, ByteBuf::from([2])),
+                    (p2, ByteBuf::from(p2.as_slice())),
+                    (p2, ByteBuf::from([2])),
+                    (p3, ByteBuf::from(p3.as_slice())),
+                    (p3, ByteBuf::from([2])),
+                ]
+            );
+            let keys = ns::list_setting_keys(&n2, false, Some(p1));
+            assert_eq!(
+                keys,
+                vec![(p1, ByteBuf::from([1])), (p1, ByteBuf::from(p1.as_slice())),]
+            );
+            let keys = ns::list_setting_keys(&n2, true, Some(p2));
+            assert_eq!(
+                keys,
+                vec![(p2, ByteBuf::from(p2.as_slice())), (p2, ByteBuf::from([2]))]
+            );
+        }
     }
 }
