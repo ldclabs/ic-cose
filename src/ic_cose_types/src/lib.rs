@@ -21,7 +21,7 @@ pub fn to_cbor_bytes(obj: &impl Serialize) -> Vec<u8> {
     buf
 }
 
-/// Validates the key of Namespace and Setting
+/// Validates namespace
 ///
 /// # Arguments
 /// * `s` - A string slice that holds the name to be validated.

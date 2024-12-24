@@ -5,7 +5,7 @@ use std::{collections::BTreeSet, time::Duration};
 use crate::store;
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
-pub enum ChainArgs {
+pub enum InstallArgs {
     Init(InitArgs),
     Upgrade(UpgradeArgs),
 }
@@ -32,9 +32,9 @@ pub struct UpgradeArgs {
 }
 
 #[ic_cdk::init]
-fn init(args: Option<ChainArgs>) {
+fn init(args: Option<InstallArgs>) {
     match args.expect("init args is missing") {
-        ChainArgs::Init(args) => {
+        InstallArgs::Init(args) => {
             store::state::with_mut(|s| {
                 s.name = args.name;
                 s.ecdsa_key_name = args.ecdsa_key_name;
@@ -50,7 +50,7 @@ fn init(args: Option<ChainArgs>) {
                 s.governance_canister = args.governance_canister;
             });
         }
-        ChainArgs::Upgrade(_) => {
+        InstallArgs::Upgrade(_) => {
             ic_cdk::trap(
                 "cannot initialize the canister with an Upgrade args. Please provide an Init args.",
             );
@@ -68,11 +68,11 @@ fn pre_upgrade() {
 }
 
 #[ic_cdk::post_upgrade]
-fn post_upgrade(args: Option<ChainArgs>) {
+fn post_upgrade(args: Option<InstallArgs>) {
     store::state::load();
 
     match args {
-        Some(ChainArgs::Upgrade(args)) => {
+        Some(InstallArgs::Upgrade(args)) => {
             store::state::with_mut(|s| {
                 if let Some(name) = args.name {
                     s.name = name;
@@ -88,7 +88,7 @@ fn post_upgrade(args: Option<ChainArgs>) {
                 }
             });
         }
-        Some(ChainArgs::Init(_)) => {
+        Some(InstallArgs::Init(_)) => {
             ic_cdk::trap(
                 "cannot upgrade the canister with an Init args. Please provide an Upgrade args.",
             );

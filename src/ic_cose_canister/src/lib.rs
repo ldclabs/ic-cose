@@ -8,6 +8,7 @@ use std::collections::BTreeSet;
 
 mod api_admin;
 mod api_cose;
+mod api_identity;
 mod api_init;
 mod api_namespace;
 mod api_setting;
@@ -16,7 +17,7 @@ mod schnorr;
 mod store;
 mod vetkd;
 
-use api_init::ChainArgs;
+use api_init::InstallArgs;
 
 fn is_controller() -> Result<(), String> {
     let caller = ic_cdk::caller();

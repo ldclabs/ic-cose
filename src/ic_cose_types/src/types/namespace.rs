@@ -1,6 +1,6 @@
 use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{validate_key, validate_principals};
 
@@ -22,6 +22,8 @@ pub struct NamespaceInfo {
     pub settings_total: u64,           // settings created by managers for users
     pub user_settings_total: u64,      // settings created by users
     pub gas_balance: u128,             // cycles
+    pub fixed_id_names: BTreeMap<String, BTreeSet<Principal>>, // fixed identity names
+    pub session_expires_in_ms: u64,    // session expiration in milliseconds for fixed identity
 }
 
 #[derive(CandidType, Clone, Debug, Default, Deserialize, Serialize)]
@@ -33,6 +35,7 @@ pub struct CreateNamespaceInput {
     pub managers: BTreeSet<Principal>, // managers can read and write all settings
     pub auditors: BTreeSet<Principal>, // auditors can read all settings
     pub users: BTreeSet<Principal>,    // users can read and write settings they created
+    pub session_expires_in_ms: Option<u64>, // session expiration in milliseconds for fixed identity, default to 1 day
 }
 
 impl CreateNamespaceInput {
@@ -65,6 +68,7 @@ pub struct UpdateNamespaceInput {
     pub max_payload_size: Option<u64>,
     pub status: Option<i8>,
     pub visibility: Option<u8>, // 0: private; 1: public
+    pub session_expires_in_ms: Option<u64>,
 }
 
 impl UpdateNamespaceInput {
@@ -92,6 +96,21 @@ impl UpdateNamespaceInput {
                 Err("visibility should be 0 or 1".to_string())?;
             }
         }
+        Ok(())
+    }
+}
+
+#[derive(CandidType, Clone, Debug, Deserialize, Serialize)]
+pub struct NamespaceDelegatorsInput {
+    pub ns: String,
+    pub name: String,
+    pub delegators: BTreeSet<Principal>,
+}
+
+impl NamespaceDelegatorsInput {
+    pub fn validate(&self) -> Result<(), String> {
+        validate_key(&self.name)?;
+        validate_principals(&self.delegators)?;
         Ok(())
     }
 }

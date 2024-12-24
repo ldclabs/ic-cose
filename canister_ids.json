@@ -1,5 +1,9 @@
 {
+  "__Candid_UI": {
+    "local": "bnz7o-iuaaa-aaaaa-qaaaa-cai"
+  },
   "ic_cose_canister": {
-    "ic": "53cyg-yyaaa-aaaap-ahpua-cai"
+    "ic": "53cyg-yyaaa-aaaap-ahpua-cai",
+    "local": "53cyg-yyaaa-aaaap-ahpua-cai"
   }
 }

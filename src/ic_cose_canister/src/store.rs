@@ -1,5 +1,11 @@
 use candid::Principal;
 use ciborium::{from_reader, from_reader_with_buffer, into_writer};
+use ic_canister_sig_creation::{
+    signature_map::{CanisterSigInputs, SignatureMap, LABEL_SIG},
+    DELEGATION_SIG_DOMAIN,
+};
+use ic_cdk::api::set_certified_data;
+use ic_certification::labeled_hash;
 use ic_cose_types::{
     cose::{
         cwt::{ClaimsSet, Timestamp, SCOPE_NAME},
@@ -31,6 +37,8 @@ use crate::{
     schnorr::{derive_schnorr_public_key, schnorr_public_key, sign_with_schnorr},
     vetkd::{vetkd_encrypted_key, vetkd_public_key},
 };
+
+const SESSION_EXPIRES_IN_MS: u64 = 1000 * 3600 * 24; // 1 day
 
 type Memory = VirtualMemory<DefaultMemoryImpl>;
 
@@ -127,6 +135,10 @@ pub struct Namespace {
     pub user_settings: BTreeMap<(Principal, ByteBuf), Setting>, // settings created by users
     #[serde(rename = "g")]
     pub gas_balance: u128, // gas balance, TODO: https://internetcomputer.org/docs/current/developer-docs/gas-cost
+    #[serde(default, rename = "f")]
+    pub fixed_id_names: BTreeMap<String, BTreeSet<Principal>>, // fixed_id_name -> users
+    #[serde(default, rename = "se")]
+    pub session_expires_in_ms: u64, // session expires in milliseconds
 }
 
 impl Namespace {
@@ -146,6 +158,8 @@ impl Namespace {
             settings_total: self.settings.len() as u64,
             user_settings_total: self.user_settings.len() as u64,
             gas_balance: self.gas_balance,
+            fixed_id_names: self.fixed_id_names.clone(),
+            session_expires_in_ms: self.session_expires_in_ms,
         }
     }
 
@@ -389,6 +403,7 @@ const NS_MEMORY_ID: MemoryId = MemoryId::new(1);
 const PAYLOADS_MEMORY_ID: MemoryId = MemoryId::new(2);
 
 thread_local! {
+    static SIGNATURES : RefCell<SignatureMap> = RefCell::new(SignatureMap::default());
     static STATE: RefCell<State> = RefCell::new(State::default());
     static NS: RefCell<BTreeMap<String, Namespace>> = const { RefCell::new(BTreeMap::new()) };
 
@@ -445,6 +460,31 @@ pub mod state {
         } else {
             Err(format!("API {} not allowed", api))
         }
+    }
+
+    pub fn add_signature(seed: &[u8], message: &[u8]) {
+        SIGNATURES.with_borrow_mut(|sigs| {
+            let sig_inputs = CanisterSigInputs {
+                domain: DELEGATION_SIG_DOMAIN,
+                seed,
+                message,
+            };
+            sigs.add_signature(&sig_inputs);
+
+            set_certified_data(&labeled_hash(LABEL_SIG, &sigs.root_hash()));
+        });
+    }
+
+    pub fn get_signature(seed: &[u8], message: &[u8]) -> Result<Vec<u8>, String> {
+        SIGNATURES.with_borrow(|sigs| {
+            let sig_inputs = CanisterSigInputs {
+                domain: DELEGATION_SIG_DOMAIN,
+                seed,
+                message,
+            };
+            sigs.get_signature_as_cbor(&sig_inputs, None)
+                .map_err(|err| format!("failed to get signature: {:?}", err))
+        })
     }
 
     pub async fn init_public_key() {
@@ -820,6 +860,7 @@ pub mod ns {
                 managers: input.managers,
                 auditors: input.auditors,
                 users: input.users,
+                session_expires_in_ms: input.session_expires_in_ms.unwrap_or(SESSION_EXPIRES_IN_MS),
                 ..Default::default()
             };
 
@@ -850,6 +891,9 @@ pub mod ns {
             }
             if let Some(visibility) = input.visibility {
                 ns.visibility = visibility;
+            }
+            if let Some(session_expires_in_ms) = input.session_expires_in_ms {
+                ns.session_expires_in_ms = session_expires_in_ms;
             }
             ns.updated_at = now_ms;
             Ok(())
