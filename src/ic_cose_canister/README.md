@@ -31,12 +31,14 @@
   namespace_get_delegators : (text, text) -> (Result_7) query;
   namespace_get_fixed_identity : (text, text) -> (Result_8) query;
   namespace_get_info : (text) -> (Result_1) query;
+  namespace_list_setting_keys : (text) -> (Result_9) query;
+  namespace_list_user_setting_keys : (text) -> (Result_9) query;
   namespace_remove_auditors : (text, vec principal) -> (Result);
   namespace_remove_delegator : (NamespaceDelegatorsInput) -> (Result);
   namespace_remove_managers : (text, vec principal) -> (Result);
   namespace_remove_users : (text, vec principal) -> (Result);
-  namespace_sign_delegation : (SignDelegationInput) -> (Result_9);
-  namespace_top_up : (text, nat) -> (Result_10);
+  namespace_sign_delegation : (SignDelegationInput) -> (Result_10);
+  namespace_top_up : (text, nat) -> (Result_11);
   namespace_update_info : (UpdateNamespaceInput) -> (Result);
   schnorr_public_key : (SchnorrAlgorithm, opt PublicKeyInput) -> (
       Result_4,
@@ -44,22 +46,22 @@
   schnorr_sign : (SchnorrAlgorithm, SignInput) -> (Result_5);
   schnorr_sign_identity : (SchnorrAlgorithm, SignIdentityInput) -> (Result_5);
   setting_add_readers : (SettingPath, vec principal) -> (Result);
-  setting_create : (SettingPath, CreateSettingInput) -> (Result_11);
-  setting_get : (SettingPath) -> (Result_12) query;
-  setting_get_archived_payload : (SettingPath) -> (Result_13) query;
-  setting_get_info : (SettingPath) -> (Result_12) query;
+  setting_create : (SettingPath, CreateSettingInput) -> (Result_12);
+  setting_get : (SettingPath) -> (Result_13) query;
+  setting_get_archived_payload : (SettingPath) -> (Result_14) query;
+  setting_get_info : (SettingPath) -> (Result_13) query;
   setting_remove_readers : (SettingPath, vec principal) -> (Result);
-  setting_update_info : (SettingPath, UpdateSettingInfoInput) -> (Result_11);
+  setting_update_info : (SettingPath, UpdateSettingInfoInput) -> (Result_12);
   setting_update_payload : (SettingPath, UpdateSettingPayloadInput) -> (
-      Result_11,
+      Result_12,
     );
-  state_get_info : () -> (Result_14) query;
-  validate2_admin_add_allowed_apis : (vec text) -> (Result_15);
-  validate2_admin_add_auditors : (vec principal) -> (Result_15);
-  validate2_admin_add_managers : (vec principal) -> (Result_15);
-  validate2_admin_remove_allowed_apis : (vec text) -> (Result_15);
-  validate2_admin_remove_auditors : (vec principal) -> (Result_15);
-  validate2_admin_remove_managers : (vec principal) -> (Result_15);
+  state_get_info : () -> (Result_15) query;
+  validate2_admin_add_allowed_apis : (vec text) -> (Result_16);
+  validate2_admin_add_auditors : (vec principal) -> (Result_16);
+  validate2_admin_add_managers : (vec principal) -> (Result_16);
+  validate2_admin_remove_allowed_apis : (vec text) -> (Result_16);
+  validate2_admin_remove_auditors : (vec principal) -> (Result_16);
+  validate2_admin_remove_managers : (vec principal) -> (Result_16);
   validate_admin_add_allowed_apis : (vec text) -> (Result);
   validate_admin_add_auditors : (vec principal) -> (Result);
   validate_admin_add_managers : (vec principal) -> (Result);

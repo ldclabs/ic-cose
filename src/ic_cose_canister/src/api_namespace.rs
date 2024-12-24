@@ -3,6 +3,7 @@ use ic_cose_types::{
     types::{namespace::*, state::StateInfo},
     validate_principals, MILLISECONDS,
 };
+use serde_bytes::ByteBuf;
 use std::collections::BTreeSet;
 
 use crate::{is_authenticated, is_controller_or_manager, store};
@@ -21,6 +22,34 @@ fn state_get_info() -> Result<StateInfo, String> {
 fn namespace_get_info(namespace: String) -> Result<NamespaceInfo, String> {
     let caller = ic_cdk::caller();
     store::ns::get_namespace(&caller, namespace)
+}
+
+#[ic_cdk::query]
+fn namespace_list_setting_keys(
+    namespace: String,
+) -> Result<BTreeSet<(Principal, ByteBuf)>, String> {
+    let caller = ic_cdk::caller();
+    store::ns::with(&namespace, |ns| {
+        if !ns.can_read_namespace(&caller) {
+            return Err("no permission".to_string());
+        }
+
+        Ok(ns.settings.keys().cloned().collect())
+    })
+}
+
+#[ic_cdk::query]
+fn namespace_list_user_setting_keys(
+    namespace: String,
+) -> Result<BTreeSet<(Principal, ByteBuf)>, String> {
+    let caller = ic_cdk::caller();
+    store::ns::with(&namespace, |ns| {
+        if !ns.can_read_namespace(&caller) {
+            return Err("no permission".to_string());
+        }
+
+        Ok(ns.user_settings.keys().cloned().collect())
+    })
 }
 
 #[ic_cdk::update(guard = "is_authenticated")]
