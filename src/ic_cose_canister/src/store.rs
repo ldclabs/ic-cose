@@ -348,6 +348,10 @@ impl SettingPathKey {
             val.version,
         )
     }
+
+    pub fn v0(&self) -> SettingPathKey {
+        SettingPathKey(self.0.clone(), self.1, self.2.clone(), self.3.clone(), 0)
+    }
 }
 
 impl Storable for SettingPathKey {
@@ -714,7 +718,7 @@ pub mod ns {
                 return Ok(true);
             }
 
-            let setting = SETTINGS_STORE.with_borrow(|m| m.get(spk));
+            let setting = SETTINGS_STORE.with_borrow(|m| m.get(&spk.v0()));
             Ok(setting.map_or(false, |s| s.readers.contains(caller)))
         })
         .unwrap_or(false)
@@ -1053,7 +1057,7 @@ pub mod ns {
                 return Ok(None);
             }
 
-            let setting = SETTINGS_STORE.with_borrow(|m| m.get(spk));
+            let setting = SETTINGS_STORE.with_borrow(|m| m.get(&spk.v0()));
             Ok(setting.filter(|s| {
                 spk.4 <= s.version && (can == Some(true) || s.readers.contains(caller))
             }))
@@ -1193,7 +1197,8 @@ pub mod ns {
                 Err("no permission".to_string())?;
             }
 
-            SETTINGS_STORE.with_borrow_mut(|r| match r.get(spk) {
+            let spkv0 = spk.v0();
+            SETTINGS_STORE.with_borrow_mut(|r| match r.get(&spkv0) {
                 Some(mut setting) => {
                     if setting.version != spk.4 {
                         Err("version mismatch".to_string())?;
@@ -1204,7 +1209,7 @@ pub mod ns {
 
                     match f(&mut setting) {
                         Ok(rt) => {
-                            r.insert(spk.clone(), setting);
+                            r.insert(spkv0.clone(), setting);
                             Ok(rt)
                         }
                         Err(err) => Err(err),
@@ -1221,7 +1226,8 @@ pub mod ns {
                 Err("no permission".to_string())?;
             }
 
-            SETTINGS_STORE.with_borrow_mut(|r| match r.get(spk) {
+            let spkv0 = spk.v0();
+            SETTINGS_STORE.with_borrow_mut(|r| match r.get(&spkv0) {
                 Some(setting) => {
                     if setting.version != spk.4 {
                         Err("version mismatch".to_string())?;
@@ -1230,7 +1236,7 @@ pub mod ns {
                         Err("readonly setting can not be deleted".to_string())?;
                     }
 
-                    r.remove(spk);
+                    r.remove(&spkv0);
                     if spk.4 > 1 {
                         PAYLOADS_STORE.with_borrow_mut(|rr| {
                             let mut pk = spk.clone();
@@ -1271,7 +1277,8 @@ pub mod ns {
                 size += dek.len();
             }
 
-            let output = SETTINGS_STORE.with_borrow_mut(|r| match r.get(&spk) {
+            let spkv0 = spk.v0();
+            let output = SETTINGS_STORE.with_borrow_mut(|r| match r.get(&spkv0) {
                 Some(mut setting) => {
                     if setting.version != spk.4 {
                         Err("version mismatch".to_string())?;
@@ -1316,6 +1323,7 @@ pub mod ns {
                         setting.dek = Some(dek);
                     }
 
+                    r.insert(spkv0, setting.clone());
                     Ok(UpdateSettingOutput {
                         created_at: setting.created_at,
                         updated_at: setting.updated_at,
