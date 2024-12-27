@@ -1497,7 +1497,7 @@ dependencies = [
 
 [[package]]
 name = "ic_cose_canister"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "candid",
  "ciborium",
@@ -1518,7 +1518,7 @@ dependencies = [
 
 [[package]]
 name = "ic_cose_types"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "aes-gcm",
  "candid",
