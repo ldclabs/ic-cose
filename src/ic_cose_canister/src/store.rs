@@ -103,6 +103,7 @@ impl State {
             } else {
                 None
             },
+            governance_canister: self.governance_canister.clone(),
         }
     }
 }

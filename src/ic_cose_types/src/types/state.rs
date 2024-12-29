@@ -20,4 +20,5 @@ pub struct StateInfo {
     pub ecdsa_public_key: Option<PublicKeyOutput>,
     pub schnorr_ed25519_public_key: Option<PublicKeyOutput>,
     pub schnorr_secp256k1_public_key: Option<PublicKeyOutput>,
+    pub governance_canister: Option<Principal>,
 }
