@@ -29,4 +29,4 @@ ic-canister-sig-creation = { workspace = true }
 ic-certification = { workspace = true }
 ic-crypto-standalone-sig-verifier = { workspace = true }
 getrandom = { version = "0.2", features = ["custom"] }
-ic_cose_types = { path = "../ic_cose_types", version = "0.5" }
+ic_cose_types = { path = "../ic_cose_types", version = "0.6" }

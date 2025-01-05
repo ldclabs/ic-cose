@@ -1,5 +1,5 @@
 [workspace]
-members = ["src/ic_cose_canister", "src/ic_cose_types"]
+members = ["src/ic_cose_canister", "src/ic_cose_types", "src/ic_object_store"]
 resolver = "2"
 
 [profile.release]
@@ -9,7 +9,7 @@ strip = true
 opt-level = 's'
 
 [workspace.package]
-version = "0.5.4"
+version = "0.6.0"
 edition = "2021"
 repository = "https://github.com/ldclabs/ic-cose"
 keywords = ["config", "cbor", "canister", "icp", "encryption"]
@@ -39,6 +39,8 @@ ic-canister-sig-creation = "1.1"
 getrandom = { version = "0.2", features = ["custom"] }
 coset = "0.3"
 aes-gcm = "0.10"
+object_store = { version = "0.11", no-default-features = true }
+thiserror = "2"
 ic-crypto-secp256k1 = { git = "https://github.com/dfinity/ic/", rev = "5d202894864f4db4a5a46f44422aebc80c3d321b" }
 ic-crypto-ed25519 = { git = "https://github.com/dfinity/ic/", rev = "5d202894864f4db4a5a46f44422aebc80c3d321b" }
 ic-crypto-standalone-sig-verifier = { git = "https://github.com/dfinity/ic/", rev = "5d202894864f4db4a5a46f44422aebc80c3d321b" }

@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 
 pub use ic_cdk::api::management_canister::schnorr::SchnorrAlgorithm;
 pub mod namespace;
+pub mod object_store;
 pub mod setting;
 pub mod state;
 

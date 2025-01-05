@@ -8,6 +8,15 @@
       "package": "ic_cose_canister",
       "optimize": "cycles",
       "type": "rust"
+    },
+    "ic_object_store": {
+      "candid": "src/ic_object_store/ic_object_store.did",
+      "declarations": {
+        "node_compatibility": true
+      },
+      "package": "ic_object_store",
+      "optimize": "cycles",
+      "type": "rust"
     }
   },
   "defaults": {

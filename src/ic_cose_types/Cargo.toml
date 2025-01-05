@@ -27,3 +27,4 @@ sha3 = { workspace = true }
 coset = { workspace = true }
 aes-gcm = { workspace = true }
 const-hex = { workspace = true }
+thiserror = { workspace = true }

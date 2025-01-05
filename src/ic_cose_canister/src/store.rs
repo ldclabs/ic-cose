@@ -103,7 +103,7 @@ impl State {
             } else {
                 None
             },
-            governance_canister: self.governance_canister.clone(),
+            governance_canister: self.governance_canister,
         }
     }
 }
@@ -351,7 +351,7 @@ impl SettingPathKey {
     }
 
     pub fn v0(&self) -> SettingPathKey {
-        SettingPathKey(self.0.clone(), self.1, self.2.clone(), self.3.clone(), 0)
+        SettingPathKey(self.0.clone(), self.1, self.2, self.3.clone(), 0)
     }
 }
 
@@ -1385,26 +1385,26 @@ mod test {
         assert!(p2 < p3);
 
         SETTINGS_STORE.with_borrow_mut(|r| {
-            for (i, n) in (&[n1.clone(), n2.clone()]).iter().enumerate() {
+            for (i, n) in [n1.clone(), n2.clone()].iter().enumerate() {
                 for p in &[p0, p1, p2, p3] {
                     r.insert(
-                        SettingPathKey(n.clone(), 0, p.clone(), ByteBuf::from([i as u8]), 0),
+                        SettingPathKey(n.clone(), 0, *p, ByteBuf::from([i as u8]), 0),
                         Setting::default(),
                     );
                     r.insert(
-                        SettingPathKey(n.clone(), 0, p.clone(), ByteBuf::from(p.as_slice()), 0),
+                        SettingPathKey(n.clone(), 0, *p, ByteBuf::from(p.as_slice()), 0),
                         Setting::default(),
                     );
                     r.insert(
-                        SettingPathKey(n.clone(), 1, p.clone(), ByteBuf::from([i as u8 + 1]), 0),
+                        SettingPathKey(n.clone(), 1, *p, ByteBuf::from([i as u8 + 1]), 0),
                         Setting::default(),
                     );
                     r.insert(
-                        SettingPathKey(n.clone(), 1, p.clone(), ByteBuf::from(p.as_slice()), 0),
+                        SettingPathKey(n.clone(), 1, *p, ByteBuf::from(p.as_slice()), 0),
                         Setting::default(),
                     );
                     r.insert(
-                        SettingPathKey(n.clone(), 2, p.clone(), ByteBuf::from([0]), 0),
+                        SettingPathKey(n.clone(), 2, *p, ByteBuf::from([0]), 0),
                         Setting::default(),
                     );
                 }
