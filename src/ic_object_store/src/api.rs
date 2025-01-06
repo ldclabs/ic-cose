@@ -4,6 +4,10 @@ use serde_bytes::ByteBuf;
 
 use crate::store;
 
+const MAX_PART_INDEX: usize = 999;
+const MAX_PART_SIZE: usize = 256 * 1024;
+const MAX_PAYLOAD_SIZE: usize = 1024 * 1024;
+
 #[ic_cdk::query]
 fn get_state() -> Result<StateInfo, String> {
     store::state::with(|s| {
@@ -22,6 +26,16 @@ fn get_state() -> Result<StateInfo, String> {
 fn put_opts(path: String, payload: ByteBuf, opts: PutOptions) -> Result<PutResult> {
     is_writer()?;
     parse_path(&path)?;
+    if payload.len() > MAX_PAYLOAD_SIZE {
+        return Err(Error::Precondition {
+            path,
+            error: format!(
+                "payload size {} exceeds max size {}",
+                payload.len(),
+                MAX_PAYLOAD_SIZE
+            ),
+        });
+    }
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
     store::object::put_opts(path, payload, opts, now_ms)
 }
@@ -100,6 +114,25 @@ fn create_multipart(path: String, opts: PutMultipartOpts) -> Result<MultipartId>
 #[ic_cdk::update]
 fn put_part(path: String, id: MultipartId, part_idx: usize, payload: ByteBuf) -> Result<PartId> {
     is_writer()?;
+    if part_idx > MAX_PART_INDEX {
+        return Err(Error::Precondition {
+            path,
+            error: format!(
+                "part index {} exceeds max index {}",
+                part_idx, MAX_PART_INDEX
+            ),
+        });
+    }
+    if payload.len() > MAX_PART_SIZE {
+        return Err(Error::Precondition {
+            path,
+            error: format!(
+                "part size {} exceeds max size {}",
+                payload.len(),
+                MAX_PART_SIZE
+            ),
+        });
+    }
     store::object::put_part(path, id, part_idx, payload)
 }
 

@@ -1,0 +1,18 @@
+[package]
+name = "ic_cose_rs"
+description = "The Rust version of the client SDK for the IC-COSE canister."
+publish = true
+repository = "https://github.com/ldclabs/ic-cose/tree/main/src/ic_cose_rs"
+version.workspace = true
+edition.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+
+[dependencies]
+candid = { workspace = true }
+serde_bytes = { workspace = true }
+rand = { workspace = true }
+ic-agent = { workspace = true }
+x25519-dalek = { workspace = true }
+ic_cose_types = { path = "../ic_cose_types", version = "0.6" }

@@ -1,5 +1,10 @@
 [workspace]
-members = ["src/ic_cose_canister", "src/ic_cose_types", "src/ic_object_store"]
+members = [
+  "src/ic_cose_canister",
+  "src/ic_cose_rs",
+  "src/ic_cose_types",
+  "src/ic_object_store",
+]
 resolver = "2"
 
 [profile.release]
@@ -36,7 +41,9 @@ ic-stable-structures = "0.6"
 icrc-ledger-types = "0.1"
 ic-certification = "3.0"
 ic-canister-sig-creation = "1.1"
+ic-agent = "0.39"
 getrandom = { version = "0.2", features = ["custom"] }
+rand = "0.8"
 coset = "0.3"
 aes-gcm = "0.10"
 object_store = { version = "0.11", no-default-features = true }
