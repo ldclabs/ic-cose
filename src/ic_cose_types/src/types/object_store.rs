@@ -42,7 +42,6 @@ pub struct UpdateVersion {
 
 pub type PutResult = UpdateVersion;
 
-#[non_exhaustive]
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Attribute {
     ContentDisposition,
@@ -79,7 +78,7 @@ pub struct PutMultipartOpts {
     pub attributes: BTreeMap<Attribute, String>,
 }
 
-#[derive(CandidType, Clone, Debug, Deserialize, Serialize)]
+#[derive(CandidType, Default, Clone, Debug, Deserialize, Serialize)]
 pub struct GetOptions {
     /// Request will succeed if the `ObjectMeta::e_tag` matches
     /// otherwise returning [`Error::Precondition`]
@@ -282,13 +281,6 @@ pub enum Error {
     InvalidPath {
         /// The wrapped error
         path: String,
-    },
-
-    /// Error when `tokio::spawn` failed
-    #[error("Error joining spawned task: {}", error)]
-    JoinError {
-        /// The wrapped error
-        error: String,
     },
 
     /// Error when the attempted operation is not supported

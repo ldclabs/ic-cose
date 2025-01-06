@@ -1,39 +1,19 @@
-use candid::Principal;
-use ic_cose_types::types::object_store::*;
-use serde_bytes::ByteBuf;
-use std::collections::BTreeSet;
+use rand::thread_rng;
+use rand::RngCore;
 
-mod api;
-mod api_admin;
-mod api_init;
-mod store;
+pub mod agent;
+pub mod client;
 
-use api_init::InstallArgs;
-
-fn is_controller() -> Result<(), String> {
-    let caller = ic_cdk::caller();
-    if ic_cdk::api::is_controller(&caller) || store::state::is_controller(&caller) {
-        Ok(())
-    } else {
-        Err("user is not a controller".to_string())
-    }
+pub fn rand_bytes<const N: usize>() -> [u8; N] {
+    let mut rng = thread_rng();
+    let mut bytes = [0u8; N];
+    rng.fill_bytes(&mut bytes);
+    bytes
 }
 
-#[cfg(all(
-    target_arch = "wasm32",
-    target_vendor = "unknown",
-    target_os = "unknown"
-))]
-/// A getrandom implementation that always fails
-pub fn always_fail(_buf: &mut [u8]) -> Result<(), getrandom::Error> {
-    Err(getrandom::Error::UNSUPPORTED)
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn it_works() {}
 }
-
-#[cfg(all(
-    target_arch = "wasm32",
-    target_vendor = "unknown",
-    target_os = "unknown"
-))]
-getrandom::register_custom_getrandom!(always_fail);
-
-ic_cdk::export_candid!();

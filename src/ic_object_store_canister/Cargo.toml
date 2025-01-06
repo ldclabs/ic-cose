@@ -1,0 +1,26 @@
+[package]
+name = "ic_object_store_canister"
+description = "A Object Store of Apache Arrow on the Internet Computer."
+publish = false
+repository = "https://github.com/ldclabs/ic-cose/tree/main/src/ic_object_store_canister"
+version.workspace = true
+edition.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+candid = { workspace = true }
+ciborium = { workspace = true }
+ic-cdk = { workspace = true }
+serde = { workspace = true }
+serde_bytes = { workspace = true }
+ic-stable-structures = { workspace = true }
+object_store = { workspace = true }
+getrandom = { workspace = true }
+ic_cose_types = { path = "../ic_cose_types", version = "0.6" }

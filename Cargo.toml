@@ -23,8 +23,11 @@ categories = ["web-programming"]
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+async-trait = "0.1"
+bytes = "1.9"
 candid = "0.10"
 ciborium = "0.2"
+futures = "0.3"
 serde = "1"
 serde_bytes = "0.11"
 k256 = { version = "0.13", features = ["ecdsa", "schnorr"] }
@@ -48,6 +51,7 @@ rand = "0.8"
 coset = "0.3"
 aes-gcm = "0.10"
 object_store = { version = "0.11", no-default-features = true }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 thiserror = "2"
 ic-crypto-secp256k1 = { git = "https://github.com/dfinity/ic/", rev = "5d202894864f4db4a5a46f44422aebc80c3d321b" }
 ic-crypto-ed25519 = { git = "https://github.com/dfinity/ic/", rev = "5d202894864f4db4a5a46f44422aebc80c3d321b" }

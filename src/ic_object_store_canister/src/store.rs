@@ -17,6 +17,9 @@ use std::{
 
 type Memory = VirtualMemory<DefaultMemoryImpl>;
 
+// https://internetcomputer.org/docs/current/developer-docs/smart-contracts/maintain/resource-limits
+const MAX_RESPONSE_PAYLOAD_SIZE: usize = 2000 * 1024;
+
 #[derive(Clone, Default, Deserialize, Serialize)]
 pub struct State {
     pub name: String,
@@ -513,22 +516,37 @@ pub mod object {
                 version: me.version,
             };
             opts.check_preconditions(&meta)?;
+            if opts.head {
+                return Ok(GetResult {
+                    range: (0, 0),
+                    meta,
+                    attributes: BTreeMap::new(),
+                    payload: ByteBuf::new(),
+                });
+            }
+            let r = match opts.range {
+                Some(range) => range
+                    .into_range(me.size)
+                    .map_err(|error| Error::Precondition {
+                        path: path.clone(),
+                        error,
+                    })?,
+                None => 0..me.size,
+            };
+
+            if r.end - r.start > MAX_RESPONSE_PAYLOAD_SIZE {
+                return Err(Error::Precondition {
+                    path,
+                    error: "payload size exceeds max size".to_string(),
+                });
+            }
 
             let data = OBJECT_DATA.with_borrow(|od| od.get(etag).unwrap());
-            let (range, payload) = match opts.range {
-                Some(range) => {
-                    let r = range
-                        .into_range(data.len())
-                        .map_err(|error| Error::Precondition { path, error })?;
-                    ((r.start, r.end), data[r].to_vec())
-                }
-                None => ((0, data.len()), data),
-            };
             Ok(GetResult {
-                range,
+                range: (r.start, r.end),
                 meta,
                 attributes: me.attributes,
-                payload: ByteBuf::from(payload),
+                payload: ByteBuf::from(data[r].to_owned()),
             })
         })
     }
@@ -545,6 +563,26 @@ pub mod object {
                     error: "upload not completed".to_string(),
                 });
             }
+
+            let me = OBJECT_META.with_borrow(|om| om.get(etag).unwrap());
+            let mut total = 0;
+            for (start, end) in &ranges {
+                if start >= end || end > &me.size {
+                    return Err(Error::Precondition {
+                        path: path.clone(),
+                        error: format!("invalid range ({start}, {end})"),
+                    });
+                }
+                total += end - start;
+            }
+
+            if total > MAX_RESPONSE_PAYLOAD_SIZE {
+                return Err(Error::Precondition {
+                    path,
+                    error: "payload size exceeds max size".to_string(),
+                });
+            }
+
             let data = OBJECT_DATA.with_borrow(|od| od.get(etag).unwrap());
             ranges
                 .into_iter()

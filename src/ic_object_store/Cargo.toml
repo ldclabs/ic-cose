@@ -1,7 +1,7 @@
 [package]
 name = "ic_object_store"
-description = "A Object Store of Apache Arrow on the Internet Computer."
-publish = false
+description = "The Rust version of the client SDK for the ic_object_store canister."
+publish = true
 repository = "https://github.com/ldclabs/ic-cose/tree/main/src/ic_object_store"
 version.workspace = true
 edition.workspace = true
@@ -9,18 +9,15 @@ keywords.workspace = true
 categories.workspace = true
 license.workspace = true
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[lib]
-crate-type = ["cdylib"]
-
 [dependencies]
+async-trait = { workspace = true }
+futures = { workspace = true }
+bytes = { workspace = true }
 candid = { workspace = true }
-ciborium = { workspace = true }
-ic-cdk = { workspace = true }
-serde = { workspace = true }
 serde_bytes = { workspace = true }
-ic-stable-structures = { workspace = true }
+rand = { workspace = true }
+ic-agent = { workspace = true }
 object_store = { workspace = true }
-getrandom = { workspace = true }
+chrono = { workspace = true }
+aes-gcm = { workspace = true }
 ic_cose_types = { path = "../ic_cose_types", version = "0.6" }

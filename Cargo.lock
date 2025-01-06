@@ -1990,12 +1990,17 @@ dependencies = [
 name = "ic_object_store"
 version = "0.6.0"
 dependencies = [
+ "aes-gcm",
+ "async-trait",
+ "bytes",
  "candid",
+ "chrono",
+ "futures",
  "ic-agent",
  "ic_cose_types",
+ "object_store",
  "rand",
  "serde_bytes",
- "x25519-dalek",
 ]
 
 [[package]]
