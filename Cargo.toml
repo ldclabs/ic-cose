@@ -1,9 +1,10 @@
 [workspace]
 members = [
   "src/ic_cose_canister",
-  "src/ic_cose_rs",
+  "src/ic_cose",
   "src/ic_cose_types",
   "src/ic_object_store",
+  "src/ic_object_store_canister",
 ]
 resolver = "2"
 

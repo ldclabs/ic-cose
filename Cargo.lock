@@ -1930,6 +1930,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ic_cose"
+version = "0.6.0"
+dependencies = [
+ "candid",
+ "ic-agent",
+ "ic_cose_types",
+ "rand",
+ "serde_bytes",
+ "x25519-dalek",
+]
+
+[[package]]
 name = "ic_cose_canister"
 version = "0.6.0"
 dependencies = [
@@ -1948,18 +1960,6 @@ dependencies = [
  "ic_cose_types",
  "serde",
  "serde_bytes",
-]
-
-[[package]]
-name = "ic_cose_rs"
-version = "0.6.0"
-dependencies = [
- "candid",
- "ic-agent",
- "ic_cose_types",
- "rand",
- "serde_bytes",
- "x25519-dalek",
 ]
 
 [[package]]
@@ -1988,6 +1988,18 @@ dependencies = [
 
 [[package]]
 name = "ic_object_store"
+version = "0.6.0"
+dependencies = [
+ "candid",
+ "ic-agent",
+ "ic_cose_types",
+ "rand",
+ "serde_bytes",
+ "x25519-dalek",
+]
+
+[[package]]
+name = "ic_object_store_canister"
 version = "0.6.0"
 dependencies = [
  "candid",

@@ -14,9 +14,9 @@ test:
 
 # cargo install ic-wasm
 build-wasm:
-	@cargo build --release --target wasm32-unknown-unknown --package ic_cose_canister --package ic_object_store
+	@cargo build --release --target wasm32-unknown-unknown --package ic_cose_canister --package ic_object_store_canister
 
 # cargo install candid-extractor
 build-did:
 	candid-extractor target/wasm32-unknown-unknown/release/ic_cose_canister.wasm > src/ic_cose_canister/ic_cose_canister.did
-	candid-extractor target/wasm32-unknown-unknown/release/ic_object_store.wasm > src/ic_object_store/ic_object_store.did
+	candid-extractor target/wasm32-unknown-unknown/release/ic_object_store_canister.wasm > src/ic_object_store_canister/ic_object_store_canister.did

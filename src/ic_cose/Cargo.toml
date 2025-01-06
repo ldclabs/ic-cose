@@ -1,8 +1,8 @@
 [package]
-name = "ic_cose_rs"
+name = "ic_cose"
 description = "The Rust version of the client SDK for the IC-COSE canister."
 publish = true
-repository = "https://github.com/ldclabs/ic-cose/tree/main/src/ic_cose_rs"
+repository = "https://github.com/ldclabs/ic-cose/tree/main/src/ic_cose"
 version.workspace = true
 edition.workspace = true
 keywords.workspace = true
