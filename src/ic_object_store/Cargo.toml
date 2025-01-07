@@ -1,6 +1,6 @@
 [package]
 name = "ic_object_store"
-description = "The Rust version of the client SDK for the ic_object_store canister."
+description = "The Rust version of the client SDK for the IC Object Store canister."
 publish = true
 repository = "https://github.com/ldclabs/ic-cose/tree/main/src/ic_object_store"
 version.workspace = true

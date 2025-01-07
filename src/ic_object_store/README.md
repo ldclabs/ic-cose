@@ -5,9 +5,9 @@
 [![Docs.rs](https://img.shields.io/docsrs/ic_object_store?label=docs.rs)](https://docs.rs/ic_object_store)
 [![Latest Version](https://img.shields.io/crates/v/ic_object_store.svg)](https://crates.io/crates/ic_object_store)
 
-[IC-COSE](https://github.com/ldclabs/ic-cose) is a decentralized COnfiguration service with Signing and Encryption on the Internet Computer.
+[IC Object Store](https://github.com/ldclabs/ic-cose/tree/main/src/ic_object_store_canister) is a native Rust implementation of Apache Arrow object store on the Internet Computer.
 
-`ic_object_store` is the Rust version of the client SDK for the ic_object_store canister.
+`ic_object_store` is the Rust version of the client SDK for the IC Object Store canister.
 
 ## Documentation
 

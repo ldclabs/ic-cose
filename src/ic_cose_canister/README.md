@@ -9,74 +9,15 @@
 - [ ] Serve as a state persistence service for enclaves, aiding in loading and persisting confidential data during startup and runtime.
 - [ ] Can be used as a cluster management center for both Web3 and Web2 services.
 
-## Candid API
+## Demo
 
-```shell
-  admin_add_allowed_apis : (vec text) -> (Result);
-  admin_add_auditors : (vec principal) -> (Result);
-  admin_add_managers : (vec principal) -> (Result);
-  admin_create_namespace : (CreateNamespaceInput) -> (Result_1);
-  admin_list_namespace : (opt text, opt nat32) -> (Result_2) query;
-  admin_remove_allowed_apis : (vec text) -> (Result);
-  admin_remove_auditors : (vec principal) -> (Result);
-  admin_remove_managers : (vec principal) -> (Result);
-  ecdh_cose_encrypted_key : (SettingPath, ECDHInput) -> (Result_3);
-  ecdsa_public_key : (opt PublicKeyInput) -> (Result_4) query;
-  ecdsa_sign : (SignInput) -> (Result_5);
-  get_delegation : (blob, blob, nat64) -> (Result_6) query;
-  namespace_add_auditors : (text, vec principal) -> (Result);
-  namespace_add_delegator : (NamespaceDelegatorsInput) -> (Result_7);
-  namespace_add_managers : (text, vec principal) -> (Result);
-  namespace_add_users : (text, vec principal) -> (Result);
-  namespace_get_delegators : (text, text) -> (Result_7) query;
-  namespace_get_fixed_identity : (text, text) -> (Result_8) query;
-  namespace_get_info : (text) -> (Result_1) query;
-  namespace_list_setting_keys : (text) -> (Result_9) query;
-  namespace_list_user_setting_keys : (text) -> (Result_9) query;
-  namespace_remove_auditors : (text, vec principal) -> (Result);
-  namespace_remove_delegator : (NamespaceDelegatorsInput) -> (Result);
-  namespace_remove_managers : (text, vec principal) -> (Result);
-  namespace_remove_users : (text, vec principal) -> (Result);
-  namespace_sign_delegation : (SignDelegationInput) -> (Result_10);
-  namespace_top_up : (text, nat) -> (Result_11);
-  namespace_update_info : (UpdateNamespaceInput) -> (Result);
-  schnorr_public_key : (SchnorrAlgorithm, opt PublicKeyInput) -> (
-      Result_4,
-    ) query;
-  schnorr_sign : (SchnorrAlgorithm, SignInput) -> (Result_5);
-  schnorr_sign_identity : (SchnorrAlgorithm, SignIdentityInput) -> (Result_5);
-  setting_add_readers : (SettingPath, vec principal) -> (Result);
-  setting_create : (SettingPath, CreateSettingInput) -> (Result_12);
-  setting_get : (SettingPath) -> (Result_13) query;
-  setting_get_archived_payload : (SettingPath) -> (Result_14) query;
-  setting_get_info : (SettingPath) -> (Result_13) query;
-  setting_remove_readers : (SettingPath, vec principal) -> (Result);
-  setting_update_info : (SettingPath, UpdateSettingInfoInput) -> (Result_12);
-  setting_update_payload : (SettingPath, UpdateSettingPayloadInput) -> (
-      Result_12,
-    );
-  state_get_info : () -> (Result_15) query;
-  validate2_admin_add_allowed_apis : (vec text) -> (Result_16);
-  validate2_admin_add_auditors : (vec principal) -> (Result_16);
-  validate2_admin_add_managers : (vec principal) -> (Result_16);
-  validate2_admin_remove_allowed_apis : (vec text) -> (Result_16);
-  validate2_admin_remove_auditors : (vec principal) -> (Result_16);
-  validate2_admin_remove_managers : (vec principal) -> (Result_16);
-  validate_admin_add_allowed_apis : (vec text) -> (Result);
-  validate_admin_add_auditors : (vec principal) -> (Result);
-  validate_admin_add_managers : (vec principal) -> (Result);
-  validate_admin_remove_allowed_apis : (vec text) -> (Result);
-  validate_admin_remove_auditors : (vec principal) -> (Result);
-  validate_admin_remove_managers : (vec principal) -> (Result);
-  vetkd_encrypted_key : (SettingPath, blob) -> (Result_5);
-  vetkd_public_key : (SettingPath) -> (Result_5);
-```
+Try it online: https://a4gq6-oaaaa-aaaab-qaa4q-cai.raw.icp0.io/?id=53cyg-yyaaa-aaaap-ahpua-cai
 
-The complete Candid API definition can be found in the [ic_cose_canister.did](https://github.com/ldclabs/ic-cose/tree/main/src/ic_cose_canister/ic_cose_canister.did) file.
+## Quick Start
 
-## Running locally
+### Local Deployment
 
-Deploy to local network:
+Deploy the canister:
 ```bash
 dfx deploy ic_cose_canister
 
@@ -127,7 +68,45 @@ dfx canister call ic_cose_canister ecdsa_public_key '(opt record {
 dfx canister call ic_cose_canister namespace_add_users "(\"testing\", vec {principal \"hpudd-yqaaa-aaaap-ahnbq-cai\"})"
 ```
 
+## API Reference
+
+The canister exposes a comprehensive Candid API. Key endpoints include:
+
+```candid
+# Namespace Operations
+namespace_add_managers : (text, vec principal) -> (Result)
+namespace_update_info : (UpdateNamespaceInput) -> (Result)
+namespace_get_info : (text) -> (Result) query
+namespace_list_setting_keys : (text, bool, opt principal) -> (Result) query
+
+# Setting Operations
+setting_create : (SettingPath, CreateSettingInput) -> (Result)
+setting_get : (SettingPath) -> (Result) query
+setting_add_readers : (SettingPath, vec principal) -> (Result)
+setting_update_payload : (SettingPath, UpdateSettingPayloadInput) -> (Result)
+namespace_top_up : (text, nat) -> (Result)
+
+# COSE Operations
+schnorr_public_key : (SchnorrAlgorithm, opt PublicKeyInput) -> (Result) query
+schnorr_sign : (SchnorrAlgorithm, SignInput) -> (Result)
+ecdsa_sign : (SignInput) -> (Result)
+ecdh_cose_encrypted_key : (SettingPath, ECDHInput) -> (Result)
+
+# Identity Operations
+namespace_get_fixed_identity : (text, text) -> (Result) query
+namespace_add_delegator : (NamespaceDelegatorsInput) -> (Result)
+namespace_sign_delegation : (SignDelegationInput) -> (Result)
+get_delegation : (blob, blob, nat64) -> (Result) query
+
+# Admin Operations
+admin_add_managers : (vec principal) -> (Result)
+admin_create_namespace : (CreateNamespaceInput) -> (Result)
+admin_add_allowed_apis : (vec text) -> (Result)
+```
+
+Full Candid API definition: [ic_cose_canister.did](https://github.com/ldclabs/ic-cose/tree/main/src/ic_cose_canister/ic_cose_canister.did)
+
 ## License
-Copyright © 2024 [LDC Labs](https://github.com/ldclabs).
+Copyright © 2024-2025 [LDC Labs](https://github.com/ldclabs).
 
 `ldclabs/ic-cose` is licensed under the MIT License. See [LICENSE](../../LICENSE-MIT) for the full license text.
