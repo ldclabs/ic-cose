@@ -1,10 +1,15 @@
 use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
-use serde_bytes::ByteBuf;
+use serde_bytes::{ByteArray, ByteBuf};
 use std::{
     collections::{BTreeMap, BTreeSet},
     ops::Range,
 };
+
+pub const CHUNK_SIZE: usize = 256 * 1024;
+pub const MAX_PARTS: usize = 1024;
+// https://internetcomputer.org/docs/current/developer-docs/smart-contracts/maintain/resource-limits
+pub const MAX_PAYLOAD_SIZE: usize = 2000 * 1024;
 
 // https://github.com/apache/arrow-rs/blob/main/object_store/src/lib.rs
 
@@ -18,9 +23,10 @@ pub struct StateInfo {
     pub next_etag: u64,
 }
 
-#[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(CandidType, Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub enum PutMode {
     /// Perform an atomic write operation, overwriting any object present at the provided path
+    #[default]
     Overwrite,
     /// Perform an atomic write operation, returning [`Error::AlreadyExists`] if an
     /// object already exists at the provided path
@@ -52,7 +58,7 @@ pub enum Attribute {
     Metadata(String),
 }
 
-#[derive(CandidType, Clone, Debug, Deserialize, Serialize)]
+#[derive(CandidType, Clone, Debug, Default, Deserialize, Serialize)]
 pub struct PutOptions {
     /// Configure the [`PutMode`] for this operation
     pub mode: PutMode,
@@ -64,9 +70,14 @@ pub struct PutOptions {
     ///
     /// Implementations that don't support an attribute should return an error
     pub attributes: BTreeMap<Attribute, String>,
+    /// A nonce with AES256-GCM encryption
+    pub aes_nonce: Option<ByteArray<12>>,
+    /// A set of tags with AES256-GCM encryption
+    /// Each part of the object has its own tag
+    pub aes_tags: Option<Vec<ByteArray<16>>>,
 }
 
-#[derive(CandidType, Clone, Debug, Deserialize, Serialize)]
+#[derive(CandidType, Clone, Debug, Default, Deserialize, Serialize)]
 pub struct PutMultipartOpts {
     /// Provide a [`TagSet`] for this object
     ///
@@ -76,6 +87,11 @@ pub struct PutMultipartOpts {
     ///
     /// Implementations that don't support an attribute should return an error
     pub attributes: BTreeMap<Attribute, String>,
+    /// A nonce with AES256-GCM encryption
+    pub aes_nonce: Option<ByteArray<12>>,
+    /// A set of tags with AES256-GCM encryption
+    /// Each part of the object has its own tag
+    pub aes_tags: Option<Vec<ByteArray<16>>>,
 }
 
 #[derive(CandidType, Default, Clone, Debug, Deserialize, Serialize)]
@@ -241,6 +257,11 @@ pub struct ObjectMeta {
     pub e_tag: Option<String>,
     /// A version indicator for this object
     pub version: Option<String>,
+    /// A nonce with AES256-GCM encryption
+    pub aes_nonce: Option<ByteArray<12>>,
+    /// A set of tags with AES256-GCM encryption
+    /// Each part of the object has its own tag
+    pub aes_tags: Option<Vec<ByteArray<16>>>,
 }
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize)]

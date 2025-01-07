@@ -23,18 +23,23 @@ pub struct UpgradeArgs {
 
 #[ic_cdk::init]
 fn init(args: Option<InstallArgs>) {
-    match args.expect("init args is missing") {
-        InstallArgs::Init(args) => {
+    store::state::with_mut(|s| {
+        s.name = "ICObjectStore".to_string();
+    });
+
+    match args {
+        Some(InstallArgs::Init(args)) => {
             store::state::with_mut(|s| {
                 s.name = args.name;
                 s.governance_canister = args.governance_canister;
             });
         }
-        InstallArgs::Upgrade(_) => {
+        Some(InstallArgs::Upgrade(_)) => {
             ic_cdk::trap(
                 "cannot initialize the canister with an Upgrade args. Please provide an Init args.",
             );
         }
+        _ => {}
     }
 }
 

@@ -50,7 +50,7 @@ getrandom = { version = "0.2", features = ["custom"] }
 rand = "0.8"
 coset = "0.3"
 aes-gcm = "0.10"
-object_store = { version = "0.11", no-default-features = true }
+object_store = { version = "0.11" }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 thiserror = "2"
 ic-crypto-secp256k1 = { git = "https://github.com/dfinity/ic/", rev = "5d202894864f4db4a5a46f44422aebc80c3d321b" }

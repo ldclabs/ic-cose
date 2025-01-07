@@ -1,6 +1,6 @@
 use candid::Principal;
 use ciborium::{from_reader, into_writer};
-use ic_cose_types::types::object_store::Attribute;
+use ic_cose_types::types::object_store::{Attribute, CHUNK_SIZE, MAX_PAYLOAD_SIZE};
 use ic_stable_structures::{
     memory_manager::{MemoryId, MemoryManager, VirtualMemory},
     storable::Bound,
@@ -8,7 +8,7 @@ use ic_stable_structures::{
 };
 use object_store::path::Path;
 use serde::{Deserialize, Serialize};
-use serde_bytes::ByteBuf;
+use serde_bytes::{ByteArray, ByteBuf};
 use std::{
     borrow::Cow,
     cell::RefCell,
@@ -17,16 +17,13 @@ use std::{
 
 type Memory = VirtualMemory<DefaultMemoryImpl>;
 
-// https://internetcomputer.org/docs/current/developer-docs/smart-contracts/maintain/resource-limits
-const MAX_RESPONSE_PAYLOAD_SIZE: usize = 2000 * 1024;
-
 #[derive(Clone, Default, Deserialize, Serialize)]
 pub struct State {
     pub name: String,
     pub managers: BTreeSet<Principal>,
     pub auditors: BTreeSet<Principal>,
     pub governance_canister: Option<Principal>,
-    pub locations: BTreeMap<String, (u64, bool)>, // path -> (etag, completed)
+    pub locations: BTreeMap<String, (u64, i64)>, // path -> (etag, size)
     pub next_etag: u64,
 }
 
@@ -36,21 +33,18 @@ pub struct ObjectMetadata {
     /// The last modified time, unix timestamp in milliseconds
     #[serde(rename = "m")]
     last_modified: u64,
-    /// The size in bytes of the object
     #[serde(rename = "s")]
     size: usize,
-    // /// The unique identifier for the object
-    // ///
-    // /// <https://datatracker.ietf.org/doc/html/rfc9110#name-etag>
-    // #[serde(rename = "e")]
-    // e_tag: Option<String>,
     #[serde(rename = "t")]
     tags: String,
     #[serde(rename = "a")]
     attributes: BTreeMap<Attribute, String>,
-    /// A version indicator for this object
     #[serde(rename = "v")]
     version: Option<String>,
+    #[serde(rename = "an")]
+    aes_nonce: Option<ByteArray<12>>,
+    #[serde(rename = "at")]
+    aes_tags: Option<Vec<ByteArray<16>>>,
 }
 
 impl Storable for ObjectMetadata {
@@ -64,6 +58,45 @@ impl Storable for ObjectMetadata {
 
     fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
         from_reader(&bytes[..]).expect("failed to decode ObjectMetadata data")
+    }
+}
+
+// FileId: (object id, chunk id)
+// a object is a collection of chunks.
+#[derive(Clone, Default, Deserialize, Serialize, Ord, PartialOrd, Eq, PartialEq)]
+pub struct ObjectId(pub u64, pub u32);
+impl Storable for ObjectId {
+    const BOUND: Bound = Bound::Bounded {
+        max_size: 15,
+        is_fixed_size: false,
+    };
+
+    fn to_bytes(&self) -> Cow<[u8]> {
+        let mut buf = vec![];
+        into_writer(self, &mut buf).expect("failed to encode ObjectId data");
+        Cow::Owned(buf)
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        from_reader(&bytes[..]).expect("failed to decode ObjectId data")
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct Chunk(pub Vec<u8>);
+
+impl Storable for Chunk {
+    const BOUND: Bound = Bound::Bounded {
+        max_size: CHUNK_SIZE as u32,
+        is_fixed_size: false,
+    };
+
+    fn to_bytes(&self) -> Cow<[u8]> {
+        Cow::Borrowed(&self.0)
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        Self(bytes.to_vec())
     }
 }
 
@@ -91,7 +124,7 @@ thread_local! {
         )
     );
 
-    static OBJECT_DATA: RefCell<StableBTreeMap<u64, Vec<u8>, Memory>> = RefCell::new(
+    static OBJECT_DATA: RefCell<StableBTreeMap<ObjectId, Chunk, Memory>> = RefCell::new(
         StableBTreeMap::init(
             MEMORY_MANAGER.with_borrow(|m| m.get(OBJECT_DATA_MEMORY_ID)),
         )
@@ -150,6 +183,94 @@ pub mod object {
     use super::*;
     use ic_cose_types::types::object_store::*;
 
+    fn put_object_data(etag: u64, payload: ByteBuf, prev_size: usize) {
+        OBJECT_DATA.with_borrow_mut(|od| {
+            let payload = payload.into_vec();
+            if prev_size > payload.len() {
+                // remove the remaining chunks
+                for idx in payload.len().div_ceil(CHUNK_SIZE)..prev_size.div_ceil(CHUNK_SIZE) {
+                    od.remove(&ObjectId(etag, idx as u32));
+                }
+            }
+            for (idx, chunk) in payload.chunks(CHUNK_SIZE).enumerate() {
+                od.insert(ObjectId(etag, idx as u32), Chunk(chunk.to_owned()));
+            }
+        });
+    }
+
+    fn copy_object_data(from: u64, to: u64, size: usize, prev_size: usize) {
+        OBJECT_DATA.with_borrow_mut(|od| {
+            if prev_size > size {
+                // remove the remaining chunks
+                for idx in size.div_ceil(CHUNK_SIZE)..prev_size.div_ceil(CHUNK_SIZE) {
+                    od.remove(&ObjectId(to, idx as u32));
+                }
+            }
+            for idx in 0..size.div_ceil(CHUNK_SIZE) {
+                if let Some(chunk) = od.get(&ObjectId(from, idx as u32)) {
+                    od.insert(ObjectId(to, idx as u32), chunk);
+                }
+            }
+        });
+    }
+
+    fn get_object_ranges(etag: u64, ranges: &[(usize, usize)]) -> Result<Vec<ByteBuf>> {
+        OBJECT_DATA.with_borrow(|od| {
+            let mut result = Vec::with_capacity(ranges.len());
+            let mut chunk_cache: Option<(u32, Chunk)> = None; // cache the last chunk read
+
+            for &(start, end) in ranges {
+                let mut buf = Vec::with_capacity(end - start);
+
+                // Calculate the chunk indices we need to read
+                let start_chunk = (start / CHUNK_SIZE) as u32;
+                let end_chunk = ((end - 1) / CHUNK_SIZE) as u32;
+
+                for idx in start_chunk..=end_chunk {
+                    // Calculate the byte range within this chunk
+                    let chunk_start = if idx == start_chunk {
+                        start % CHUNK_SIZE
+                    } else {
+                        0
+                    };
+
+                    let chunk_end = if idx == end_chunk {
+                        (end - 1) % CHUNK_SIZE + 1
+                    } else {
+                        CHUNK_SIZE
+                    };
+
+                    match &chunk_cache {
+                        Some((cached_idx, cached_chunk)) if *cached_idx == idx => {
+                            buf.extend_from_slice(&cached_chunk.0[chunk_start..chunk_end]);
+                        }
+                        _ => {
+                            let chunk =
+                                od.get(&ObjectId(etag, idx)).ok_or(Error::Precondition {
+                                    path: "".to_string(),
+                                    error: format!("missing part {} at {}", idx, etag),
+                                })?;
+                            buf.extend_from_slice(&chunk.0[chunk_start..chunk_end]);
+                            chunk_cache = Some((idx, chunk));
+                        }
+                    }
+                }
+
+                result.push(ByteBuf::from(buf));
+            }
+
+            Ok(result)
+        })
+    }
+
+    fn delete_object_data(etag: u64, size: usize) {
+        OBJECT_DATA.with_borrow_mut(|od| {
+            for idx in 0..size.div_ceil(CHUNK_SIZE) {
+                od.remove(&ObjectId(etag, idx as u32));
+            }
+        });
+    }
+
     pub fn put_opts(
         path: String,
         payload: ByteBuf,
@@ -162,18 +283,39 @@ pub mod object {
                 size: payload.len(),
                 tags: opts.tags,
                 attributes: opts.attributes,
-                version: None,
+                aes_nonce: opts.aes_nonce,
+                aes_tags: opts.aes_tags,
+                ..Default::default()
             };
+
+            if let Some(tags) = &meta.aes_tags {
+                let parts = payload.len().div_ceil(CHUNK_SIZE);
+                if tags.len() != parts {
+                    return Err(Error::Precondition {
+                        path,
+                        error: format!(
+                            "aes_tags size {} does not match parts {}",
+                            tags.len(),
+                            parts
+                        ),
+                    });
+                }
+            }
 
             let etag = match opts.mode {
                 PutMode::Overwrite => {
-                    let (etag, _) = s.locations.entry(path).or_insert((s.next_etag, true));
-                    if etag == &s.next_etag {
+                    let (etag, size) = s
+                        .locations
+                        .entry(path)
+                        .or_insert((s.next_etag, meta.size as i64));
+                    let etag = *etag;
+                    let size = *size;
+                    if etag == s.next_etag {
                         s.next_etag += 1;
                     }
-                    OBJECT_META.with_borrow_mut(|om| om.insert(*etag, meta));
-                    OBJECT_DATA.with_borrow_mut(|od| od.insert(*etag, payload.into_vec()));
-                    *etag
+                    OBJECT_META.with_borrow_mut(|om| om.insert(etag, meta));
+                    put_object_data(etag, payload, if size > 0 { size as usize } else { 0 });
+                    etag
                 }
                 PutMode::Create => {
                     if s.locations.contains_key(&path) {
@@ -181,10 +323,10 @@ pub mod object {
                     }
 
                     let etag = s.next_etag;
-                    s.locations.insert(path, (etag, true));
+                    s.locations.insert(path, (etag, meta.size as i64));
                     s.next_etag += 1;
                     OBJECT_META.with_borrow_mut(|om| om.insert(etag, meta));
-                    OBJECT_DATA.with_borrow_mut(|od| od.insert(etag, payload.into_vec()));
+                    put_object_data(etag, payload, 0);
                     etag
                 }
                 PutMode::Update(v) => match s.locations.get(&path) {
@@ -192,21 +334,25 @@ pub mod object {
                         path,
                         error: "object not found".into(),
                     })?,
-                    Some((etag, _)) => {
+                    Some((etag, size)) => {
+                        let etag = *etag;
+                        let size = *size;
                         let existing = etag.to_string();
                         let expected = v.e_tag.ok_or(Error::Generic {
                             error: "e_tag required for conditional update".to_string(),
                         })?;
                         if existing != expected {
-                            Err(Error::Precondition {
+                            return Err(Error::Precondition {
                                 path,
                                 error: format!("{existing} does not match {expected}"),
-                            })?;
+                            });
                         }
+
+                        s.locations.insert(path, (etag, meta.size as i64));
                         meta.version = v.version;
-                        OBJECT_META.with_borrow_mut(|om| om.insert(*etag, meta));
-                        OBJECT_DATA.with_borrow_mut(|od| od.insert(*etag, payload.into_vec()));
-                        *etag
+                        OBJECT_META.with_borrow_mut(|om| om.insert(etag, meta));
+                        put_object_data(etag, payload, size as usize);
+                        etag
                     }
                 },
             };
@@ -220,10 +366,11 @@ pub mod object {
 
     pub fn delete(path: String) -> Result<()> {
         STATE.with_borrow_mut(|s| {
-            if let Some((etag, _)) = s.locations.remove(&path) {
-                MULTIPART_UPLOAD.with_borrow_mut(|m| m.remove(&etag));
+            if let Some((etag, size)) = s.locations.remove(&path) {
                 OBJECT_META.with_borrow_mut(|om| om.remove(&etag));
-                OBJECT_DATA.with_borrow_mut(|od| od.remove(&etag));
+                if size > 0 {
+                    delete_object_data(etag, size as usize);
+                }
             }
             Ok(())
         })
@@ -231,26 +378,32 @@ pub mod object {
 
     pub fn copy(from: String, to: String) -> Result<()> {
         STATE.with_borrow_mut(|s| {
-            let from = {
-                let (etag, completed) = s
+            let (from, size) = {
+                let (etag, size) = s
                     .locations
                     .get(&from)
                     .ok_or(Error::NotFound { path: from.clone() })?;
-                if !completed {
+                if *size < 0 {
                     return Err(Error::Precondition {
                         path: from,
                         error: "upload not completed".to_string(),
                     });
                 }
-                *etag
+                (*etag, *size)
             };
 
-            let (etag, _) = s.locations.entry(to).or_insert((s.next_etag, true));
+            let (etag, psize) = s.locations.entry(to).or_insert((s.next_etag, size));
             if etag == &s.next_etag {
                 s.next_etag += 1;
             }
+            let psize = *psize;
             OBJECT_META.with_borrow_mut(|om| om.insert(*etag, om.get(&from).unwrap()));
-            OBJECT_DATA.with_borrow_mut(|od| od.insert(*etag, od.get(&from).unwrap()));
+            copy_object_data(
+                from,
+                *etag,
+                size as usize,
+                if psize > 0 { psize as usize } else { 0 },
+            );
             Ok(())
         })
     }
@@ -261,26 +414,26 @@ pub mod object {
                 return Err(Error::AlreadyExists { path: to });
             }
 
-            let from = {
-                let (etag, completed) = s
+            let (from, size) = {
+                let (etag, size) = s
                     .locations
                     .get(&from)
                     .ok_or(Error::NotFound { path: from.clone() })?;
-                if !completed {
+                if *size < 0 {
                     return Err(Error::Precondition {
                         path: from,
                         error: "upload not completed".to_string(),
                     });
                 }
-                *etag
+                (*etag, *size)
             };
 
             let etag = s.next_etag;
             s.next_etag += 1;
-            s.locations.insert(to, (etag, true));
+            s.locations.insert(to, (etag, size));
 
             OBJECT_META.with_borrow_mut(|om| om.insert(etag, om.get(&from).unwrap()));
-            OBJECT_DATA.with_borrow_mut(|od| od.insert(etag, od.get(&from).unwrap()));
+            copy_object_data(from, etag, size as usize, 0);
             Ok(())
         })
     }
@@ -288,11 +441,11 @@ pub mod object {
     pub fn rename(from: String, to: String) -> Result<()> {
         STATE.with_borrow_mut(|s| {
             {
-                let (_, completed) = s
+                let (_, size) = s
                     .locations
                     .get(&from)
                     .ok_or(Error::NotFound { path: from.clone() })?;
-                if !completed {
+                if *size < 0 {
                     return Err(Error::Precondition {
                         path: from,
                         error: "upload not completed".to_string(),
@@ -300,12 +453,16 @@ pub mod object {
                 }
             };
 
-            let from = s.locations.remove(&from).unwrap();
-            let (etag, _) = s.locations.entry(to).or_insert(from);
-            if etag != &from.0 {
+            let (from, size) = s.locations.remove(&from).unwrap();
+            let (etag, psize) = s.locations.entry(to).or_insert((from, size));
+            if etag != &from {
+                // delete the existing 'to' object data
                 OBJECT_META.with_borrow_mut(|om| om.remove(etag));
-                OBJECT_DATA.with_borrow_mut(|od| od.remove(etag));
-                *etag = from.0;
+                if *psize > 0 {
+                    delete_object_data(*etag, *psize as usize);
+                }
+                *etag = from;
+                *psize = size;
             }
             Ok(())
         })
@@ -317,11 +474,11 @@ pub mod object {
                 return Err(Error::AlreadyExists { path: to });
             }
             {
-                let (_, completed) = s
+                let (_, size) = s
                     .locations
                     .get(&from)
                     .ok_or(Error::NotFound { path: from.clone() })?;
-                if !completed {
+                if *size < 0 {
                     return Err(Error::Precondition {
                         path: from,
                         error: "upload not completed".to_string(),
@@ -329,34 +486,21 @@ pub mod object {
                 }
             };
 
-            let etag = s.locations.remove(&from).unwrap();
-            s.locations.insert(to, etag);
+            let (etag, size) = s.locations.remove(&from).unwrap();
+            s.locations.insert(to, (etag, size));
             Ok(())
         })
     }
 
-    pub fn create_multipart(
-        path: String,
-        opts: PutMultipartOpts,
-        now_ms: u64,
-    ) -> Result<MultipartId> {
+    pub fn create_multipart(path: String) -> Result<MultipartId> {
         STATE.with_borrow_mut(|s| {
             if s.locations.contains_key(&path) {
                 return Err(Error::AlreadyExists { path });
             }
 
-            let meta = ObjectMetadata {
-                last_modified: now_ms,
-                size: 0,
-                tags: opts.tags,
-                attributes: opts.attributes,
-                version: None,
-            };
-
             let etag = s.next_etag;
-            s.locations.insert(path, (etag, false));
             s.next_etag += 1;
-            OBJECT_META.with_borrow_mut(|om| om.insert(etag, meta));
+            s.locations.insert(path, (etag, -1));
             Ok(etag.to_string())
         })
     }
@@ -364,13 +508,13 @@ pub mod object {
     pub fn put_part(
         path: String,
         id: MultipartId,
-        part_idx: usize,
+        part_idx: u32,
         payload: ByteBuf,
     ) -> Result<PartId> {
         STATE.with_borrow_mut(|s| {
-            let (etag, completed) = s
+            let (etag, size) = s
                 .locations
-                .get(&path)
+                .get_mut(&path)
                 .ok_or(Error::NotFound { path: path.clone() })?;
             if etag.to_string() != id {
                 return Err(Error::Precondition {
@@ -378,19 +522,20 @@ pub mod object {
                     error: "upload not found".to_string(),
                 });
             }
-            if *completed {
+            if *size >= 0 {
                 return Err(Error::Precondition {
                     path,
                     error: "upload already completed".to_string(),
                 });
             }
+            let iparts = -2 - part_idx as i64;
+            if *size > iparts {
+                // record the parts number
+                *size = iparts;
+            }
 
-            MULTIPART_UPLOAD.with_borrow_mut(|m| {
-                let parts = m.entry(*etag).or_default();
-                if parts.len() <= part_idx {
-                    parts.resize(part_idx + 1, None);
-                }
-                parts[part_idx] = Some(payload);
+            OBJECT_DATA.with_borrow_mut(|od| {
+                od.insert(ObjectId(*etag, part_idx), Chunk(payload.into_vec()));
             });
 
             Ok(PartId {
@@ -399,10 +544,15 @@ pub mod object {
         })
     }
 
-    pub fn complete_multipart(path: String, id: MultipartId) -> Result<PutResult> {
+    pub fn complete_multipart(
+        path: String,
+        id: MultipartId,
+        opts: PutMultipartOpts,
+        now_ms: u64,
+    ) -> Result<PutResult> {
         STATE.with_borrow_mut(|s| {
-            let etag = {
-                let (etag, completed) = s
+            let (etag, parts) = {
+                let (etag, size) = s
                     .locations
                     .get(&path)
                     .ok_or(Error::NotFound { path: path.clone() })?;
@@ -412,54 +562,66 @@ pub mod object {
                         error: "upload not found".to_string(),
                     });
                 }
-                if *completed {
+                if *size >= 0 {
                     return Err(Error::Precondition {
                         path,
                         error: "upload already completed".to_string(),
                     });
                 }
-                *etag
+
+                (*etag, (-1 - *size) as u32)
             };
 
-            let parts = MULTIPART_UPLOAD.with_borrow_mut(|m| {
-                m.remove(&etag).ok_or(Error::Precondition {
-                    path: path.clone(),
-                    error: "upload parts not found".to_string(),
-                })
-            })?;
+            if let Some(tags) = &opts.aes_tags {
+                if tags.len() as u32 != parts {
+                    return Err(Error::Precondition {
+                        path,
+                        error: format!(
+                            "aes_tags size {} does not match parts {}",
+                            tags.len(),
+                            parts
+                        ),
+                    });
+                }
+            }
 
-            let mut cap = 0;
-            for (idx, part) in parts.iter().enumerate() {
-                match part {
-                    Some(p) => cap += p.len(),
-                    None => {
+            OBJECT_DATA.with_borrow_mut(|od| {
+                let mut size = 0;
+                for idx in 0..parts {
+                    if let Some(chunk) = od.get(&ObjectId(etag, idx)) {
+                        if idx != parts - 1 && chunk.0.len() != CHUNK_SIZE {
+                            return Err(Error::Precondition {
+                                path,
+                                error: format!("invalid part size {} at {}", chunk.0.len(), idx),
+                            });
+                        }
+                        size += chunk.0.len();
+                    } else {
                         return Err(Error::Precondition {
-                            path: path.clone(),
-                            error: format!("missing part at index: {idx}"),
+                            path,
+                            error: format!("missing part {}", idx),
                         });
                     }
                 }
-            }
 
-            let mut payload = Vec::with_capacity(cap);
-            {
-                for part in parts {
-                    payload.extend_from_slice(&part.unwrap());
-                }
-            }
+                OBJECT_META.with_borrow_mut(|om| {
+                    om.insert(
+                        etag,
+                        ObjectMetadata {
+                            last_modified: now_ms,
+                            size,
+                            tags: opts.tags,
+                            attributes: opts.attributes,
+                            aes_nonce: opts.aes_nonce,
+                            aes_tags: opts.aes_tags,
+                            version: None,
+                        },
+                    )
+                });
+                s.locations.insert(path, (etag, size as i64));
+                Ok(())
+            })?;
 
-            OBJECT_META.with_borrow_mut(|om| {
-                let meta = om.get(&etag).unwrap().clone();
-                om.insert(
-                    etag,
-                    ObjectMetadata {
-                        size: payload.len(),
-                        ..meta
-                    },
-                )
-            });
-            OBJECT_DATA.with_borrow_mut(|od| od.insert(etag, payload));
-            s.locations.insert(path, (etag, true));
             Ok(PutResult {
                 e_tag: Some(etag.to_string()),
                 version: None,
@@ -469,8 +631,8 @@ pub mod object {
 
     pub fn abort_multipart(path: String, id: MultipartId) -> Result<()> {
         STATE.with_borrow_mut(|s| {
-            let etag = {
-                let (etag, completed) = s
+            let (etag, parts) = {
+                let (etag, size) = s
                     .locations
                     .get(&path)
                     .ok_or(Error::NotFound { path: path.clone() })?;
@@ -480,33 +642,70 @@ pub mod object {
                         error: "upload not found".to_string(),
                     });
                 }
-                if *completed {
+                if *size >= 0 {
                     return Err(Error::Precondition {
                         path,
                         error: "upload already completed".to_string(),
                     });
                 }
-                *etag
+
+                (*etag, (-1 - *size) as u32)
             };
 
-            MULTIPART_UPLOAD.with_borrow_mut(|m| m.remove(&etag));
             s.locations.remove(&path);
+            OBJECT_META.with_borrow_mut(|om| om.remove(&etag));
+            if parts > 0 {
+                OBJECT_DATA.with_borrow_mut(|od| {
+                    for idx in 0..parts {
+                        od.remove(&ObjectId(etag, idx));
+                    }
+                });
+            }
+
             Ok(())
         })
     }
 
-    pub fn get_opts(path: String, opts: GetOptions) -> Result<GetResult> {
+    pub fn get_part(path: String, part_idx: u32) -> Result<ByteBuf> {
         STATE.with_borrow(|s| {
-            let (etag, completed) = s
+            let (etag, size) = s
                 .locations
                 .get(&path)
                 .ok_or(Error::NotFound { path: path.clone() })?;
-            if !completed {
+
+            if *size < 0 {
                 return Err(Error::Precondition {
                     path,
                     error: "upload not completed".to_string(),
                 });
             }
+
+            OBJECT_DATA.with_borrow(|od| {
+                let chunk = od
+                    .get(&ObjectId(*etag, part_idx))
+                    .ok_or(Error::Precondition {
+                        path: "".to_string(),
+                        error: format!("missing part {} at {}", part_idx, etag),
+                    })?;
+                Ok(ByteBuf::from(chunk.0.clone()))
+            })
+        })
+    }
+
+    pub fn get_opts(path: String, opts: GetOptions) -> Result<GetResult> {
+        STATE.with_borrow(|s| {
+            let (etag, size) = s
+                .locations
+                .get(&path)
+                .ok_or(Error::NotFound { path: path.clone() })?;
+
+            if *size < 0 {
+                return Err(Error::Precondition {
+                    path,
+                    error: "upload not completed".to_string(),
+                });
+            }
+
             let me = OBJECT_META.with_borrow(|om| om.get(etag).unwrap());
             let meta = ObjectMeta {
                 location: path.clone(),
@@ -514,16 +713,20 @@ pub mod object {
                 size: me.size,
                 e_tag: Some(etag.to_string()),
                 version: me.version,
+                aes_nonce: me.aes_nonce,
+                aes_tags: me.aes_tags,
             };
+            // should check preconditions before returning head
             opts.check_preconditions(&meta)?;
             if opts.head {
                 return Ok(GetResult {
                     range: (0, 0),
                     meta,
-                    attributes: BTreeMap::new(),
+                    attributes: me.attributes,
                     payload: ByteBuf::new(),
                 });
             }
+
             let r = match opts.range {
                 Some(range) => range
                     .into_range(me.size)
@@ -534,40 +737,41 @@ pub mod object {
                 None => 0..me.size,
             };
 
-            if r.end - r.start > MAX_RESPONSE_PAYLOAD_SIZE {
+            if r.end - r.start > MAX_PAYLOAD_SIZE {
                 return Err(Error::Precondition {
                     path,
-                    error: "payload size exceeds max size".to_string(),
+                    error: "range exceeds max response payload size".to_string(),
                 });
             }
 
-            let data = OBJECT_DATA.with_borrow(|od| od.get(etag).unwrap());
+            let range = (r.start, r.end);
+            let mut data = get_object_ranges(*etag, &[range])?;
             Ok(GetResult {
-                range: (r.start, r.end),
+                range,
                 meta,
                 attributes: me.attributes,
-                payload: ByteBuf::from(data[r].to_owned()),
+                payload: data.pop().unwrap(),
             })
         })
     }
 
     pub fn get_ranges(path: String, ranges: Vec<(usize, usize)>) -> Result<Vec<ByteBuf>> {
         STATE.with_borrow(|s| {
-            let (etag, completed) = s
+            let (etag, size) = s
                 .locations
                 .get(&path)
                 .ok_or(Error::NotFound { path: path.clone() })?;
-            if !completed {
+            if *size < 0 {
                 return Err(Error::Precondition {
                     path,
                     error: "upload not completed".to_string(),
                 });
             }
 
-            let me = OBJECT_META.with_borrow(|om| om.get(etag).unwrap());
+            let size = *size as usize;
             let mut total = 0;
             for (start, end) in &ranges {
-                if start >= end || end > &me.size {
+                if start >= end || end > &size {
                     return Err(Error::Precondition {
                         path: path.clone(),
                         error: format!("invalid range ({start}, {end})"),
@@ -576,41 +780,30 @@ pub mod object {
                 total += end - start;
             }
 
-            if total > MAX_RESPONSE_PAYLOAD_SIZE {
+            if total > MAX_PAYLOAD_SIZE {
                 return Err(Error::Precondition {
                     path,
                     error: "payload size exceeds max size".to_string(),
                 });
             }
 
-            let data = OBJECT_DATA.with_borrow(|od| od.get(etag).unwrap());
-            ranges
-                .into_iter()
-                .map(|(start, end)| {
-                    let r = GetRange::Bounded(start, end)
-                        .into_range(data.len())
-                        .map_err(|error| Error::Precondition {
-                            path: path.clone(),
-                            error,
-                        })?;
-                    Ok(ByteBuf::from(data[r].to_vec()))
-                })
-                .collect()
+            get_object_ranges(*etag, &ranges)
         })
     }
 
     pub fn head(path: String) -> Result<ObjectMeta> {
         STATE.with_borrow(|s| {
-            let (etag, completed) = s
+            let (etag, size) = s
                 .locations
                 .get(&path)
                 .ok_or(Error::NotFound { path: path.clone() })?;
-            if !completed {
+            if *size < 0 {
                 return Err(Error::Precondition {
                     path,
                     error: "upload not completed".to_string(),
                 });
             }
+
             let me = OBJECT_META.with_borrow(|om| om.get(etag).unwrap());
             Ok(ObjectMeta {
                 location: path.clone(),
@@ -618,6 +811,8 @@ pub mod object {
                 size: me.size,
                 e_tag: Some(etag.to_string()),
                 version: me.version,
+                aes_nonce: me.aes_nonce,
+                aes_tags: me.aes_tags,
             })
         })
     }
@@ -629,11 +824,11 @@ pub mod object {
                 let start: String = prefix.clone().map(|p| p.into()).unwrap_or_default();
                 let prefix = prefix.unwrap_or_default();
                 let mut objects = vec![];
-                for (path, (etag, completed)) in s.locations.range(start.clone()..) {
+                for (path, (etag, size)) in s.locations.range(start.clone()..) {
                     if !path.starts_with(&start) {
                         break;
                     }
-                    if *completed {
+                    if *size >= 0 {
                         let key: Path = path.clone().into();
                         if key
                             .prefix_match(&prefix)
@@ -647,6 +842,8 @@ pub mod object {
                                 size: me.size,
                                 e_tag: Some(etag.to_string()),
                                 version: me.version,
+                                aes_nonce: me.aes_nonce,
+                                aes_tags: me.aes_tags,
                             });
                             if objects.len() >= MAX_LIST_LIMIT {
                                 break;
@@ -666,12 +863,12 @@ pub mod object {
                 let prefix = prefix.unwrap_or_default();
                 let offset = offset;
                 let mut objects = vec![];
-                for (path, (etag, completed)) in s.locations.range(start.clone()..) {
+                for (path, (etag, size)) in s.locations.range(start.clone()..) {
                     if !path.starts_with(&start) {
                         break;
                     }
 
-                    if *completed {
+                    if *size >= 0 {
                         let key: Path = path.clone().into();
                         if key
                             .prefix_match(&prefix)
@@ -688,6 +885,8 @@ pub mod object {
                                 size: me.size,
                                 e_tag: Some(etag.to_string()),
                                 version: me.version,
+                                aes_nonce: me.aes_nonce,
+                                aes_tags: me.aes_tags,
                             });
                             if objects.len() >= MAX_LIST_LIMIT {
                                 break;
@@ -710,12 +909,12 @@ pub mod object {
                 // Only objects in this base level should be returned in the
                 // response. Otherwise, we just collect the common prefixes.
                 let mut objects = vec![];
-                for (path, (etag, completed)) in s.locations.range(start.clone()..) {
+                for (path, (etag, size)) in s.locations.range(start.clone()..) {
                     if !path.starts_with(&start) {
                         break;
                     }
 
-                    if *completed {
+                    if *size >= 0 {
                         let key: Path = path.clone().into();
                         let mut parts = match key.prefix_match(&prefix) {
                             Some(parts) => parts,
@@ -739,6 +938,8 @@ pub mod object {
                                 size: me.size,
                                 e_tag: Some(etag.to_string()),
                                 version: me.version,
+                                aes_nonce: me.aes_nonce,
+                                aes_tags: me.aes_tags,
                             });
                             if objects.len() >= MAX_LIST_LIMIT {
                                 break;
@@ -753,5 +954,21 @@ pub mod object {
                 })
             })
         })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_bound_max_size() {
+        let v = ObjectId(u64::MAX, u32::MAX);
+        let v = v.to_bytes();
+        println!("ObjectId max_size: {:?}", v.len());
+
+        let v = ObjectId(0u64, 0u32);
+        let v = v.to_bytes();
+        println!("ObjectId min_size: {:?}", v.len());
     }
 }

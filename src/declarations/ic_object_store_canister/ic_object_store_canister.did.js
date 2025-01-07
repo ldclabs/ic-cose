@@ -22,17 +22,10 @@ export const idlFactory = ({ IDL }) => {
     'NotSupported' : IDL.Record({ 'error' : IDL.Text }),
     'Precondition' : IDL.Record({ 'path' : IDL.Text, 'error' : IDL.Text }),
     'NotImplemented' : IDL.Null,
-    'JoinError' : IDL.Record({ 'error' : IDL.Text }),
     'Unauthenticated' : IDL.Record({ 'path' : IDL.Text, 'error' : IDL.Text }),
   });
   const Result = IDL.Variant({ 'Ok' : IDL.Null, 'Err' : Error });
   const Result_1 = IDL.Variant({ 'Ok' : IDL.Null, 'Err' : IDL.Text });
-  const PartId = IDL.Record({ 'content_id' : IDL.Text });
-  const UpdateVersion = IDL.Record({
-    'e_tag' : IDL.Opt(IDL.Text),
-    'version' : IDL.Opt(IDL.Text),
-  });
-  const Result_2 = IDL.Variant({ 'Ok' : UpdateVersion, 'Err' : Error });
   const Attribute = IDL.Variant({
     'ContentType' : IDL.Null,
     'Metadata' : IDL.Text,
@@ -42,9 +35,16 @@ export const idlFactory = ({ IDL }) => {
     'ContentDisposition' : IDL.Null,
   });
   const PutMultipartOpts = IDL.Record({
+    'aes_tags' : IDL.Opt(IDL.Vec(IDL.Vec(IDL.Nat8))),
     'tags' : IDL.Text,
     'attributes' : IDL.Vec(IDL.Tuple(Attribute, IDL.Text)),
+    'aes_nonce' : IDL.Opt(IDL.Vec(IDL.Nat8)),
   });
+  const UpdateVersion = IDL.Record({
+    'e_tag' : IDL.Opt(IDL.Text),
+    'version' : IDL.Opt(IDL.Text),
+  });
+  const Result_2 = IDL.Variant({ 'Ok' : UpdateVersion, 'Err' : Error });
   const Result_3 = IDL.Variant({ 'Ok' : IDL.Text, 'Err' : Error });
   const GetRange = IDL.Variant({
     'Offset' : IDL.Nat64,
@@ -61,10 +61,12 @@ export const idlFactory = ({ IDL }) => {
     'range' : IDL.Opt(GetRange),
   });
   const ObjectMeta = IDL.Record({
+    'aes_tags' : IDL.Opt(IDL.Vec(IDL.Vec(IDL.Nat8))),
     'size' : IDL.Nat64,
     'e_tag' : IDL.Opt(IDL.Text),
     'version' : IDL.Opt(IDL.Text),
     'last_modified' : IDL.Nat64,
+    'aes_nonce' : IDL.Opt(IDL.Vec(IDL.Nat8)),
     'location' : IDL.Text,
   });
   const GetResult = IDL.Record({
@@ -74,7 +76,8 @@ export const idlFactory = ({ IDL }) => {
     'payload' : IDL.Vec(IDL.Nat8),
   });
   const Result_4 = IDL.Variant({ 'Ok' : GetResult, 'Err' : Error });
-  const Result_5 = IDL.Variant({
+  const Result_5 = IDL.Variant({ 'Ok' : IDL.Vec(IDL.Nat8), 'Err' : Error });
+  const Result_6 = IDL.Variant({
     'Ok' : IDL.Vec(IDL.Vec(IDL.Nat8)),
     'Err' : Error,
   });
@@ -86,26 +89,29 @@ export const idlFactory = ({ IDL }) => {
     'auditors' : IDL.Vec(IDL.Principal),
     'locations' : IDL.Nat64,
   });
-  const Result_6 = IDL.Variant({ 'Ok' : StateInfo, 'Err' : IDL.Text });
-  const Result_7 = IDL.Variant({ 'Ok' : ObjectMeta, 'Err' : Error });
-  const Result_8 = IDL.Variant({ 'Ok' : IDL.Vec(ObjectMeta), 'Err' : Error });
+  const Result_7 = IDL.Variant({ 'Ok' : StateInfo, 'Err' : IDL.Text });
+  const Result_8 = IDL.Variant({ 'Ok' : ObjectMeta, 'Err' : Error });
+  const Result_9 = IDL.Variant({ 'Ok' : IDL.Vec(ObjectMeta), 'Err' : Error });
   const ListResult = IDL.Record({
     'common_prefixes' : IDL.Vec(IDL.Text),
     'objects' : IDL.Vec(ObjectMeta),
   });
-  const Result_9 = IDL.Variant({ 'Ok' : ListResult, 'Err' : Error });
+  const Result_10 = IDL.Variant({ 'Ok' : ListResult, 'Err' : Error });
   const PutMode = IDL.Variant({
     'Overwrite' : IDL.Null,
     'Create' : IDL.Null,
     'Update' : UpdateVersion,
   });
   const PutOptions = IDL.Record({
+    'aes_tags' : IDL.Opt(IDL.Vec(IDL.Vec(IDL.Nat8))),
     'mode' : PutMode,
     'tags' : IDL.Text,
     'attributes' : IDL.Vec(IDL.Tuple(Attribute, IDL.Text)),
+    'aes_nonce' : IDL.Opt(IDL.Vec(IDL.Nat8)),
   });
-  const Result_10 = IDL.Variant({ 'Ok' : PartId, 'Err' : Error });
-  const Result_11 = IDL.Variant({ 'Ok' : IDL.Text, 'Err' : IDL.Text });
+  const PartId = IDL.Record({ 'content_id' : IDL.Text });
+  const Result_11 = IDL.Variant({ 'Ok' : PartId, 'Err' : Error });
+  const Result_12 = IDL.Variant({ 'Ok' : IDL.Text, 'Err' : IDL.Text });
   return IDL.Service({
     'abort_multipart' : IDL.Func([IDL.Text, IDL.Text], [Result], []),
     'admin_add_auditors' : IDL.Func([IDL.Vec(IDL.Principal)], [Result_1], []),
@@ -121,31 +127,32 @@ export const idlFactory = ({ IDL }) => {
         [],
       ),
     'complete_multipart' : IDL.Func(
-        [IDL.Text, IDL.Text, IDL.Vec(PartId)],
+        [IDL.Text, IDL.Text, PutMultipartOpts],
         [Result_2],
         [],
       ),
     'copy' : IDL.Func([IDL.Text, IDL.Text], [Result], []),
     'copy_if_not_exists' : IDL.Func([IDL.Text, IDL.Text], [Result], []),
-    'create_multipart' : IDL.Func([IDL.Text, PutMultipartOpts], [Result_3], []),
+    'create_multipart' : IDL.Func([IDL.Text], [Result_3], []),
     'delete' : IDL.Func([IDL.Text], [Result], []),
     'get_opts' : IDL.Func([IDL.Text, GetOptions], [Result_4], ['query']),
+    'get_part' : IDL.Func([IDL.Text, IDL.Nat64], [Result_5], ['query']),
     'get_ranges' : IDL.Func(
         [IDL.Text, IDL.Vec(IDL.Tuple(IDL.Nat64, IDL.Nat64))],
-        [Result_5],
+        [Result_6],
         ['query'],
       ),
-    'get_state' : IDL.Func([], [Result_6], ['query']),
-    'head' : IDL.Func([IDL.Text], [Result_7], ['query']),
-    'list' : IDL.Func([IDL.Opt(IDL.Text)], [Result_8], ['query']),
+    'get_state' : IDL.Func([], [Result_7], ['query']),
+    'head' : IDL.Func([IDL.Text], [Result_8], ['query']),
+    'list' : IDL.Func([IDL.Opt(IDL.Text)], [Result_9], ['query']),
     'list_with_delimiter' : IDL.Func(
         [IDL.Opt(IDL.Text)],
-        [Result_9],
+        [Result_10],
         ['query'],
       ),
     'list_with_offset' : IDL.Func(
         [IDL.Opt(IDL.Text), IDL.Text],
-        [Result_8],
+        [Result_9],
         ['query'],
       ),
     'put_opts' : IDL.Func(
@@ -155,29 +162,29 @@ export const idlFactory = ({ IDL }) => {
       ),
     'put_part' : IDL.Func(
         [IDL.Text, IDL.Text, IDL.Nat64, IDL.Vec(IDL.Nat8)],
-        [Result_10],
+        [Result_11],
         [],
       ),
     'rename' : IDL.Func([IDL.Text, IDL.Text], [Result], []),
     'rename_if_not_exists' : IDL.Func([IDL.Text, IDL.Text], [Result], []),
     'validate_admin_add_auditors' : IDL.Func(
         [IDL.Vec(IDL.Principal)],
-        [Result_11],
+        [Result_12],
         [],
       ),
     'validate_admin_add_managers' : IDL.Func(
         [IDL.Vec(IDL.Principal)],
-        [Result_11],
+        [Result_12],
         [],
       ),
     'validate_admin_remove_auditors' : IDL.Func(
         [IDL.Vec(IDL.Principal)],
-        [Result_11],
+        [Result_12],
         [],
       ),
     'validate_admin_remove_managers' : IDL.Func(
         [IDL.Vec(IDL.Principal)],
-        [Result_11],
+        [Result_12],
         [],
       ),
   });

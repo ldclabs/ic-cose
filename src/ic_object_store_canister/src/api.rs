@@ -4,10 +4,6 @@ use serde_bytes::ByteBuf;
 
 use crate::store;
 
-const MAX_PART_INDEX: usize = 999;
-const MAX_PART_SIZE: usize = 256 * 1024;
-const MAX_PAYLOAD_SIZE: usize = 1024 * 1024;
-
 #[ic_cdk::query]
 fn get_state() -> Result<StateInfo, String> {
     store::state::with(|s| {
@@ -104,48 +100,67 @@ fn rename_if_not_exists(from: String, to: String) -> Result<()> {
 }
 
 #[ic_cdk::update]
-fn create_multipart(path: String, opts: PutMultipartOpts) -> Result<MultipartId> {
+fn create_multipart(path: String) -> Result<MultipartId> {
     is_writer()?;
     parse_path(&path)?;
-    let now_ms = ic_cdk::api::time() / MILLISECONDS;
-    store::object::create_multipart(path, opts, now_ms)
+
+    store::object::create_multipart(path)
 }
 
 #[ic_cdk::update]
 fn put_part(path: String, id: MultipartId, part_idx: usize, payload: ByteBuf) -> Result<PartId> {
     is_writer()?;
-    if part_idx > MAX_PART_INDEX {
+    if part_idx >= MAX_PARTS {
         return Err(Error::Precondition {
             path,
             error: format!(
                 "part index {} exceeds max index {}",
-                part_idx, MAX_PART_INDEX
+                part_idx,
+                MAX_PARTS - 1
             ),
         });
     }
-    if payload.len() > MAX_PART_SIZE {
+    if payload.len() > CHUNK_SIZE {
         return Err(Error::Precondition {
             path,
             error: format!(
                 "part size {} exceeds max size {}",
                 payload.len(),
-                MAX_PART_SIZE
+                CHUNK_SIZE
             ),
         });
     }
-    store::object::put_part(path, id, part_idx, payload)
+    store::object::put_part(path, id, part_idx as u32, payload)
 }
 
 #[ic_cdk::update]
-fn complete_multipart(path: String, id: MultipartId, _parts: Vec<PartId>) -> Result<PutResult> {
+fn complete_multipart(path: String, id: MultipartId, opts: PutMultipartOpts) -> Result<PutResult> {
     is_writer()?;
-    store::object::complete_multipart(path, id)
+    let now_ms = ic_cdk::api::time() / MILLISECONDS;
+    store::object::complete_multipart(path, id, opts, now_ms)
 }
 
 #[ic_cdk::update]
 fn abort_multipart(path: String, id: MultipartId) -> Result<()> {
     is_writer()?;
     store::object::abort_multipart(path, id)
+}
+
+#[ic_cdk::query]
+fn get_part(path: String, part_idx: usize) -> Result<ByteBuf> {
+    is_reader()?;
+    if part_idx > MAX_PARTS {
+        return Err(Error::Precondition {
+            path,
+            error: format!(
+                "part index {} exceeds max index {}",
+                part_idx,
+                MAX_PARTS - 1
+            ),
+        });
+    }
+
+    store::object::get_part(path, part_idx as u32)
 }
 
 #[ic_cdk::query]

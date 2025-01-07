@@ -18,7 +18,6 @@ export type Error = { 'NotModified' : { 'path' : string, 'error' : string } } |
   { 'NotSupported' : { 'error' : string } } |
   { 'Precondition' : { 'path' : string, 'error' : string } } |
   { 'NotImplemented' : null } |
-  { 'JoinError' : { 'error' : string } } |
   { 'Unauthenticated' : { 'path' : string, 'error' : string } };
 export interface GetOptions {
   'if_match' : [] | [string],
@@ -49,10 +48,12 @@ export interface ListResult {
   'objects' : Array<ObjectMeta>,
 }
 export interface ObjectMeta {
+  'aes_tags' : [] | [Array<Uint8Array | number[]>],
   'size' : bigint,
   'e_tag' : [] | [string],
   'version' : [] | [string],
   'last_modified' : bigint,
+  'aes_nonce' : [] | [Uint8Array | number[]],
   'location' : string,
 }
 export interface PartId { 'content_id' : string }
@@ -60,21 +61,27 @@ export type PutMode = { 'Overwrite' : null } |
   { 'Create' : null } |
   { 'Update' : UpdateVersion };
 export interface PutMultipartOpts {
+  'aes_tags' : [] | [Array<Uint8Array | number[]>],
   'tags' : string,
   'attributes' : Array<[Attribute, string]>,
+  'aes_nonce' : [] | [Uint8Array | number[]],
 }
 export interface PutOptions {
+  'aes_tags' : [] | [Array<Uint8Array | number[]>],
   'mode' : PutMode,
   'tags' : string,
   'attributes' : Array<[Attribute, string]>,
+  'aes_nonce' : [] | [Uint8Array | number[]],
 }
 export type Result = { 'Ok' : null } |
   { 'Err' : Error };
 export type Result_1 = { 'Ok' : null } |
   { 'Err' : string };
-export type Result_10 = { 'Ok' : PartId } |
+export type Result_10 = { 'Ok' : ListResult } |
   { 'Err' : Error };
-export type Result_11 = { 'Ok' : string } |
+export type Result_11 = { 'Ok' : PartId } |
+  { 'Err' : Error };
+export type Result_12 = { 'Ok' : string } |
   { 'Err' : string };
 export type Result_2 = { 'Ok' : UpdateVersion } |
   { 'Err' : Error };
@@ -82,15 +89,15 @@ export type Result_3 = { 'Ok' : string } |
   { 'Err' : Error };
 export type Result_4 = { 'Ok' : GetResult } |
   { 'Err' : Error };
-export type Result_5 = { 'Ok' : Array<Uint8Array | number[]> } |
+export type Result_5 = { 'Ok' : Uint8Array | number[] } |
   { 'Err' : Error };
-export type Result_6 = { 'Ok' : StateInfo } |
+export type Result_6 = { 'Ok' : Array<Uint8Array | number[]> } |
+  { 'Err' : Error };
+export type Result_7 = { 'Ok' : StateInfo } |
   { 'Err' : string };
-export type Result_7 = { 'Ok' : ObjectMeta } |
+export type Result_8 = { 'Ok' : ObjectMeta } |
   { 'Err' : Error };
-export type Result_8 = { 'Ok' : Array<ObjectMeta> } |
-  { 'Err' : Error };
-export type Result_9 = { 'Ok' : ListResult } |
+export type Result_9 = { 'Ok' : Array<ObjectMeta> } |
   { 'Err' : Error };
 export interface StateInfo {
   'next_etag' : bigint,
@@ -114,32 +121,36 @@ export interface _SERVICE {
   'admin_add_managers' : ActorMethod<[Array<Principal>], Result_1>,
   'admin_remove_auditors' : ActorMethod<[Array<Principal>], Result_1>,
   'admin_remove_managers' : ActorMethod<[Array<Principal>], Result_1>,
-  'complete_multipart' : ActorMethod<[string, string, Array<PartId>], Result_2>,
+  'complete_multipart' : ActorMethod<
+    [string, string, PutMultipartOpts],
+    Result_2
+  >,
   'copy' : ActorMethod<[string, string], Result>,
   'copy_if_not_exists' : ActorMethod<[string, string], Result>,
-  'create_multipart' : ActorMethod<[string, PutMultipartOpts], Result_3>,
+  'create_multipart' : ActorMethod<[string], Result_3>,
   'delete' : ActorMethod<[string], Result>,
   'get_opts' : ActorMethod<[string, GetOptions], Result_4>,
-  'get_ranges' : ActorMethod<[string, Array<[bigint, bigint]>], Result_5>,
-  'get_state' : ActorMethod<[], Result_6>,
-  'head' : ActorMethod<[string], Result_7>,
-  'list' : ActorMethod<[[] | [string]], Result_8>,
-  'list_with_delimiter' : ActorMethod<[[] | [string]], Result_9>,
-  'list_with_offset' : ActorMethod<[[] | [string], string], Result_8>,
+  'get_part' : ActorMethod<[string, bigint], Result_5>,
+  'get_ranges' : ActorMethod<[string, Array<[bigint, bigint]>], Result_6>,
+  'get_state' : ActorMethod<[], Result_7>,
+  'head' : ActorMethod<[string], Result_8>,
+  'list' : ActorMethod<[[] | [string]], Result_9>,
+  'list_with_delimiter' : ActorMethod<[[] | [string]], Result_10>,
+  'list_with_offset' : ActorMethod<[[] | [string], string], Result_9>,
   'put_opts' : ActorMethod<
     [string, Uint8Array | number[], PutOptions],
     Result_2
   >,
   'put_part' : ActorMethod<
     [string, string, bigint, Uint8Array | number[]],
-    Result_10
+    Result_11
   >,
   'rename' : ActorMethod<[string, string], Result>,
   'rename_if_not_exists' : ActorMethod<[string, string], Result>,
-  'validate_admin_add_auditors' : ActorMethod<[Array<Principal>], Result_11>,
-  'validate_admin_add_managers' : ActorMethod<[Array<Principal>], Result_11>,
-  'validate_admin_remove_auditors' : ActorMethod<[Array<Principal>], Result_11>,
-  'validate_admin_remove_managers' : ActorMethod<[Array<Principal>], Result_11>,
+  'validate_admin_add_auditors' : ActorMethod<[Array<Principal>], Result_12>,
+  'validate_admin_add_managers' : ActorMethod<[Array<Principal>], Result_12>,
+  'validate_admin_remove_auditors' : ActorMethod<[Array<Principal>], Result_12>,
+  'validate_admin_remove_managers' : ActorMethod<[Array<Principal>], Result_12>,
 }
 export declare const idlFactory: IDL.InterfaceFactory;
 export declare const init: (args: { IDL: typeof IDL }) => IDL.Type[];

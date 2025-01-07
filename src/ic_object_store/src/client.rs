@@ -6,10 +6,10 @@ use futures::{stream::BoxStream, StreamExt, TryStreamExt};
 use ic_agent::Agent;
 use ic_cose_types::types::object_store::*;
 use object_store::{path::Path, MultipartUpload, ObjectStore};
-use serde_bytes::{ByteBuf, Bytes};
+use serde_bytes::{ByteArray, ByteBuf, Bytes};
 use std::{
     collections::BTreeSet,
-    ops::{DerefMut, Range},
+    ops::Range,
     sync::Arc,
 };
 
@@ -87,10 +87,29 @@ impl Client {
         &self,
         path: &Path,
         payload: &Bytes,
-        opts: &PutOptions,
+        mut opts: PutOptions,
     ) -> Result<PutResult> {
+        if payload.len() > MAX_PAYLOAD_SIZE {
+            return Err(Error::Precondition {
+                path: path.as_ref().to_string(),
+                error: format!(
+                    "payload size {} exceeds max size {}",
+                    payload.len(),
+                    MAX_PAYLOAD_SIZE
+                ),
+            });
+        }
+
         let res = if let Some(cipher) = &self.cipher {
-            let data = aes256_gcm_encrypt(cipher, payload)?;
+            let nonce: [u8; 12] = rand_bytes();
+            let mut data = payload.to_vec();
+            let mut aes_tags: Vec<ByteArray<16>> = Vec::new();
+            for chunk in data.chunks_mut(CHUNK_SIZE) {
+                let tag = aes256_gcm_encrypt_in(cipher, &nonce, chunk)?;
+                aes_tags.push(tag.into());
+            }
+            opts.aes_nonce = Some(nonce.into());
+            opts.aes_tags = Some(aes_tags);
             update_call(
                 &self.agent,
                 &self.canister,
@@ -161,22 +180,17 @@ impl Client {
         .map_err(|error| Error::Generic { error })?
     }
 
-    pub async fn create_multipart(
-        &self,
-        path: &Path,
-        opts: &PutMultipartOpts,
-    ) -> Result<MultipartId> {
+    pub async fn create_multipart(&self, path: &Path) -> Result<MultipartId> {
         update_call(
             &self.agent,
             &self.canister,
             "create_multipart",
-            (path.as_ref(), opts),
+            (path.as_ref(),),
         )
         .await
         .map_err(|error| Error::Generic { error })?
     }
 
-    /// should use put_all_parts when AES encryption is enabled
     pub async fn put_part(
         &self,
         path: &Path,
@@ -194,56 +208,17 @@ impl Client {
         .map_err(|error| Error::Generic { error })?
     }
 
-    pub async fn put_all_parts(
-        &self,
-        path: &Path,
-        id: &MultipartId,
-        parts: Vec<&Bytes>,
-    ) -> Result<Vec<PartId>> {
-        let mut part_ids = Vec::with_capacity(parts.len());
-        if let Some(cipher) = &self.cipher {
-            let mut total_size = 0;
-            let mut part_len = 0;
-            for part in parts.iter() {
-                let len = part.len();
-                total_size += len;
-                if len > part_len {
-                    part_len = len;
-                }
-            }
-
-            let mut buf = Vec::with_capacity(total_size + ENCRYPTION_SIZE);
-            for part in parts.into_iter() {
-                buf.extend_from_slice(part);
-            }
-
-            aes256_gcm_encrypt_in(cipher, &mut buf)?;
-            for (part_idx, payload) in buf.chunks(part_len).enumerate() {
-                let res = self
-                    .put_part(path, id, part_idx, Bytes::new(payload))
-                    .await?;
-                part_ids.push(res);
-            }
-        } else {
-            for (part_idx, payload) in parts.into_iter().enumerate() {
-                let res = self.put_part(path, id, part_idx, payload).await?;
-                part_ids.push(res);
-            }
-        }
-        Ok(part_ids)
-    }
-
     pub async fn complete_multipart(
         &self,
         path: &Path,
         id: &MultipartId,
-        parts: &[PartId],
+        opts: &PutMultipartOpts,
     ) -> Result<PutResult> {
         update_call(
             &self.agent,
             &self.canister,
             "complete_multipart",
-            (path.as_ref(), id, parts),
+            (path.as_ref(), id, opts),
         )
         .await
         .map_err(|error| Error::Generic { error })?
@@ -260,12 +235,23 @@ impl Client {
         .map_err(|error| Error::Generic { error })?
     }
 
+    pub async fn get_part(&self, path: &Path, part_idx: usize) -> Result<ByteBuf> {
+        query_call(
+            &self.agent,
+            &self.canister,
+            "get_part",
+            (path.as_ref(), part_idx),
+        )
+        .await
+        .map_err(|error| Error::Generic { error })?
+    }
+
     pub async fn get_opts(&self, path: &Path, mut opts: GetOptions) -> Result<GetResult> {
         if let Some(cipher) = &self.cipher {
             let range = opts.range.clone();
-            // should fetch the whole object to decrypt
             opts.range = None;
-
+            // use head to get metadata for decryption
+            opts.head = true;
             let res: Result<GetResult> = query_call(
                 &self.agent,
                 &self.canister,
@@ -276,28 +262,62 @@ impl Client {
             .map_err(|error| Error::Generic { error })?;
 
             let mut res = res?;
-            res.meta.size = res.meta.size.saturating_sub(ENCRYPTION_SIZE);
-            if !res.payload.is_empty() {
-                aes256_gcm_decrypt(cipher, res.payload.deref_mut())?;
-                match range {
-                    Some(GetRange::Bounded(start, end)) => {
-                        res.range = (start, end);
-                        res.payload = res.payload[start..end].to_owned().into();
+            if res.meta.size == 0 {
+                return Ok(res);
+            }
+
+            let r = match range {
+                Some(r) => r
+                    .into_range(res.meta.size)
+                    .map_err(|error| Error::Precondition {
+                        path: path.as_ref().to_string(),
+                        error,
+                    })?,
+                None => 0..res.meta.size,
+            };
+            let nonce = res.meta.aes_nonce.as_ref().ok_or_else(|| Error::Generic {
+                error: "missing AES256 nonce".to_string(),
+            })?;
+            let tags = res.meta.aes_tags.as_ref().ok_or_else(|| Error::Generic {
+                error: "missing AES256 tags".to_string(),
+            })?;
+            let mut chunk_cache: Option<(u32, Vec<u8>)> = None; // cache the last chunk read
+            let mut buf = Vec::with_capacity(r.end - r.start);
+
+            // Calculate the chunk indices we need to read
+            let start_chunk = (r.start / CHUNK_SIZE) as u32;
+            let end_chunk = ((r.end - 1) / CHUNK_SIZE) as u32;
+
+            for idx in start_chunk..=end_chunk {
+                // Calculate the byte range within this chunk
+                let chunk_start = if idx == start_chunk {
+                    r.start % CHUNK_SIZE
+                } else {
+                    0
+                };
+
+                let chunk_end = if idx == end_chunk {
+                    (r.end - 1) % CHUNK_SIZE + 1
+                } else {
+                    CHUNK_SIZE
+                };
+
+                match &chunk_cache {
+                    Some((cached_idx, cached_chunk)) if *cached_idx == idx => {
+                        buf.extend_from_slice(&cached_chunk[chunk_start..chunk_end]);
                     }
-                    Some(GetRange::Offset(r)) => {
-                        res.range = (r, res.payload.len());
-                        res.payload = res.payload[r..].to_owned().into();
-                    }
-                    Some(GetRange::Suffix(r)) => {
-                        res.range = (res.payload.len().saturating_sub(r), res.payload.len());
-                        res.payload = res.payload[res.range.0..].to_owned().into();
-                    }
-                    None => {
-                        res.range = (0, res.payload.len());
+                    _ => {
+                        let chunk = self.get_part(path, idx as usize).await?;
+                        let mut chunk = chunk.into_vec();
+                        aes256_gcm_decrypt_in(cipher, nonce, &tags[idx as usize], &mut chunk)?;
+                        buf.extend_from_slice(&chunk[chunk_start..chunk_end]);
+                        chunk_cache = Some((idx, chunk));
                     }
                 }
             }
 
+            res.payload = buf.into();
+            res.range = (r.start, r.end);
             return Ok(res);
         }
 
@@ -312,19 +332,59 @@ impl Client {
     }
 
     pub async fn get_ranges(&self, path: &Path, ranges: &[(usize, usize)]) -> Result<Vec<ByteBuf>> {
-        if self.cipher.is_some() {
-            let res = self.get_opts(path, Default::default()).await?;
-            let mut chunks: Vec<ByteBuf> = Vec::with_capacity(ranges.len());
-            for range in ranges {
-                if range.0 >= range.1 || range.1 > res.payload.len() {
-                    return Err(Error::Generic {
-                        error: format!("invalid range: ({}, {})", range.0, range.1),
-                    });
+        if ranges.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        if let Some(cipher) = &self.cipher {
+            let meta = self.head(path).await?;
+            let nonce = meta.aes_nonce.as_ref().ok_or_else(|| Error::Generic {
+                error: "missing AES256 nonce".to_string(),
+            })?;
+            let tags = meta.aes_tags.as_ref().ok_or_else(|| Error::Generic {
+                error: "missing AES256 tags".to_string(),
+            })?;
+
+            let mut result = Vec::with_capacity(ranges.len());
+            let mut chunk_cache: Option<(u32, Vec<u8>)> = None; // cache the last chunk read
+            for &(start, end) in ranges {
+                let mut buf = Vec::with_capacity(end - start);
+
+                // Calculate the chunk indices we need to read
+                let start_chunk = (start / CHUNK_SIZE) as u32;
+                let end_chunk = ((end - 1) / CHUNK_SIZE) as u32;
+
+                for idx in start_chunk..=end_chunk {
+                    // Calculate the byte range within this chunk
+                    let chunk_start = if idx == start_chunk {
+                        start % CHUNK_SIZE
+                    } else {
+                        0
+                    };
+
+                    let chunk_end = if idx == end_chunk {
+                        (end - 1) % CHUNK_SIZE + 1
+                    } else {
+                        CHUNK_SIZE
+                    };
+
+                    match &chunk_cache {
+                        Some((cached_idx, cached_chunk)) if *cached_idx == idx => {
+                            buf.extend_from_slice(&cached_chunk[chunk_start..chunk_end]);
+                        }
+                        _ => {
+                            let chunk = self.get_part(path, idx as usize).await?;
+                            let mut chunk = chunk.into_vec();
+                            aes256_gcm_decrypt_in(cipher, nonce, &tags[idx as usize], &mut chunk)?;
+                            buf.extend_from_slice(&chunk[chunk_start..chunk_end]);
+                            chunk_cache = Some((idx, chunk));
+                        }
+                    }
                 }
-                let data = res.payload[range.0..range.1].to_owned();
-                chunks.push(data.into());
+                result.push(ByteBuf::from(buf));
             }
-            return Ok(chunks);
+
+            return Ok(result);
         }
 
         query_call(
@@ -338,33 +398,20 @@ impl Client {
     }
 
     pub async fn head(&self, path: &Path) -> Result<ObjectMeta> {
-        let res: Result<ObjectMeta> =
-            query_call(&self.agent, &self.canister, "head", (path.as_ref(),))
-                .await
-                .map_err(|error| Error::Generic { error })?;
-        let mut res = res?;
-        if self.cipher.is_some() {
-            res.size = res.size.saturating_sub(ENCRYPTION_SIZE);
-        }
-        Ok(res)
+        query_call(&self.agent, &self.canister, "head", (path.as_ref(),))
+            .await
+            .map_err(|error| Error::Generic { error })?
     }
 
     pub async fn list(&self, prefix: Option<Path>) -> Result<Vec<ObjectMeta>> {
-        let res: Result<Vec<ObjectMeta>> = query_call(
+        query_call(
             &self.agent,
             &self.canister,
             "list",
             (prefix.map(String::from),),
         )
         .await
-        .map_err(|error| Error::Generic { error })?;
-        let mut res = res?;
-        if self.cipher.is_some() {
-            for meta in &mut res {
-                meta.size = meta.size.saturating_sub(ENCRYPTION_SIZE);
-            }
-        }
-        Ok(res)
+        .map_err(|error| Error::Generic { error })?
     }
 
     pub async fn list_with_offset(
@@ -372,46 +419,33 @@ impl Client {
         prefix: Option<Path>,
         offset: &Path,
     ) -> Result<Vec<ObjectMeta>> {
-        let res: Result<Vec<ObjectMeta>> = query_call(
+        query_call(
             &self.agent,
             &self.canister,
             "list_with_offset",
             (prefix.map(String::from), offset.as_ref()),
         )
         .await
-        .map_err(|error| Error::Generic { error })?;
-        let mut res = res?;
-        if self.cipher.is_some() {
-            for meta in &mut res {
-                meta.size = meta.size.saturating_sub(ENCRYPTION_SIZE);
-            }
-        }
-        Ok(res)
+        .map_err(|error| Error::Generic { error })?
     }
 
     pub async fn list_with_delimiter(&self, prefix: Option<Path>) -> Result<ListResult> {
-        let res: Result<ListResult> = query_call(
+        query_call(
             &self.agent,
             &self.canister,
             "list_with_delimiter",
             (prefix.map(String::from),),
         )
         .await
-        .map_err(|error| Error::Generic { error })?;
-        let mut res = res?;
-        if self.cipher.is_some() {
-            for meta in &mut res.objects {
-                meta.size = meta.size.saturating_sub(ENCRYPTION_SIZE);
-            }
-        }
-        Ok(res)
+        .map_err(|error| Error::Generic { error })?
     }
 }
 
 #[derive(Debug)]
 pub struct MultipartUploader {
     part_idx: usize,
-    parts: Vec<bytes::Bytes>,
+    parts_cache: Vec<u8>,
+    opts: PutMultipartOpts,
     state: Arc<UploadState>,
 }
 
@@ -430,19 +464,35 @@ impl std::fmt::Debug for UploadState {
 #[async_trait]
 impl MultipartUpload for MultipartUploader {
     fn put_part(&mut self, payload: object_store::PutPayload) -> object_store::UploadPart {
-        if self.state.client.cipher.is_some() {
-            self.parts.push(bytes::Bytes::from(payload));
+        let payload = bytes::Bytes::from(payload);
+        self.parts_cache.extend_from_slice(&payload);
+        if self.parts_cache.len() < CHUNK_SIZE {
             return Box::pin(futures::future::ready(Ok(())));
+        }
+
+        let mut part = Vec::with_capacity(CHUNK_SIZE);
+        part.extend_from_slice(self.parts_cache.drain(..CHUNK_SIZE).as_slice());
+
+        if let Some(cipher) = &self.state.client.cipher {
+            let tag =
+                aes256_gcm_encrypt_in(cipher, self.opts.aes_nonce.as_ref().unwrap(), &mut part);
+            match tag {
+                Ok(tag) => {
+                    self.opts.aes_tags.as_mut().unwrap().push(tag.into());
+                }
+                Err(err) => {
+                    return Box::pin(futures::future::ready(Err(from_error(err))));
+                }
+            }
         }
 
         let part_idx = self.part_idx;
         self.part_idx += 1;
         let state = self.state.clone();
         Box::pin(async move {
-            let data = bytes::Bytes::from(payload);
             let _ = state
                 .client
-                .put_part(&state.path, &state.id, part_idx, Bytes::new(&data))
+                .put_part(&state.path, &state.id, part_idx, Bytes::new(&part))
                 .await
                 .map_err(from_error)?;
             Ok(())
@@ -450,24 +500,36 @@ impl MultipartUpload for MultipartUploader {
     }
 
     async fn complete(&mut self) -> object_store::Result<object_store::PutResult> {
-        if !self.parts.is_empty() {
+        for part in self.parts_cache.chunks_mut(CHUNK_SIZE) {
+            let part_idx = self.part_idx;
+            self.part_idx += 1;
+
+            if let Some(cipher) = &self.state.client.cipher {
+                let tag =
+                    aes256_gcm_encrypt_in(cipher, self.opts.aes_nonce.as_ref().unwrap(), part);
+                match tag {
+                    Ok(tag) => {
+                        self.opts.aes_tags.as_mut().unwrap().push(tag.into());
+                    }
+                    Err(err) => {
+                        return Err(from_error(err));
+                    }
+                }
+            }
+
             let _ = self
                 .state
                 .client
-                .put_all_parts(
-                    &self.state.path,
-                    &self.state.id,
-                    self.parts.iter().map(|data| Bytes::new(data)).collect(),
-                )
+                .put_part(&self.state.path, &self.state.id, part_idx, Bytes::new(part))
                 .await
                 .map_err(from_error)?;
-            self.parts.clear();
         }
 
+        self.parts_cache.clear();
         let res = self
             .state
             .client
-            .complete_multipart(&self.state.path, &self.state.id, &[])
+            .complete_multipart(&self.state.path, &self.state.id, &self.opts)
             .await
             .map_err(from_error)?;
         Ok(object_store::PutResult {
@@ -519,7 +581,7 @@ impl ObjectStore for ObjectStoreClient {
         let opts = to_put_options(&opts);
         let res = self
             .client
-            .put_opts(path, Bytes::new(&data), &opts)
+            .put_opts(path, Bytes::new(&data), opts)
             .await
             .map_err(from_error)?;
         Ok(object_store::PutResult {
@@ -533,23 +595,30 @@ impl ObjectStore for ObjectStoreClient {
         path: &Path,
         opts: object_store::PutMultipartOpts,
     ) -> object_store::Result<Box<dyn object_store::MultipartUpload>> {
-        let opts = PutMultipartOpts {
+        let upload_id = self
+            .client
+            .create_multipart(path)
+            .await
+            .map_err(from_error)?;
+        let mut opts = PutMultipartOpts {
             tags: opts.tags.encoded().to_string(),
             attributes: opts
                 .attributes
                 .iter()
                 .map(|(k, v)| (to_attribute(k), v.to_string()))
                 .collect(),
+            ..Default::default()
         };
-        let upload_id = self
-            .client
-            .create_multipart(path, &opts)
-            .await
-            .map_err(from_error)?;
+
+        if self.client.cipher.is_some() {
+            opts.aes_nonce = Some(rand_bytes().into());
+            opts.aes_tags = Some(Vec::new());
+        }
 
         Ok(Box::new(MultipartUploader {
             part_idx: 0,
-            parts: Vec::new(),
+            parts_cache: Vec::new(),
+            opts,
             state: Arc::new(UploadState {
                 client: self.client.clone(),
                 path: path.clone(),
@@ -822,46 +891,32 @@ pub fn to_put_options(opts: &object_store::PutOptions) -> PutOptions {
             .iter()
             .map(|(k, v)| (to_attribute(k), v.to_string()))
             .collect(),
+        ..Default::default()
     }
 }
 
-pub const ENCRYPTION_SIZE: usize = 28;
-
-fn aes256_gcm_encrypt(cipher: &Arc<Aes256Gcm>, data: &[u8]) -> Result<Vec<u8>> {
-    let mut buf: Vec<u8> = Vec::with_capacity(data.len() + ENCRYPTION_SIZE);
-    buf.extend_from_slice(data);
-    aes256_gcm_encrypt_in(cipher, &mut buf)?;
-    Ok(buf)
-}
-
-fn aes256_gcm_encrypt_in(cipher: &Arc<Aes256Gcm>, buf: &mut Vec<u8>) -> Result<()> {
-    let nonce: [u8; 12] = rand_bytes();
-    let nonce = Nonce::from_slice(&nonce);
+fn aes256_gcm_encrypt_in(
+    cipher: &Arc<Aes256Gcm>,
+    nonce: &[u8; 12],
+    buf: &mut [u8],
+) -> Result<[u8; 16]> {
     let tag = cipher
-        .encrypt_in_place_detached(nonce, &[], buf)
+        .encrypt_in_place_detached(Nonce::from_slice(nonce), &[], buf)
         .map_err(|err| Error::Generic {
             error: format!("AES256 encrypt failed: {}", err),
         })?;
-    buf.extend_from_slice(&tag);
-    buf.extend_from_slice(nonce);
-    Ok(())
+    Ok(tag.into())
 }
 
-fn aes256_gcm_decrypt(cipher: &Arc<Aes256Gcm>, data: &mut Vec<u8>) -> Result<()> {
-    let len = data.len().saturating_sub(ENCRYPTION_SIZE);
-    if len == 0 {
-        return Err(Error::Generic {
-            error: "AES256 decrypt failed: invalid data".to_string(),
-        });
-    }
-
-    let tag = Tag::from_slice(&data[len..len + 16]).to_owned();
-    let nonce = Nonce::from_slice(&data[len + 16..]).to_owned();
-    data.truncate(len);
+fn aes256_gcm_decrypt_in(
+    cipher: &Arc<Aes256Gcm>,
+    nonce: &[u8; 12],
+    tag: &[u8; 16],
+    data: &mut [u8],
+) -> Result<()> {
     cipher
-        .decrypt_in_place_detached(&nonce, &[], data, &tag)
+        .decrypt_in_place_detached(Nonce::from_slice(nonce), &[], data, Tag::from_slice(tag))
         .map_err(|err| Error::Generic {
             error: format!("AES256 decrypt failed: {}", err),
-        })?;
-    Ok(())
+        })
 }
