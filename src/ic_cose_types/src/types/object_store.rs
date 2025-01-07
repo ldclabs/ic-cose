@@ -211,6 +211,11 @@ impl GetRange {
     pub fn into_range(self, len: usize) -> Result<Range<usize>, String> {
         match self {
             Self::Bounded(start, end) => {
+                if start >= end {
+                    return Err(format!(
+                        "wanted range starting at {start} and ending at {end}, but start >= end"
+                    ));
+                }
                 if start >= len {
                     Err(format!(
                         "wanted range starting at {start}, but object was only {len} bytes long"

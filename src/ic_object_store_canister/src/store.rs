@@ -302,7 +302,7 @@ pub mod object {
                 }
             }
 
-            let etag = match opts.mode {
+            let (etag, version) = match opts.mode {
                 PutMode::Overwrite => {
                     let (etag, size) = s
                         .locations
@@ -315,7 +315,7 @@ pub mod object {
                     }
                     OBJECT_META.with_borrow_mut(|om| om.insert(etag, meta));
                     put_object_data(etag, payload, if size > 0 { size as usize } else { 0 });
-                    etag
+                    (etag, None)
                 }
                 PutMode::Create => {
                     if s.locations.contains_key(&path) {
@@ -327,7 +327,7 @@ pub mod object {
                     s.next_etag += 1;
                     OBJECT_META.with_borrow_mut(|om| om.insert(etag, meta));
                     put_object_data(etag, payload, 0);
-                    etag
+                    (etag, None)
                 }
                 PutMode::Update(v) => match s.locations.get(&path) {
                     None => Err(Error::Precondition {
@@ -349,17 +349,17 @@ pub mod object {
                         }
 
                         s.locations.insert(path, (etag, meta.size as i64));
-                        meta.version = v.version;
+                        meta.version = v.version.clone();
                         OBJECT_META.with_borrow_mut(|om| om.insert(etag, meta));
                         put_object_data(etag, payload, size as usize);
-                        etag
+                        (etag, v.version)
                     }
                 },
             };
 
             Ok(PutResult {
                 e_tag: Some(etag.to_string()),
-                version: None,
+                version,
             })
         })
     }
@@ -875,7 +875,7 @@ pub mod object {
                             .map(|mut x| x.next().is_some())
                             .unwrap_or(false)
                         {
-                            if key < offset {
+                            if key <= offset {
                                 continue;
                             }
                             let me = om.get(etag).unwrap();
@@ -960,6 +960,7 @@ pub mod object {
 #[cfg(test)]
 mod test {
     use super::*;
+    use ic_cose_types::{cose::sha3_256, types::object_store::*};
 
     #[test]
     fn test_bound_max_size() {
@@ -970,5 +971,375 @@ mod test {
         let v = ObjectId(0u64, 0u32);
         let v = v.to_bytes();
         println!("ObjectId min_size: {:?}", v.len());
+    }
+
+    #[test]
+    fn test_objects() {
+        // Test basic put/get
+        let path = "test/a.txt".to_string();
+        let payload = ByteBuf::from("hello world");
+        let opts = PutOptions {
+            mode: PutMode::Create,
+            ..Default::default()
+        };
+
+        // Put object
+        let res = object::put_opts(path.clone(), payload.clone(), opts.clone(), 0).unwrap();
+        assert_eq!(res.e_tag, Some("0".to_string()));
+
+        // Get object
+        let res = object::get_opts(path.clone(), GetOptions::default()).unwrap();
+        assert_eq!(res.payload, payload);
+
+        // Test head
+        let meta = object::head(path.clone()).unwrap();
+        assert_eq!(meta.size, payload.len());
+        assert_eq!(meta.e_tag, Some("0".to_string()));
+
+        // Test create again
+        assert!(object::put_opts(path.clone(), payload.clone(), opts, 0).is_err());
+
+        // Test overwrite
+        let payload = ByteBuf::from("hello Anda");
+        let res = object::put_opts(
+            path.clone(),
+            payload.clone(),
+            PutOptions {
+                mode: PutMode::Overwrite,
+                ..Default::default()
+            },
+            0,
+        )
+        .unwrap();
+        assert_eq!(res.e_tag, Some("0".to_string()));
+
+        let res = object::get_opts(path.clone(), GetOptions::default()).unwrap();
+        assert_eq!(res.payload, payload);
+        assert_eq!(res.meta.size, payload.len());
+
+        // Test update
+        let payload = ByteBuf::from("hello Anda 2");
+        let res = object::put_opts(
+            path.clone(),
+            payload.clone(),
+            PutOptions {
+                mode: PutMode::Update(UpdateVersion {
+                    e_tag: Some("1".to_string()),
+                    version: Some("1".to_string()),
+                }),
+                ..Default::default()
+            },
+            0,
+        );
+        assert!(res.is_err());
+        let res = object::put_opts(
+            path.clone(),
+            payload.clone(),
+            PutOptions {
+                mode: PutMode::Update(UpdateVersion {
+                    e_tag: Some("0".to_string()),
+                    version: Some("1".to_string()),
+                }),
+                ..Default::default()
+            },
+            0,
+        )
+        .unwrap();
+        assert_eq!(res.e_tag, Some("0".to_string()));
+        assert_eq!(res.version, Some("1".to_string()));
+        let res = object::get_opts(path.clone(), GetOptions::default()).unwrap();
+        assert_eq!(res.payload, payload);
+        assert_eq!(res.meta.location, path);
+        assert_eq!(res.meta.e_tag, Some("0".to_string()));
+        assert_eq!(res.meta.size, payload.len());
+        assert_eq!(res.meta.version, Some("1".to_string()));
+
+        // Test copy
+        let to = "test/b.txt".to_string();
+        let res = object::copy(to.clone(), path.clone());
+        assert!(res.is_err());
+        object::copy(path.clone(), to.clone()).unwrap();
+        let res = object::copy_if_not_exists(path.clone(), to.clone());
+        assert!(res.is_err());
+
+        // Test delete
+        object::delete(path.clone()).unwrap();
+        assert!(object::get_opts(path.clone(), GetOptions::default()).is_err());
+
+        let res = object::get_opts(to.clone(), GetOptions::default()).unwrap();
+        assert_eq!(res.payload, payload);
+        assert_eq!(res.meta.location, to);
+        assert_eq!(res.meta.e_tag, Some("1".to_string()));
+        assert_eq!(res.meta.size, payload.len());
+        assert_eq!(res.meta.version, Some("1".to_string()));
+
+        object::copy_if_not_exists(to.clone(), path.clone()).unwrap();
+        let res = object::get_opts(path.clone(), GetOptions::default()).unwrap();
+        assert_eq!(res.payload, payload);
+        assert_eq!(res.meta.location, path);
+        assert_eq!(res.meta.e_tag, Some("2".to_string()));
+        assert_eq!(res.meta.size, payload.len());
+        assert_eq!(res.meta.version, Some("1".to_string()));
+
+        // Test rename
+        let rename = "test/c.txt".to_string();
+        object::rename(to.clone(), rename.clone()).unwrap();
+        assert!(object::get_opts(to.clone(), GetOptions::default()).is_err());
+        assert!(object::rename(to.clone(), rename.clone()).is_err());
+        let res = object::get_opts(rename.clone(), GetOptions::default()).unwrap();
+        assert_eq!(res.payload, payload);
+        assert_eq!(res.meta.location, rename);
+        assert_eq!(res.meta.e_tag, Some("1".to_string()));
+        assert_eq!(res.meta.size, payload.len());
+        assert_eq!(res.meta.version, Some("1".to_string()));
+
+        assert!(object::rename_if_not_exists(path.clone(), rename.clone()).is_err());
+        let rename = "test/d.txt".to_string();
+        object::rename_if_not_exists(path.clone(), rename.clone()).unwrap();
+        assert!(object::get_opts(path.clone(), GetOptions::default()).is_err());
+        let res = object::get_opts(rename.clone(), GetOptions::default()).unwrap();
+        assert_eq!(res.payload, payload);
+        assert_eq!(res.meta.location, rename);
+        assert_eq!(res.meta.e_tag, Some("2".to_string()));
+        assert_eq!(res.meta.size, payload.len());
+        assert_eq!(res.meta.version, Some("1".to_string()));
+
+        // Test rename with overwrite
+        let path = "test/c.txt".to_string();
+        object::rename(path.clone(), rename.clone()).unwrap();
+        assert!(object::get_opts(path.clone(), GetOptions::default()).is_err());
+        let res = object::get_opts(rename.clone(), GetOptions::default()).unwrap();
+        assert_eq!(res.payload, payload);
+        assert_eq!(res.meta.location, rename);
+        assert_eq!(res.meta.e_tag, Some("1".to_string()));
+        assert_eq!(res.meta.size, payload.len());
+        assert_eq!(res.meta.version, Some("1".to_string()));
+    }
+
+    #[test]
+    fn test_list() {
+        let paths = vec![
+            "a/1.txt".to_string(),
+            "a/1.txt/1.txt".to_string(),
+            "aa/1.txt".to_string(),
+            "b/1.txt".to_string(),
+            "a/2.txt".to_string(),
+            "b/2.txt".to_string(),
+            "a/3.txt".to_string(),
+        ];
+        let mut pahts_sorted = paths.clone();
+        pahts_sorted.sort();
+        assert_ne!(&paths, &pahts_sorted);
+        let opts = PutOptions {
+            mode: PutMode::Create,
+            ..Default::default()
+        };
+        for path in paths.iter() {
+            object::put_opts(
+                path.clone(),
+                ByteBuf::from(path.as_bytes()),
+                opts.clone(),
+                0,
+            )
+            .unwrap();
+        }
+        let res = object::list(None).unwrap();
+        let list_paths: Vec<String> = res.iter().map(|x| x.location.clone()).collect();
+        assert_eq!(list_paths, pahts_sorted);
+
+        let res = object::list(Some("a".to_string().into())).unwrap();
+        let list_paths: Vec<String> = res.iter().map(|x| x.location.clone()).collect();
+        assert_eq!(
+            list_paths,
+            vec![
+                "a/1.txt".to_string(),
+                "a/1.txt/1.txt".to_string(),
+                "a/2.txt".to_string(),
+                "a/3.txt".to_string()
+            ]
+        );
+
+        let res = object::list(Some("a/1".to_string().into())).unwrap();
+        assert!(res.is_empty());
+        let res = object::list(Some("a/1.txt".to_string().into())).unwrap();
+        let list_paths: Vec<String> = res.iter().map(|x| x.location.clone()).collect();
+        assert_eq!(list_paths, vec!["a/1.txt/1.txt".to_string()]);
+
+        let res = object::list_with_offset(
+            Some("a".to_string().into()),
+            "a/1.txt/1.txt".to_string().into(),
+        )
+        .unwrap();
+        let list_paths: Vec<String> = res.iter().map(|x| x.location.clone()).collect();
+        assert_eq!(
+            list_paths,
+            vec!["a/2.txt".to_string(), "a/3.txt".to_string()]
+        );
+
+        let res = object::list_with_delimiter(None).unwrap();
+        assert_eq!(
+            res.common_prefixes,
+            vec!["a".to_string(), "aa".to_string(), "b".to_string()]
+        );
+        assert!(res.objects.is_empty());
+
+        let res = object::list_with_delimiter(Some("a".to_string().into())).unwrap();
+        assert_eq!(res.common_prefixes, vec!["a/1.txt".to_string()]);
+        let list_paths: Vec<String> = res.objects.iter().map(|x| x.location.clone()).collect();
+        assert_eq!(
+            list_paths,
+            vec![
+                "a/1.txt".to_string(),
+                "a/2.txt".to_string(),
+                "a/3.txt".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn test_large_objects() {
+        // Test basic put/get
+        let path = "test/a.bin".to_string();
+        let count = 10000usize;
+        let len = count * 32;
+        let mut payload = Vec::with_capacity(len);
+        for i in 0..count {
+            payload.extend_from_slice(sha3_256(&i.to_be_bytes()).as_slice());
+        }
+        assert_eq!(payload.len(), len);
+
+        object::put_opts(
+            path.clone(),
+            ByteBuf::from(payload.to_vec()),
+            PutOptions {
+                mode: PutMode::Create,
+                ..Default::default()
+            },
+            0,
+        )
+        .unwrap();
+        let res = object::get_opts(path.clone(), GetOptions::default()).unwrap();
+        assert_eq!(&res.payload, &payload);
+        assert_eq!(res.meta.location, path);
+        assert_eq!(res.meta.size, payload.len());
+
+        let res = object::get_part(path.clone(), 0).unwrap();
+        assert_eq!(res, payload[0..CHUNK_SIZE]);
+        let res = object::get_part(path.clone(), 1).unwrap();
+        assert_eq!(res, payload[CHUNK_SIZE..]);
+        assert!(object::get_part(path.clone(), 2).is_err());
+
+        let ranges = vec![(0usize, 1000), (10usize, 10000), (100usize, len)];
+        let rt = object::get_ranges(path.clone(), ranges.clone()).unwrap();
+        assert_eq!(rt.len(), ranges.len());
+        for (i, (start, end)) in ranges.into_iter().enumerate() {
+            let res = object::get_opts(
+                path.clone(),
+                GetOptions {
+                    range: Some(GetRange::Bounded(start, end)),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(rt[i], &res.payload);
+            assert_eq!(&res.payload, &payload[start..end]);
+            assert_eq!(res.meta.location, path);
+            assert_eq!(res.meta.size, payload.len());
+        }
+
+        assert!(object::get_opts(
+            path.clone(),
+            GetOptions {
+                range: Some(GetRange::Bounded(100, 100)),
+                ..Default::default()
+            }
+        )
+        .is_err());
+        assert!(object::get_opts(
+            path.clone(),
+            GetOptions {
+                range: Some(GetRange::Bounded(len, len + 1)),
+                ..Default::default()
+            }
+        )
+        .is_err());
+        let res = object::get_opts(
+            path.clone(),
+            GetOptions {
+                range: Some(GetRange::Bounded(1, len + 1)),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(&res.payload, &payload[1..]);
+    }
+
+    #[test]
+    fn test_multipart() {
+        // Test basic put/get
+        let path = "test/b.bin".to_string();
+        let count = 100000usize;
+        let len = count * 32;
+        let mut payload = Vec::with_capacity(len);
+        for i in 0..count {
+            payload.extend_from_slice(sha3_256(&i.to_be_bytes()).as_slice());
+        }
+        assert_eq!(payload.len(), len);
+
+        let id = object::create_multipart(path.clone()).unwrap();
+        assert!(object::create_multipart(path.clone()).is_err());
+
+        let chunks: Vec<&[u8]> = payload.chunks(CHUNK_SIZE).collect();
+        for i in 1..chunks.len() {
+            object::put_part(
+                path.clone(),
+                id.clone(),
+                i as u32,
+                ByteBuf::from(chunks[i].to_vec()),
+            )
+            .unwrap();
+        }
+
+        // not completed
+        assert!(object::complete_multipart(
+            path.clone(),
+            id.clone(),
+            PutMultipartOpts::default(),
+            0
+        )
+        .is_err());
+
+        object::put_part(
+            path.clone(),
+            id.clone(),
+            0,
+            ByteBuf::from(chunks[0].to_vec()),
+        )
+        .unwrap();
+
+        object::complete_multipart(path.clone(), id.clone(), PutMultipartOpts::default(), 0)
+            .unwrap();
+
+        let ranges = vec![
+            (0usize, 1000),
+            (100usize, 100000),
+            (len - CHUNK_SIZE * 2, len),
+        ];
+        let rt = object::get_ranges(path.clone(), ranges.clone()).unwrap();
+        assert_eq!(rt.len(), ranges.len());
+        for (i, (start, end)) in ranges.into_iter().enumerate() {
+            let res = object::get_opts(
+                path.clone(),
+                GetOptions {
+                    range: Some(GetRange::Bounded(start, end)),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(rt[i], &res.payload);
+            assert_eq!(&res.payload, &payload[start..end]);
+            assert_eq!(res.meta.location, path);
+            assert_eq!(res.meta.size, payload.len());
+        }
     }
 }
