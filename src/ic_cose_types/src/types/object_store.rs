@@ -19,7 +19,7 @@ pub struct StateInfo {
     pub managers: BTreeSet<Principal>,
     pub auditors: BTreeSet<Principal>,
     pub governance_canister: Option<Principal>,
-    pub locations: u64,
+    pub objects: u64,
     pub next_etag: u64,
 }
 

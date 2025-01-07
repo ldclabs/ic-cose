@@ -88,7 +88,7 @@ type StateInfo = record {
   governance_canister : opt principal;
   name : text;
   auditors : vec principal;
-  locations : nat64;
+  objects : nat64;
 };
 type UpdateVersion = record { e_tag : opt text; version : opt text };
 type UpgradeArgs = record {

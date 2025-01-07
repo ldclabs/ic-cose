@@ -87,7 +87,7 @@ export const idlFactory = ({ IDL }) => {
     'governance_canister' : IDL.Opt(IDL.Principal),
     'name' : IDL.Text,
     'auditors' : IDL.Vec(IDL.Principal),
-    'locations' : IDL.Nat64,
+    'objects' : IDL.Nat64,
   });
   const Result_7 = IDL.Variant({ 'Ok' : StateInfo, 'Err' : IDL.Text });
   const Result_8 = IDL.Variant({ 'Ok' : ObjectMeta, 'Err' : Error });

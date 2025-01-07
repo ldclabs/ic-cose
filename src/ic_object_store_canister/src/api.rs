@@ -12,7 +12,7 @@ fn get_state() -> Result<StateInfo, String> {
             managers: s.managers.clone(),
             auditors: s.auditors.clone(),
             governance_canister: s.governance_canister,
-            locations: s.locations.len() as u64,
+            objects: s.locations.len() as u64,
             next_etag: s.next_etag,
         })
     })

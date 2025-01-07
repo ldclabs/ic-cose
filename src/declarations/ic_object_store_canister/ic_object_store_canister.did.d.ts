@@ -105,7 +105,7 @@ export interface StateInfo {
   'governance_canister' : [] | [Principal],
   'name' : string,
   'auditors' : Array<Principal>,
-  'locations' : bigint,
+  'objects' : bigint,
 }
 export interface UpdateVersion {
   'e_tag' : [] | [string],

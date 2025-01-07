@@ -7,11 +7,7 @@ use ic_agent::Agent;
 use ic_cose_types::types::object_store::*;
 use object_store::{path::Path, MultipartUpload, ObjectStore};
 use serde_bytes::{ByteArray, ByteBuf, Bytes};
-use std::{
-    collections::BTreeSet,
-    ops::Range,
-    sync::Arc,
-};
+use std::{collections::BTreeSet, ops::Range, sync::Arc};
 
 use crate::{
     agent::{query_call, update_call},
@@ -919,4 +915,131 @@ fn aes256_gcm_decrypt_in(
         .map_err(|err| Error::Generic {
             error: format!("AES256 decrypt failed: {}", err),
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::build_agent;
+    use ed25519_consensus::SigningKey;
+    use ic_agent::{identity::BasicIdentity, Identity};
+    use ic_cose_types::cose::sha3_256;
+
+    #[tokio::test(flavor = "current_thread")]
+    #[ignore]
+    async fn test_client() {
+        let secret = [8u8; 32];
+        let canister = Principal::from_text("6at64-oyaaa-aaaap-anvza-cai").unwrap();
+        let sk = SigningKey::from(secret);
+        let id = BasicIdentity::from_signing_key(sk);
+        println!("id: {:?}", id.sender().unwrap().to_text());
+        // jjn6g-sh75l-r3cxb-wxrkl-frqld-6p6qq-d4ato-wske5-op7s5-n566f-bqe
+
+        let agent = build_agent("http://localhost:4943", Box::new(id))
+            .await
+            .unwrap();
+        let cli = Arc::new(Client::new(Arc::new(agent), canister, Some(secret)));
+        let oc = ObjectStoreClient::new(cli.clone());
+
+        let path = Path::from("test/hello.txt");
+        let payload = "Hello Anda!".as_bytes().to_vec();
+        let res = oc
+            .put_opts(&path, payload.clone().into(), Default::default())
+            .await
+            .unwrap();
+        println!("put result: {:?}", res);
+
+        let res = oc.get_opts(&path, Default::default()).await.unwrap();
+        println!("get result: {:?}", res);
+        assert_eq!(res.meta.size, payload.len());
+        let res = match res.payload {
+            object_store::GetResultPayload::Stream(mut stream) => {
+                let mut buf = Vec::new();
+                while let Some(data) = stream.next().await {
+                    buf.extend_from_slice(&data.unwrap());
+                }
+                buf
+            }
+            _ => panic!("unexpected payload"),
+        };
+        assert_eq!(res, payload);
+
+        let res = cli.get_opts(&path, Default::default()).await.unwrap();
+        println!("get result: {:?}", res);
+        assert_eq!(res.meta.size, payload.len());
+        assert_eq!(&res.payload, &payload);
+        let aes_nonce = res.meta.aes_nonce.unwrap();
+        assert_eq!(aes_nonce.len(), 12);
+        let aes_tags = res.meta.aes_tags.unwrap();
+        assert_eq!(aes_tags.len(), 1);
+
+        let now = chrono::Utc::now();
+        let path = Path::from(format!("test/{}.bin", now.timestamp_millis()));
+        let count = 20000usize;
+        let len = count * 32;
+        let mut payload = Vec::with_capacity(len);
+        {
+            let mut uploder = oc
+                .put_multipart_opts(&path, Default::default())
+                .await
+                .unwrap();
+
+            for i in 0..count {
+                let data = sha3_256(&i.to_be_bytes()).to_vec();
+                payload.extend_from_slice(&data);
+                uploder
+                    .put_part(object_store::PutPayload::from(data))
+                    .await
+                    .unwrap();
+            }
+
+            uploder.complete().await.unwrap();
+        }
+        let res = oc.get_opts(&path, Default::default()).await.unwrap();
+        assert_eq!(res.meta.size, payload.len());
+        let res = match res.payload {
+            object_store::GetResultPayload::Stream(mut stream) => {
+                let mut buf = Vec::new();
+                while let Some(data) = stream.next().await {
+                    buf.extend_from_slice(&data.unwrap());
+                }
+                buf
+            }
+            _ => panic!("unexpected payload"),
+        };
+        assert_eq!(res, payload);
+
+        let res = cli.get_opts(&path, Default::default()).await.unwrap();
+        assert_eq!(res.meta.size, payload.len());
+        assert_eq!(&res.payload, &payload);
+        let aes_nonce = res.meta.aes_nonce.unwrap();
+        assert_eq!(aes_nonce.len(), 12);
+        let aes_tags = res.meta.aes_tags.unwrap();
+        assert_eq!(aes_tags.len(), len.div_ceil(CHUNK_SIZE));
+
+        let ranges = vec![
+            (0usize, 1000),
+            (100usize, 100000),
+            (len - CHUNK_SIZE - 1, len),
+        ];
+
+        let rt = cli.get_ranges(&path, &ranges).await.unwrap();
+        assert_eq!(rt.len(), ranges.len());
+        for (i, (start, end)) in ranges.into_iter().enumerate() {
+            let res = cli
+                .get_opts(
+                    &path,
+                    GetOptions {
+                        range: Some(GetRange::Bounded(start, end)),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(rt[i], &res.payload);
+            assert_eq!(&res.payload, &payload[start..end]);
+            assert_eq!(res.meta.location, path.as_ref());
+            assert_eq!(res.meta.size, payload.len());
+        }
+    }
 }
