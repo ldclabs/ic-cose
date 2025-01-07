@@ -37,7 +37,7 @@ admin_add_managers : (vec principal) -> (Result)
 admin_remove_managers : (vec principal) -> (Result)
 ```
 
-Full Candid API definition: [ic_cose_canister.did](https://github.com/ldclabs/ic-cose/tree/main/src/ic_object_store_canister/ic_object_store_canister.did)
+Full Candid API definition: [ic_object_store_canister.did](https://github.com/ldclabs/ic-cose/tree/main/src/ic_object_store_canister/ic_object_store_canister.did)
 
 ## License
 Copyright © 2024-2025 [LDC Labs](https://github.com/ldclabs).

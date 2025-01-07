@@ -7,7 +7,7 @@
 
 [IC-COSE](https://github.com/ldclabs/ic-cose) is a decentralized COnfiguration service with Signing and Encryption on the Internet Computer.
 
-`ic_cose` is the Rust version of the client SDK for the IC-COSE canister.
+`ic_cose` is the Rust version of the client SDK for the IC COSE canister.
 
 ## Documentation
 
