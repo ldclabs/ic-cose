@@ -935,7 +935,7 @@ mod tests {
         println!("id: {:?}", id.sender().unwrap().to_text());
         // jjn6g-sh75l-r3cxb-wxrkl-frqld-6p6qq-d4ato-wske5-op7s5-n566f-bqe
 
-        let agent = build_agent("http://localhost:4943", Box::new(id))
+        let agent = build_agent("http://localhost:4943", Arc::new(id))
             .await
             .unwrap();
         let cli = Arc::new(Client::new(Arc::new(agent), canister, Some(secret)));

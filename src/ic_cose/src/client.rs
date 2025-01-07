@@ -24,7 +24,7 @@ use crate::{
 #[derive(Clone)]
 pub struct Client {
     agent: Arc<Agent>,
-    canister: Principal,
+    pub canister: Principal,
 }
 
 impl Client {
