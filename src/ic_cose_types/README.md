@@ -7,7 +7,7 @@
 
 [IC-COSE](https://github.com/ldclabs/ic-cose) is a decentralized COnfiguration service with Signing and Encryption on the Internet Computer.
 
-`ic_cose_types` is a Rust types library used for integrating with IC COSE canister.
+`ic_cose_types` is a Rust types library used for integrating with IC-COSE.
 
 ## License
 Copyright © 2024-2025 [LDC Labs](https://github.com/ldclabs).

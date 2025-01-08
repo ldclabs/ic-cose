@@ -299,7 +299,7 @@ impl Client {
         update_call(
             &self.agent,
             &self.canister,
-            "namespace_remove_delegator",
+            "namespace_sign_delegation",
             (input,),
         )
         .await?
