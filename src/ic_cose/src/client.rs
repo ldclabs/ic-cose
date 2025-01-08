@@ -37,12 +37,12 @@ impl Client {
     }
 
     /// the caller of agent should be canister controller
-    pub async fn admin_add_managers(&self, args: BTreeSet<Principal>) -> Result<(), String> {
+    pub async fn admin_add_managers(&self, args: &BTreeSet<Principal>) -> Result<(), String> {
         update_call(&self.agent, &self.canister, "admin_add_managers", (args,)).await?
     }
 
     /// the caller of agent should be canister controller
-    pub async fn admin_remove_managers(&self, args: BTreeSet<Principal>) -> Result<(), String> {
+    pub async fn admin_remove_managers(&self, args: &BTreeSet<Principal>) -> Result<(), String> {
         update_call(
             &self.agent,
             &self.canister,
@@ -53,12 +53,12 @@ impl Client {
     }
 
     /// the caller of agent should be canister controller
-    pub async fn admin_add_auditors(&self, args: BTreeSet<Principal>) -> Result<(), String> {
+    pub async fn admin_add_auditors(&self, args: &BTreeSet<Principal>) -> Result<(), String> {
         update_call(&self.agent, &self.canister, "admin_add_auditors", (args,)).await?
     }
 
     /// the caller of agent should be canister controller
-    pub async fn admin_remove_auditors(&self, args: BTreeSet<Principal>) -> Result<(), String> {
+    pub async fn admin_remove_auditors(&self, args: &BTreeSet<Principal>) -> Result<(), String> {
         update_call(
             &self.agent,
             &self.canister,
@@ -69,7 +69,7 @@ impl Client {
     }
 
     /// the caller of agent should be canister controller
-    pub async fn admin_add_allowed_apis(&self, args: BTreeSet<String>) -> Result<(), String> {
+    pub async fn admin_add_allowed_apis(&self, args: &BTreeSet<String>) -> Result<(), String> {
         update_call(
             &self.agent,
             &self.canister,
@@ -80,7 +80,7 @@ impl Client {
     }
 
     /// the caller of agent should be canister controller
-    pub async fn admin_remove_allowed_apis(&self, args: BTreeSet<String>) -> Result<(), String> {
+    pub async fn admin_remove_allowed_apis(&self, args: &BTreeSet<String>) -> Result<(), String> {
         update_call(
             &self.agent,
             &self.canister,
@@ -93,7 +93,7 @@ impl Client {
     /// the caller of agent should be canister controller
     pub async fn admin_create_namespace(
         &self,
-        args: CreateNamespaceInput,
+        args: &CreateNamespaceInput,
     ) -> Result<NamespaceInfo, String> {
         update_call(
             &self.agent,
@@ -106,7 +106,7 @@ impl Client {
 
     pub async fn admin_list_namespace(
         &self,
-        prev: Option<String>,
+        prev: Option<&str>,
         take: Option<u32>,
     ) -> Result<Vec<NamespaceInfo>, String> {
         query_call(
@@ -120,18 +120,18 @@ impl Client {
 
     pub async fn ecdsa_public_key(
         &self,
-        args: Option<PublicKeyInput>,
+        args: Option<&PublicKeyInput>,
     ) -> Result<PublicKeyOutput, String> {
         query_call(&self.agent, &self.canister, "ecdsa_public_key", (args,)).await?
     }
 
-    pub async fn ecdsa_sign(&self, args: SignInput) -> Result<ByteBuf, String> {
+    pub async fn ecdsa_sign(&self, args: &SignInput) -> Result<ByteBuf, String> {
         update_call(&self.agent, &self.canister, "ecdsa_sign", (args,)).await?
     }
 
     pub async fn schnorr_public_key(
         &self,
-        algorithm: SchnorrAlgorithm,
+        algorithm: &SchnorrAlgorithm,
         input: Option<PublicKeyInput>,
     ) -> Result<PublicKeyOutput, String> {
         query_call(
@@ -145,8 +145,8 @@ impl Client {
 
     pub async fn schnorr_sign(
         &self,
-        algorithm: SchnorrAlgorithm,
-        input: SignInput,
+        algorithm: &SchnorrAlgorithm,
+        input: &SignInput,
     ) -> Result<ByteBuf, String> {
         update_call(
             &self.agent,
@@ -159,8 +159,8 @@ impl Client {
 
     pub async fn schnorr_sign_identity(
         &self,
-        algorithm: SchnorrAlgorithm,
-        input: SignIdentityInput,
+        algorithm: &SchnorrAlgorithm,
+        input: &SignIdentityInput,
     ) -> Result<ByteBuf, String> {
         update_call(
             &self.agent,
@@ -173,8 +173,8 @@ impl Client {
 
     pub async fn ecdh_cose_encrypted_key(
         &self,
-        path: SettingPath,
-        ecdh: ECDHInput,
+        path: &SettingPath,
+        ecdh: &ECDHInput,
     ) -> Result<ECDHOutput<ByteBuf>, String> {
         update_call(
             &self.agent,
@@ -185,7 +185,10 @@ impl Client {
         .await?
     }
 
-    pub async fn get_cose_encrypted_key(&self, path: SettingPath) -> Result<[u8; 32], String> {
+    pub async fn get_cose_encrypted_key(
+        &self,
+        path: &SettingPath,
+    ) -> Result<ByteArray<32>, String> {
         let nonce: [u8; 12] = rand_bytes();
         let secret: [u8; 32] = rand_bytes();
         let secret = StaticSecret::from(secret);
@@ -198,7 +201,7 @@ impl Client {
         let res = self
             .ecdh_cose_encrypted_key(
                 path,
-                ECDHInput {
+                &ECDHInput {
                     nonce: nonce.into(),
                     public_key: public.to_bytes().into(),
                 },
@@ -211,19 +214,20 @@ impl Client {
         let key =
             CoseKey::from_slice(&kek).map_err(|err| format!("invalid COSE key: {:?}", err))?;
         let secret = get_cose_key_secret(key)?;
-        secret.try_into().map_err(|val: Vec<u8>| {
+        let secret: [u8; 32] = secret.try_into().map_err(|val: Vec<u8>| {
             format!("invalid COSE secret, expected 32 bytes, got {}", val.len())
-        })
+        })?;
+        Ok(secret.into())
     }
 
-    pub async fn vetkd_public_key(&self, path: SettingPath) -> Result<ByteBuf, String> {
+    pub async fn vetkd_public_key(&self, path: &SettingPath) -> Result<ByteBuf, String> {
         update_call(&self.agent, &self.canister, "vetkd_public_key", (path,)).await?
     }
 
     pub async fn vetkd_encrypted_key(
         &self,
-        path: SettingPath,
-        public_key: ByteArray<48>,
+        path: &SettingPath,
+        public_key: &ByteArray<48>,
     ) -> Result<ByteBuf, String> {
         update_call(
             &self.agent,
@@ -236,8 +240,8 @@ impl Client {
 
     pub async fn namespace_get_fixed_identity(
         &self,
-        namespace: String,
-        name: String,
+        namespace: &str,
+        name: &str,
     ) -> Result<Principal, String> {
         query_call(
             &self.agent,
@@ -250,8 +254,8 @@ impl Client {
 
     pub async fn namespace_get_delegators(
         &self,
-        namespace: String,
-        name: String,
+        namespace: &str,
+        name: &str,
     ) -> Result<BTreeSet<Principal>, String> {
         query_call(
             &self.agent,
@@ -264,7 +268,7 @@ impl Client {
 
     pub async fn namespace_add_delegator(
         &self,
-        input: NamespaceDelegatorsInput,
+        input: &NamespaceDelegatorsInput,
     ) -> Result<BTreeSet<Principal>, String> {
         update_call(
             &self.agent,
@@ -277,7 +281,7 @@ impl Client {
 
     pub async fn namespace_remove_delegator(
         &self,
-        input: NamespaceDelegatorsInput,
+        input: &NamespaceDelegatorsInput,
     ) -> Result<(), String> {
         update_call(
             &self.agent,
@@ -290,7 +294,7 @@ impl Client {
 
     pub async fn namespace_sign_delegation(
         &self,
-        input: SignDelegationInput,
+        input: &SignDelegationInput,
     ) -> Result<SignDelegationOutput, String> {
         update_call(
             &self.agent,
@@ -303,8 +307,8 @@ impl Client {
 
     pub async fn get_delegation(
         &self,
-        seed: ByteBuf,
-        pubkey: ByteBuf,
+        seed: &ByteBuf,
+        pubkey: &ByteBuf,
         expiration: u64,
     ) -> Result<SignedDelegation, String> {
         query_call(
@@ -316,7 +320,7 @@ impl Client {
         .await?
     }
 
-    pub async fn namespace_get_info(&self, namespace: String) -> Result<NamespaceInfo, String> {
+    pub async fn namespace_get_info(&self, namespace: &str) -> Result<NamespaceInfo, String> {
         query_call(
             &self.agent,
             &self.canister,
@@ -328,7 +332,7 @@ impl Client {
 
     pub async fn namespace_list_setting_keys(
         &self,
-        namespace: String,
+        namespace: &str,
         user_owned: bool,
         subject: Option<Principal>,
     ) -> Result<NamespaceInfo, String> {
@@ -341,7 +345,7 @@ impl Client {
         .await?
     }
 
-    pub async fn namespace_update_info(&self, args: UpdateNamespaceInput) -> Result<(), String> {
+    pub async fn namespace_update_info(&self, args: &UpdateNamespaceInput) -> Result<(), String> {
         update_call(
             &self.agent,
             &self.canister,
@@ -351,7 +355,7 @@ impl Client {
         .await?
     }
 
-    pub async fn namespace_delete(&self, namespace: String) -> Result<(), String> {
+    pub async fn namespace_delete(&self, namespace: &str) -> Result<(), String> {
         update_call(
             &self.agent,
             &self.canister,
@@ -363,8 +367,8 @@ impl Client {
 
     pub async fn namespace_add_managers(
         &self,
-        namespace: String,
-        args: BTreeSet<Principal>,
+        namespace: &str,
+        args: &BTreeSet<Principal>,
     ) -> Result<(), String> {
         update_call(
             &self.agent,
@@ -377,8 +381,8 @@ impl Client {
 
     pub async fn namespace_remove_managers(
         &self,
-        namespace: String,
-        args: BTreeSet<Principal>,
+        namespace: &str,
+        args: &BTreeSet<Principal>,
     ) -> Result<(), String> {
         update_call(
             &self.agent,
@@ -391,8 +395,8 @@ impl Client {
 
     pub async fn namespace_add_auditors(
         &self,
-        namespace: String,
-        args: BTreeSet<Principal>,
+        namespace: &str,
+        args: &BTreeSet<Principal>,
     ) -> Result<(), String> {
         update_call(
             &self.agent,
@@ -405,8 +409,8 @@ impl Client {
 
     pub async fn namespace_remove_auditors(
         &self,
-        namespace: String,
-        args: BTreeSet<Principal>,
+        namespace: &str,
+        args: &BTreeSet<Principal>,
     ) -> Result<(), String> {
         update_call(
             &self.agent,
@@ -419,8 +423,8 @@ impl Client {
 
     pub async fn namespace_add_users(
         &self,
-        namespace: String,
-        args: BTreeSet<Principal>,
+        namespace: &str,
+        args: &BTreeSet<Principal>,
     ) -> Result<(), String> {
         update_call(
             &self.agent,
@@ -433,8 +437,8 @@ impl Client {
 
     pub async fn namespace_remove_users(
         &self,
-        namespace: String,
-        args: BTreeSet<Principal>,
+        namespace: &str,
+        args: &BTreeSet<Principal>,
     ) -> Result<(), String> {
         update_call(
             &self.agent,
@@ -445,7 +449,7 @@ impl Client {
         .await?
     }
 
-    pub async fn namespace_top_up(&self, namespace: String, cycles: u128) -> Result<u128, String> {
+    pub async fn namespace_top_up(&self, namespace: &str, cycles: u128) -> Result<u128, String> {
         update_call(
             &self.agent,
             &self.canister,
@@ -455,17 +459,17 @@ impl Client {
         .await?
     }
 
-    pub async fn setting_get_info(&self, path: SettingPath) -> Result<SettingInfo, String> {
+    pub async fn setting_get_info(&self, path: &SettingPath) -> Result<SettingInfo, String> {
         query_call(&self.agent, &self.canister, "setting_get_info", (path,)).await?
     }
 
-    pub async fn setting_get(&self, path: SettingPath) -> Result<SettingInfo, String> {
+    pub async fn setting_get(&self, path: &SettingPath) -> Result<SettingInfo, String> {
         query_call(&self.agent, &self.canister, "setting_get", (path,)).await?
     }
 
     pub async fn setting_get_archived_payload(
         &self,
-        path: SettingPath,
+        path: &SettingPath,
     ) -> Result<SettingArchivedPayload, String> {
         query_call(
             &self.agent,
@@ -478,16 +482,16 @@ impl Client {
 
     pub async fn setting_create(
         &self,
-        path: SettingPath,
-        input: CreateSettingInput,
+        path: &SettingPath,
+        input: &CreateSettingInput,
     ) -> Result<CreateSettingOutput, String> {
         update_call(&self.agent, &self.canister, "setting_create", (path, input)).await?
     }
 
     pub async fn setting_update_info(
         &self,
-        path: SettingPath,
-        input: UpdateSettingInfoInput,
+        path: &SettingPath,
+        input: &UpdateSettingInfoInput,
     ) -> Result<UpdateSettingOutput, String> {
         update_call(
             &self.agent,
@@ -500,8 +504,8 @@ impl Client {
 
     pub async fn setting_update_payload(
         &self,
-        path: SettingPath,
-        input: UpdateSettingPayloadInput,
+        path: &SettingPath,
+        input: &UpdateSettingPayloadInput,
     ) -> Result<UpdateSettingOutput, String> {
         update_call(
             &self.agent,
@@ -514,8 +518,8 @@ impl Client {
 
     pub async fn setting_add_readers(
         &self,
-        path: SettingPath,
-        args: BTreeSet<Principal>,
+        path: &SettingPath,
+        args: &BTreeSet<Principal>,
     ) -> Result<(), String> {
         update_call(
             &self.agent,
@@ -528,8 +532,8 @@ impl Client {
 
     pub async fn setting_remove_readers(
         &self,
-        path: SettingPath,
-        args: BTreeSet<Principal>,
+        path: &SettingPath,
+        args: &BTreeSet<Principal>,
     ) -> Result<(), String> {
         update_call(
             &self.agent,
@@ -540,7 +544,7 @@ impl Client {
         .await?
     }
 
-    pub async fn setting_delete(&self, path: SettingPath) -> Result<(), String> {
+    pub async fn setting_delete(&self, path: &SettingPath) -> Result<(), String> {
         update_call(&self.agent, &self.canister, "setting_delete", (path,)).await?
     }
 }

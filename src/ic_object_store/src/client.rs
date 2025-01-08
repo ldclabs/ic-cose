@@ -399,12 +399,12 @@ impl Client {
             .map_err(|error| Error::Generic { error })?
     }
 
-    pub async fn list(&self, prefix: Option<Path>) -> Result<Vec<ObjectMeta>> {
+    pub async fn list(&self, prefix: Option<&Path>) -> Result<Vec<ObjectMeta>> {
         query_call(
             &self.agent,
             &self.canister,
             "list",
-            (prefix.map(String::from),),
+            (prefix.map(|p| p.as_ref()),),
         )
         .await
         .map_err(|error| Error::Generic { error })?
@@ -412,25 +412,25 @@ impl Client {
 
     pub async fn list_with_offset(
         &self,
-        prefix: Option<Path>,
+        prefix: Option<&Path>,
         offset: &Path,
     ) -> Result<Vec<ObjectMeta>> {
         query_call(
             &self.agent,
             &self.canister,
             "list_with_offset",
-            (prefix.map(String::from), offset.as_ref()),
+            (prefix.map(|p| p.as_ref()), offset.as_ref()),
         )
         .await
         .map_err(|error| Error::Generic { error })?
     }
 
-    pub async fn list_with_delimiter(&self, prefix: Option<Path>) -> Result<ListResult> {
+    pub async fn list_with_delimiter(&self, prefix: Option<&Path>) -> Result<ListResult> {
         query_call(
             &self.agent,
             &self.canister,
             "list_with_delimiter",
-            (prefix.map(String::from),),
+            (prefix.map(|p| p.as_ref()),),
         )
         .await
         .map_err(|error| Error::Generic { error })?
@@ -667,6 +667,7 @@ impl ObjectStore for ObjectStoreClient {
         path: &Path,
         range: Range<usize>,
     ) -> object_store::Result<bytes::Bytes> {
+        #[allow(clippy::single_range_in_vec_init)]
         let mut res = self.get_ranges(path, &[range.start..range.end]).await?;
         res.pop().ok_or_else(|| object_store::Error::NotFound {
             path: path.as_ref().to_string(),
@@ -707,7 +708,7 @@ impl ObjectStore for ObjectStoreClient {
     ) -> BoxStream<'_, object_store::Result<object_store::ObjectMeta>> {
         let prefix = prefix.cloned();
         futures::stream::once(async move {
-            let res = self.client.list(prefix).await;
+            let res = self.client.list(prefix.as_ref()).await;
             let values: Vec<object_store::Result<object_store::ObjectMeta, object_store::Error>> =
                 match res {
                     Ok(res) => res.into_iter().map(|v| Ok(from_object_meta(v))).collect(),
@@ -728,7 +729,7 @@ impl ObjectStore for ObjectStoreClient {
         let prefix = prefix.cloned();
         let offset = offset.clone();
         futures::stream::once(async move {
-            let res = self.client.list_with_offset(prefix, &offset).await;
+            let res = self.client.list_with_offset(prefix.as_ref(), &offset).await;
             let values: Vec<object_store::Result<object_store::ObjectMeta, object_store::Error>> =
                 match res {
                     Ok(res) => res.into_iter().map(|v| Ok(from_object_meta(v))).collect(),
@@ -747,7 +748,7 @@ impl ObjectStore for ObjectStoreClient {
     ) -> object_store::Result<object_store::ListResult> {
         let res = self
             .client
-            .list_with_delimiter(prefix.cloned())
+            .list_with_delimiter(prefix)
             .await
             .map_err(from_error)?;
 

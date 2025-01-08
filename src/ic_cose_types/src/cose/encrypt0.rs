@@ -16,7 +16,7 @@ pub fn cose_encrypt0(
     payload: &[u8], // plain payload
     secret: &[u8; 32],
     aad: &[u8],
-    nonce: [u8; 12],
+    nonce: &[u8; 12],
     key_id: Option<Vec<u8>>,
 ) -> Result<Vec<u8>, String> {
     let protected = HeaderBuilder::new()
@@ -31,7 +31,7 @@ pub fn cose_encrypt0(
         .protected(protected)
         .unprotected(unprotected.build())
         .create_ciphertext(payload, aad, |plain_data, enc| {
-            aes256_gcm_encrypt(secret, &nonce, enc, plain_data).unwrap()
+            aes256_gcm_encrypt(secret, nonce, enc, plain_data).unwrap()
         })
         .build();
     e0.to_tagged_vec().map_err(format_error)
@@ -54,7 +54,7 @@ pub fn cose_decrypt0(
     })
 }
 
-pub fn decrypt(item: CoseEncrypt0, secret: &[u8; 32], aad: &[u8]) -> Result<Vec<u8>, String> {
+pub fn decrypt(item: &CoseEncrypt0, secret: &[u8; 32], aad: &[u8]) -> Result<Vec<u8>, String> {
     let nonce = item.unprotected.iv.first_chunk::<12>().ok_or_else(|| {
         format!(
             "invalid nonce length, expected 12, got {}",

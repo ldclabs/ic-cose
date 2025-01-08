@@ -1290,12 +1290,12 @@ mod test {
         assert!(object::create_multipart(path.clone()).is_err());
 
         let chunks: Vec<&[u8]> = payload.chunks(CHUNK_SIZE).collect();
-        for i in 1..chunks.len() {
+        for (i, chunk) in chunks.iter().enumerate().skip(1) {
             object::put_part(
                 path.clone(),
                 id.clone(),
                 i as u32,
-                ByteBuf::from(chunks[i].to_vec()),
+                ByteBuf::from(chunk.to_vec()),
             )
             .unwrap();
         }
