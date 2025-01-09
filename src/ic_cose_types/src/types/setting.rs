@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::validate_key;
+use crate::validate_str;
 
 pub const CHUNK_SIZE: u32 = 256 * 1024;
 pub const MAX_DEK_SIZE: u64 = 3 * 1024;
@@ -35,7 +35,7 @@ pub struct SettingPath {
 
 impl SettingPath {
     pub fn validate(&self) -> Result<(), String> {
-        validate_key(&self.ns)?;
+        validate_str(&self.ns)?;
         if self.key.is_empty() {
             return Err("key should not be empty".to_string());
         }
@@ -68,7 +68,7 @@ impl CreateSettingInput {
         }
         if let Some(ref tags) = self.tags {
             for (k, _) in tags.iter() {
-                validate_key(k)?;
+                validate_str(k)?;
             }
         }
         if let Some(ref dek) = self.dek {
@@ -103,7 +103,7 @@ impl UpdateSettingInfoInput {
         }
         if let Some(ref tags) = self.tags {
             for (k, _) in tags.iter() {
-                validate_key(k)?;
+                validate_str(k)?;
             }
         }
         Ok(())

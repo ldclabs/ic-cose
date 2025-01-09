@@ -2,7 +2,7 @@ use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{validate_key, validate_principals};
+use crate::{validate_principals, validate_str};
 
 pub const MAX_PAYLOAD_SIZE: u64 = 2_000_000; // 2MB
 
@@ -38,7 +38,7 @@ pub struct CreateNamespaceInput {
 
 impl CreateNamespaceInput {
     pub fn validate(&self) -> Result<(), String> {
-        validate_key(&self.name)?;
+        validate_str(&self.name)?;
         validate_principals(&self.managers)?;
         if let Some(max_payload_size) = self.max_payload_size {
             if max_payload_size == 0 {
@@ -107,7 +107,7 @@ pub struct NamespaceDelegatorsInput {
 
 impl NamespaceDelegatorsInput {
     pub fn validate(&self) -> Result<(), String> {
-        validate_key(&self.name)?;
+        validate_str(&self.name)?;
         validate_principals(&self.delegators)?;
         Ok(())
     }

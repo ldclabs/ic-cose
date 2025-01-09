@@ -7,7 +7,7 @@ use ic_cose_types::{
         ECDHInput, ECDHOutput, PublicKeyInput, PublicKeyOutput, SchnorrAlgorithm, SettingPath,
         SignIdentityInput, SignInput,
     },
-    validate_key, MILLISECONDS,
+    validate_str, MILLISECONDS,
 };
 use serde_bytes::{ByteArray, ByteBuf};
 
@@ -81,7 +81,7 @@ async fn schnorr_sign_identity(
     input: SignIdentityInput,
 ) -> Result<ByteBuf, String> {
     store::state::allowed_api("schnorr_sign_identity")?;
-    validate_key(&input.ns)?;
+    validate_str(&input.ns)?;
 
     let caller = ic_cdk::caller();
     let now_ms = ic_cdk::api::time() / MILLISECONDS;

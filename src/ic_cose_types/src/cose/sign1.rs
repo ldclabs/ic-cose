@@ -6,7 +6,15 @@ pub use iana::Algorithm::{EdDSA, ES256K};
 const ALG_ED25519: Algorithm = Algorithm::Assigned(EdDSA);
 const ALG_SECP256K1: Algorithm = Algorithm::Assigned(ES256K);
 
-/// algorithm: EdDSA | ES256K
+/// Creates a COSE_Sign1 structure with the given payload and algorithm.
+///
+/// # Arguments
+/// * `payload` - The data to be signed/protected
+/// * `alg` - The signing algorithm to use (EdDSA or ES256K)
+/// * `key_id` - Optional key identifier for the signing key
+///
+/// # Returns
+/// A CoseSign1 structure ready for signing
 pub fn cose_sign1(
     payload: Vec<u8>,
     alg: iana::Algorithm,
@@ -23,6 +31,17 @@ pub fn cose_sign1(
         .build())
 }
 
+/// Verifies and parses a COSE_Sign1 structure from bytes.
+///
+/// # Arguments
+/// * `sign1_bytes` - Raw COSE_Sign1 bytes to parse
+/// * `aad` - Additional authenticated data for verification
+/// * `secp256k1_pub_keys` - List of secp256k1 public keys for ECDSA verification
+/// * `ed25519_pub_keys` - List of Ed25519 public keys for EdDSA verification
+///
+/// # Returns
+/// Parsed CoseSign1 if verification succeeds with any provided key
+/// Error if parsing fails or no matching key verifies the signature
 pub fn cose_sign1_from(
     sign1_bytes: &[u8],
     aad: &[u8],
@@ -34,7 +53,7 @@ pub fn cose_sign1_from(
 
     match &cs1.protected.header.alg {
         Some(ALG_SECP256K1) if !secp256k1_pub_keys.is_empty() => {
-            k256::secp256k1_verify_any(secp256k1_pub_keys, &cs1.tbs_data(aad), &cs1.signature)?;
+            k256::secp256k1_verify_ecdsa_any(secp256k1_pub_keys, &cs1.tbs_data(aad), &cs1.signature)?;
         }
         Some(ALG_ED25519) if !ed25519_pub_keys.is_empty() => {
             ed25519::ed25519_verify_any(ed25519_pub_keys, &cs1.tbs_data(aad), &cs1.signature)?;

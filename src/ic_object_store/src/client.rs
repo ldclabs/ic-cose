@@ -1,10 +1,13 @@
-use aes_gcm::{aead::KeyInit, AeadInPlace, Aes256Gcm, Key, Nonce, Tag};
+use aes_gcm::{aead::KeyInit, Aes256Gcm, Key};
 use async_trait::async_trait;
 use candid::Principal;
 use chrono::DateTime;
 use futures::{stream::BoxStream, StreamExt, TryStreamExt};
 use ic_agent::Agent;
-use ic_cose_types::types::object_store::*;
+use ic_cose_types::{
+    cose::aes::{aes256_gcm_decrypt_in, aes256_gcm_encrypt_in},
+    types::object_store::*,
+};
 use object_store::{path::Path, MultipartUpload, ObjectStore};
 use serde_bytes::{ByteArray, ByteBuf, Bytes};
 use std::{collections::BTreeSet, ops::Range, sync::Arc};
@@ -16,6 +19,14 @@ use crate::{
 
 pub static STORE_NAME: &str = "ICObjectStore";
 
+/// Client for interacting with the IC Object Store canister.
+///
+/// Handles communication with the canister and optional AES-256 encryption.
+///
+/// # Fields
+/// - `agent`: IC agent for making calls to the canister
+/// - `canister`: Principal of the target canister
+/// - `cipher`: Optional AES-256-GCM cipher for encryption/decryption
 #[derive(Clone)]
 pub struct Client {
     agent: Arc<Agent>,
@@ -30,6 +41,7 @@ impl std::fmt::Debug for Client {
 }
 
 impl Client {
+    /// Creates a new Client instance with optional AES-256 encryption
     pub fn new(agent: Arc<Agent>, canister: Principal, aes_secret: Option<[u8; 32]>) -> Client {
         let cipher = aes_secret.map(|secret| {
             let key = Key::<Aes256Gcm>::from(secret);
@@ -43,16 +55,17 @@ impl Client {
         }
     }
 
+    /// Retrieves the current state of the object store
     pub async fn get_state(&self) -> Result<StateInfo, String> {
         query_call(&self.agent, &self.canister, "get_state", ()).await?
     }
 
-    /// the caller of agent should be canister controller
+    /// Adds managers to the canister (requires controller privileges)
     pub async fn admin_add_managers(&self, args: &BTreeSet<Principal>) -> Result<(), String> {
         update_call(&self.agent, &self.canister, "admin_add_managers", (args,)).await?
     }
 
-    /// the caller of agent should be canister controller
+    /// Removes managers from the canister (requires controller privileges)
     pub async fn admin_remove_managers(&self, args: &BTreeSet<Principal>) -> Result<(), String> {
         update_call(
             &self.agent,
@@ -63,12 +76,12 @@ impl Client {
         .await?
     }
 
-    /// the caller of agent should be canister controller
+    /// Adds auditors to the canister (requires controller privileges)
     pub async fn admin_add_auditors(&self, args: &BTreeSet<Principal>) -> Result<(), String> {
         update_call(&self.agent, &self.canister, "admin_add_auditors", (args,)).await?
     }
 
-    /// the caller of agent should be canister controller
+    /// Removes auditors from the canister (requires controller privileges)
     pub async fn admin_remove_auditors(&self, args: &BTreeSet<Principal>) -> Result<(), String> {
         update_call(
             &self.agent,
@@ -79,6 +92,7 @@ impl Client {
         .await?
     }
 
+    /// Stores data at specified path with options
     pub async fn put_opts(
         &self,
         path: &Path,
@@ -101,7 +115,11 @@ impl Client {
             let mut data = payload.to_vec();
             let mut aes_tags: Vec<ByteArray<16>> = Vec::new();
             for chunk in data.chunks_mut(CHUNK_SIZE) {
-                let tag = aes256_gcm_encrypt_in(cipher, &nonce, chunk)?;
+                let tag = aes256_gcm_encrypt_in(cipher, &nonce, &[], chunk).map_err(|err| {
+                    Error::Generic {
+                        error: format!("AES256 encrypt failed: {}", err),
+                    }
+                })?;
                 aes_tags.push(tag.into());
             }
             opts.aes_nonce = Some(nonce.into());
@@ -126,12 +144,14 @@ impl Client {
         res.map_err(|error| Error::Generic { error })?
     }
 
+    /// Deletes data at specified path
     pub async fn delete(&self, path: &Path) -> Result<()> {
         update_call(&self.agent, &self.canister, "delete", (path.as_ref(),))
             .await
             .map_err(|error| Error::Generic { error })?
     }
 
+    /// Copies data from one path to another
     pub async fn copy(&self, from: &Path, to: &Path) -> Result<()> {
         update_call(
             &self.agent,
@@ -143,6 +163,7 @@ impl Client {
         .map_err(|error| Error::Generic { error })?
     }
 
+    /// Copies data only if destination doesn't exist
     pub async fn copy_if_not_exists(&self, from: &Path, to: &Path) -> Result<()> {
         update_call(
             &self.agent,
@@ -154,6 +175,7 @@ impl Client {
         .map_err(|error| Error::Generic { error })?
     }
 
+    /// Renames/moves data from one path to another
     pub async fn rename(&self, from: &Path, to: &Path) -> Result<()> {
         update_call(
             &self.agent,
@@ -165,6 +187,7 @@ impl Client {
         .map_err(|error| Error::Generic { error })?
     }
 
+    /// Renames/moves data only if destination doesn't exist
     pub async fn rename_if_not_exists(&self, from: &Path, to: &Path) -> Result<()> {
         update_call(
             &self.agent,
@@ -176,6 +199,7 @@ impl Client {
         .map_err(|error| Error::Generic { error })?
     }
 
+    /// Initiates a multipart upload
     pub async fn create_multipart(&self, path: &Path) -> Result<MultipartId> {
         update_call(
             &self.agent,
@@ -187,6 +211,7 @@ impl Client {
         .map_err(|error| Error::Generic { error })?
     }
 
+    /// Uploads a part in a multipart upload
     pub async fn put_part(
         &self,
         path: &Path,
@@ -204,6 +229,7 @@ impl Client {
         .map_err(|error| Error::Generic { error })?
     }
 
+    /// Completes a multipart upload
     pub async fn complete_multipart(
         &self,
         path: &Path,
@@ -220,6 +246,7 @@ impl Client {
         .map_err(|error| Error::Generic { error })?
     }
 
+    /// Aborts a multipart upload
     pub async fn abort_multipart(&self, path: &Path, id: &MultipartId) -> Result<()> {
         update_call(
             &self.agent,
@@ -231,6 +258,7 @@ impl Client {
         .map_err(|error| Error::Generic { error })?
     }
 
+    /// Retrieves a specific part of data
     pub async fn get_part(&self, path: &Path, part_idx: usize) -> Result<ByteBuf> {
         query_call(
             &self.agent,
@@ -242,6 +270,7 @@ impl Client {
         .map_err(|error| Error::Generic { error })?
     }
 
+    /// Retrieves data with options (range, if_match, etc.)
     pub async fn get_opts(&self, path: &Path, mut opts: GetOptions) -> Result<GetResult> {
         if let Some(cipher) = &self.cipher {
             let range = opts.range.clone();
@@ -305,7 +334,16 @@ impl Client {
                     _ => {
                         let chunk = self.get_part(path, idx as usize).await?;
                         let mut chunk = chunk.into_vec();
-                        aes256_gcm_decrypt_in(cipher, nonce, &tags[idx as usize], &mut chunk)?;
+                        aes256_gcm_decrypt_in(
+                            cipher,
+                            nonce,
+                            &[],
+                            &mut chunk,
+                            tags[idx as usize].as_slice(),
+                        )
+                        .map_err(|err| Error::Generic {
+                            error: format!("AES256 decrypt failed: {}", err),
+                        })?;
                         buf.extend_from_slice(&chunk[chunk_start..chunk_end]);
                         chunk_cache = Some((idx, chunk));
                     }
@@ -327,6 +365,7 @@ impl Client {
         .map_err(|error| Error::Generic { error })?
     }
 
+    /// Retrieves multiple ranges of data
     pub async fn get_ranges(&self, path: &Path, ranges: &[(usize, usize)]) -> Result<Vec<ByteBuf>> {
         if ranges.is_empty() {
             return Ok(Vec::new());
@@ -371,7 +410,16 @@ impl Client {
                         _ => {
                             let chunk = self.get_part(path, idx as usize).await?;
                             let mut chunk = chunk.into_vec();
-                            aes256_gcm_decrypt_in(cipher, nonce, &tags[idx as usize], &mut chunk)?;
+                            aes256_gcm_decrypt_in(
+                                cipher,
+                                nonce,
+                                &[],
+                                &mut chunk,
+                                tags[idx as usize].as_slice(),
+                            )
+                            .map_err(|err| Error::Generic {
+                                error: format!("AES256 decrypt failed: {}", err),
+                            })?;
                             buf.extend_from_slice(&chunk[chunk_start..chunk_end]);
                             chunk_cache = Some((idx, chunk));
                         }
@@ -393,12 +441,14 @@ impl Client {
         .map_err(|error| Error::Generic { error })?
     }
 
+    /// Retrieves metadata for a path
     pub async fn head(&self, path: &Path) -> Result<ObjectMeta> {
         query_call(&self.agent, &self.canister, "head", (path.as_ref(),))
             .await
             .map_err(|error| Error::Generic { error })?
     }
 
+    /// Lists objects under a prefix
     pub async fn list(&self, prefix: Option<&Path>) -> Result<Vec<ObjectMeta>> {
         query_call(
             &self.agent,
@@ -410,6 +460,7 @@ impl Client {
         .map_err(|error| Error::Generic { error })?
     }
 
+    /// Lists objects with an offset
     pub async fn list_with_offset(
         &self,
         prefix: Option<&Path>,
@@ -425,6 +476,7 @@ impl Client {
         .map_err(|error| Error::Generic { error })?
     }
 
+    /// Lists objects with directory delimiter
     pub async fn list_with_delimiter(&self, prefix: Option<&Path>) -> Result<ListResult> {
         query_call(
             &self.agent,
@@ -437,6 +489,7 @@ impl Client {
     }
 }
 
+/// Handles multipart upload operations
 #[derive(Debug)]
 pub struct MultipartUploader {
     part_idx: usize,
@@ -445,6 +498,7 @@ pub struct MultipartUploader {
     state: Arc<UploadState>,
 }
 
+/// Internal state for tracking upload progress
 struct UploadState {
     client: Arc<Client>,
     path: Path,
@@ -459,6 +513,7 @@ impl std::fmt::Debug for UploadState {
 
 #[async_trait]
 impl MultipartUpload for MultipartUploader {
+    /// Adds a part to the upload, buffering until chunk size is reached
     fn put_part(&mut self, payload: object_store::PutPayload) -> object_store::UploadPart {
         let payload = bytes::Bytes::from(payload);
         self.parts_cache.extend_from_slice(&payload);
@@ -470,14 +525,21 @@ impl MultipartUpload for MultipartUploader {
         part.extend_from_slice(self.parts_cache.drain(..CHUNK_SIZE).as_slice());
 
         if let Some(cipher) = &self.state.client.cipher {
-            let tag =
-                aes256_gcm_encrypt_in(cipher, self.opts.aes_nonce.as_ref().unwrap(), &mut part);
+            let tag = aes256_gcm_encrypt_in(
+                cipher,
+                self.opts.aes_nonce.as_ref().unwrap(),
+                &[],
+                &mut part,
+            );
             match tag {
                 Ok(tag) => {
                     self.opts.aes_tags.as_mut().unwrap().push(tag.into());
                 }
                 Err(err) => {
-                    return Box::pin(futures::future::ready(Err(from_error(err))));
+                    return Box::pin(futures::future::ready(Err(object_store::Error::Generic {
+                        store: STORE_NAME,
+                        source: format!("AES256 encrypt failed: {}", err).into(),
+                    })));
                 }
             }
         }
@@ -495,6 +557,7 @@ impl MultipartUpload for MultipartUploader {
         })
     }
 
+    /// Finalizes the multipart upload and returns result
     async fn complete(&mut self) -> object_store::Result<object_store::PutResult> {
         for part in self.parts_cache.chunks_mut(CHUNK_SIZE) {
             let part_idx = self.part_idx;
@@ -502,13 +565,16 @@ impl MultipartUpload for MultipartUploader {
 
             if let Some(cipher) = &self.state.client.cipher {
                 let tag =
-                    aes256_gcm_encrypt_in(cipher, self.opts.aes_nonce.as_ref().unwrap(), part);
+                    aes256_gcm_encrypt_in(cipher, self.opts.aes_nonce.as_ref().unwrap(), &[], part);
                 match tag {
                     Ok(tag) => {
                         self.opts.aes_tags.as_mut().unwrap().push(tag.into());
                     }
                     Err(err) => {
-                        return Err(from_error(err));
+                        return Err(object_store::Error::Generic {
+                            store: STORE_NAME,
+                            source: format!("AES256 encrypt failed: {}", err).into(),
+                        });
                     }
                 }
             }
@@ -534,6 +600,7 @@ impl MultipartUpload for MultipartUploader {
         })
     }
 
+    /// Aborts the multipart upload and cleans up resources
     async fn abort(&mut self) -> object_store::Result<()> {
         self.state
             .client
@@ -543,6 +610,7 @@ impl MultipartUpload for MultipartUploader {
     }
 }
 
+/// Main client for interacting with the object store
 pub struct ObjectStoreClient {
     client: Arc<Client>,
 }
@@ -567,6 +635,7 @@ impl std::fmt::Debug for ObjectStoreClient {
 
 #[async_trait]
 impl ObjectStore for ObjectStoreClient {
+    /// Uploads an object with options
     async fn put_opts(
         &self,
         path: &Path,
@@ -586,6 +655,7 @@ impl ObjectStore for ObjectStoreClient {
         })
     }
 
+    /// Initiates a multipart upload with options
     async fn put_multipart_opts(
         &self,
         path: &Path,
@@ -623,6 +693,7 @@ impl ObjectStore for ObjectStoreClient {
         }))
     }
 
+    /// Retrieves an object with options
     async fn get_opts(
         &self,
         location: &Path,
@@ -662,6 +733,7 @@ impl ObjectStore for ObjectStoreClient {
         Ok(res)
     }
 
+    /// Retrieves a byte range from an object
     async fn get_range(
         &self,
         path: &Path,
@@ -675,6 +747,7 @@ impl ObjectStore for ObjectStoreClient {
         })
     }
 
+    /// Retrieves multiple byte ranges from an object
     async fn get_ranges(
         &self,
         location: &Path,
@@ -693,15 +766,18 @@ impl ObjectStore for ObjectStoreClient {
             .collect())
     }
 
+    /// Retrieves object metadata
     async fn head(&self, location: &Path) -> object_store::Result<object_store::ObjectMeta> {
         let res = self.client.head(location).await.map_err(from_error)?;
         Ok(from_object_meta(res))
     }
 
+    /// Deletes an object
     async fn delete(&self, location: &Path) -> object_store::Result<()> {
         self.client.delete(location).await.map_err(from_error)
     }
 
+    /// Lists objects under a prefix
     fn list(
         &self,
         prefix: Option<&Path>,
@@ -721,6 +797,7 @@ impl ObjectStore for ObjectStoreClient {
         .boxed()
     }
 
+    /// Lists objects starting from an offset
     fn list_with_offset(
         &self,
         prefix: Option<&Path>,
@@ -742,6 +819,7 @@ impl ObjectStore for ObjectStoreClient {
         .boxed()
     }
 
+    /// Lists objects with directory delimiter
     async fn list_with_delimiter(
         &self,
         prefix: Option<&Path>,
@@ -758,10 +836,12 @@ impl ObjectStore for ObjectStoreClient {
         })
     }
 
+    /// Copies an object to a new location
     async fn copy(&self, from: &Path, to: &Path) -> object_store::Result<()> {
         self.client.copy(from, to).await.map_err(from_error)
     }
 
+    /// Copies an object only if destination doesn't exist
     async fn copy_if_not_exists(&self, from: &Path, to: &Path) -> object_store::Result<()> {
         self.client
             .copy_if_not_exists(from, to)
@@ -769,10 +849,12 @@ impl ObjectStore for ObjectStoreClient {
             .map_err(from_error)
     }
 
+    /// Renames an object
     async fn rename(&self, from: &Path, to: &Path) -> object_store::Result<()> {
         self.client.rename(from, to).await.map_err(from_error)
     }
 
+    /// Renames an object only if destination doesn't exist
     async fn rename_if_not_exists(&self, from: &Path, to: &Path) -> object_store::Result<()> {
         self.client
             .rename_if_not_exists(from, to)
@@ -781,6 +863,10 @@ impl ObjectStore for ObjectStoreClient {
     }
 }
 
+/// Converts custom Error type to object_store::Error
+///
+/// Maps each error variant to its corresponding object_store error,
+/// preserving relevant context like path and error message.
 pub fn from_error(err: Error) -> object_store::Error {
     match err {
         Error::Generic { error } => object_store::Error::Generic {
@@ -829,6 +915,13 @@ pub fn from_error(err: Error) -> object_store::Error {
     }
 }
 
+/// Converts internal ObjectMeta to object_store::ObjectMeta
+///
+/// # Arguments
+/// * `val` - The source ObjectMeta to convert
+///
+/// # Returns
+/// Converted object_store::ObjectMeta with equivalent fields
 pub fn from_object_meta(val: ObjectMeta) -> object_store::ObjectMeta {
     object_store::ObjectMeta {
         location: val.location.into(),
@@ -840,6 +933,13 @@ pub fn from_object_meta(val: ObjectMeta) -> object_store::ObjectMeta {
     }
 }
 
+/// Converts object_store::GetRange to internal GetRange format
+///
+/// # Arguments
+/// * `val` - The source GetRange to convert
+///
+/// # Returns
+/// Converted GetRange with equivalent range type and values
 pub fn to_get_range(val: object_store::GetRange) -> GetRange {
     match val {
         object_store::GetRange::Bounded(v) => GetRange::Bounded(v.start, v.end),
@@ -848,6 +948,10 @@ pub fn to_get_range(val: object_store::GetRange) -> GetRange {
     }
 }
 
+/// Converts internal Attribute to object_store::Attribute
+///
+/// Maps each attribute variant to its corresponding object_store attribute,
+/// handling metadata conversion as well.
 pub fn from_attribute(val: Attribute) -> object_store::Attribute {
     match val {
         Attribute::ContentDisposition => object_store::Attribute::ContentDisposition,
@@ -859,6 +963,13 @@ pub fn from_attribute(val: Attribute) -> object_store::Attribute {
     }
 }
 
+/// Converts object_store::Attribute to internal Attribute type
+///
+/// Maps standard object store attributes to internal representation,
+/// handling metadata conversion as well.
+///
+/// # Panics
+/// Will panic if an unexpected attribute variant is encountered
 pub fn to_attribute(val: &object_store::Attribute) -> Attribute {
     match val {
         object_store::Attribute::ContentDisposition => Attribute::ContentDisposition,
@@ -871,6 +982,10 @@ pub fn to_attribute(val: &object_store::Attribute) -> Attribute {
     }
 }
 
+/// Converts object_store::PutOptions to internal PutOptions format
+///
+/// Maps standard object store put options to internal representation,
+/// handling mode, tags, and attributes conversion.
 pub fn to_put_options(opts: &object_store::PutOptions) -> PutOptions {
     let mode: PutMode = match opts.mode {
         object_store::PutMode::Overwrite => PutMode::Overwrite,
@@ -890,32 +1005,6 @@ pub fn to_put_options(opts: &object_store::PutOptions) -> PutOptions {
             .collect(),
         ..Default::default()
     }
-}
-
-fn aes256_gcm_encrypt_in(
-    cipher: &Arc<Aes256Gcm>,
-    nonce: &[u8; 12],
-    buf: &mut [u8],
-) -> Result<[u8; 16]> {
-    let tag = cipher
-        .encrypt_in_place_detached(Nonce::from_slice(nonce), &[], buf)
-        .map_err(|err| Error::Generic {
-            error: format!("AES256 encrypt failed: {}", err),
-        })?;
-    Ok(tag.into())
-}
-
-fn aes256_gcm_decrypt_in(
-    cipher: &Arc<Aes256Gcm>,
-    nonce: &[u8; 12],
-    tag: &[u8; 16],
-    data: &mut [u8],
-) -> Result<()> {
-    cipher
-        .decrypt_in_place_detached(Nonce::from_slice(nonce), &[], data, Tag::from_slice(tag))
-        .map_err(|err| Error::Generic {
-            error: format!("AES256 decrypt failed: {}", err),
-        })
 }
 
 #[cfg(test)]

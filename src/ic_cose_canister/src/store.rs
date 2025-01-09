@@ -1205,7 +1205,7 @@ pub mod ns {
                     if setting.version != spk.4 {
                         Err("version mismatch".to_string())?;
                     }
-                    if setting.status == 1 {
+                    if setting.status >= 1 {
                         Err("readonly setting can not be updated".to_string())?;
                     }
 
@@ -1234,7 +1234,7 @@ pub mod ns {
                     if setting.version != spk.4 {
                         Err("version mismatch".to_string())?;
                     }
-                    if setting.status == 1 {
+                    if setting.status >= 1 {
                         Err("readonly setting can not be deleted".to_string())?;
                     }
 
@@ -1285,7 +1285,7 @@ pub mod ns {
                     if setting.version != spk.4 {
                         Err("version mismatch".to_string())?;
                     }
-                    if setting.status == 1 {
+                    if setting.status >= 1 {
                         Err("readonly setting can not be updated".to_string())?;
                     }
 

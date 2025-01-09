@@ -2,6 +2,16 @@ use super::format_error;
 
 pub use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
 
+/// Verifies an Ed25519 signature using the provided public key.
+///
+/// # Arguments
+/// * `public_key` - 32-byte Ed25519 public key
+/// * `message` - The message that was signed
+/// * `signature` - 64-byte Ed25519 signature to verify
+///
+/// # Returns
+/// * `Ok(())` if the signature is valid
+/// * `Err(String)` with error message if verification fails
 pub fn ed25519_verify(
     public_key: &[u8; 32],
     message: &[u8],
@@ -16,6 +26,16 @@ pub fn ed25519_verify(
     }
 }
 
+/// Verifies an Ed25519 signature against multiple public keys.
+///
+/// # Arguments
+/// * `public_keys` - List of Ed25519 public keys to try
+/// * `message` - The message that was signed
+/// * `signature` - 64-byte Ed25519 signature to verify
+///
+/// # Returns
+/// * `Ok(())` if any key verifies the signature
+/// * `Err(String)` if no key verifies the signature
 pub fn ed25519_verify_any(
     public_keys: &[VerifyingKey],
     message: &[u8],

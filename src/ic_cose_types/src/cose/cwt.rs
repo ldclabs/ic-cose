@@ -6,6 +6,19 @@ pub use coset::cwt::*;
 const CLOCK_SKEW: i64 = 5 * 60; // 5 minutes
 pub static SCOPE_NAME: ClaimName = ClaimName::Assigned(iana::CwtClaimName::Scope);
 
+/// Parses and validates a CWT (CBOR Web Token) from raw bytes.
+///
+/// # Arguments
+/// * `data` - Raw CBOR-encoded CWT data
+/// * `now_sec` - Current timestamp in seconds for validation
+///
+/// # Returns
+/// * `Ok(ClaimsSet)` if token is valid
+/// * `Err(String)` if token is invalid or expired
+///
+/// # Validation
+/// * Checks expiration time (exp) with 5-minute clock skew
+/// * Checks not-before time (nbf) with 5-minute clock skew
 pub fn cwt_from(data: &[u8], now_sec: i64) -> Result<ClaimsSet, String> {
     let claims = ClaimsSet::from_slice(data).map_err(|err| format!("invalid claims: {}", err))?;
     if let Some(ref exp) = claims.expiration_time {
@@ -30,6 +43,14 @@ pub fn cwt_from(data: &[u8], now_sec: i64) -> Result<ClaimsSet, String> {
     Ok(claims)
 }
 
+/// Extracts scope claim from CWT claims set.
+///
+/// # Arguments
+/// * `claims` - CWT claims set to search
+///
+/// # Returns
+/// * `Ok(String)` with scope value if found and valid
+/// * `Err(String)` if scope is missing or invalid
 pub fn get_scope(claims: &ClaimsSet) -> Result<String, String> {
     let scope = claims
         .rest

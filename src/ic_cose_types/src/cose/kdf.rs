@@ -2,7 +2,18 @@ use coset::{iana, CborSerializable, CoseKdfContextBuilder, HeaderBuilder, SuppPu
 use hkdf::Hkdf;
 use sha2::Sha256;
 
-// HKDF-SHA-256
+/// Derives a key using HKDF-SHA-256 (RFC 5869)
+///
+/// # Arguments
+/// * `secret` - Input keying material (IKM)
+/// * `salt` - Optional salt value (can improve security)
+/// * `info` - Context and application specific information
+///
+/// # Returns
+/// Derived key of length `N` bytes
+///
+/// # Panics
+/// If HKDF expansion fails (e.g., output length too large)
 pub fn hkdf256<const N: usize>(secret: &[u8], salt: Option<&[u8]>, info: &[u8]) -> [u8; N] {
     let mut output = [0u8; N];
     let hkdf = Hkdf::<Sha256>::new(salt, secret);
@@ -10,9 +21,20 @@ pub fn hkdf256<const N: usize>(secret: &[u8], salt: Option<&[u8]>, info: &[u8]) 
     output
 }
 
-// HKDF-SHA-256 with Context Information Structure
-// https://datatracker.ietf.org/doc/html/rfc9053#name-context-information-structu
-pub fn derive_aesgcm256_secret(secret: &[u8], salt: Option<&[u8]>) -> [u8; 32] {
+/// Derives a 256-bit key for AES-GCM using HKDF-SHA-256 with COSE context
+/// 
+/// https://datatracker.ietf.org/doc/html/rfc9053#name-context-information-structu
+///
+/// # Arguments
+/// * `secret` - Input key material (IKM)
+/// * `salt` - Optional salt value (can improve security)
+///
+/// # Returns
+/// 32-byte derived key suitable for AES-256-GCM
+///
+/// # Panics
+/// If context serialization or HKDF expansion fails
+pub fn derive_a256gcm_key(secret: &[u8], salt: Option<&[u8]>) -> [u8; 32] {
     let ctx = CoseKdfContextBuilder::new()
         .algorithm(iana::Algorithm::A256GCM)
         .supp_pub_info(

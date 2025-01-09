@@ -14,23 +14,33 @@ pub use cose::format_error;
 pub static ANONYMOUS: Principal = Principal::anonymous();
 pub const MILLISECONDS: u64 = 1_000_000u64;
 
-// to_cbor_bytes returns the CBOR encoding of the given object that implements the Serialize trait.
+/// Converts a serializable object to CBOR-encoded bytes
+///
+/// # Arguments
+/// * `obj` - A reference to any type implementing Serialize trait
+///
+/// # Returns
+/// Vec<u8> containing the CBOR-encoded data
+///
+/// # Panics
+/// Panics if CBOR serialization fails
 pub fn to_cbor_bytes(obj: &impl Serialize) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::new();
     into_writer(obj, &mut buf).expect("failed to encode in CBOR format");
     buf
 }
 
-/// Validates namespace
+/// Validates a string against naming conventions
 ///
-/// # Arguments
-/// * `s` - A string slice that holds the name to be validated.
+/// # Rules
+/// - Must not be empty
+/// - Length must be ≤ 64 characters
+/// - Can only contain: lowercase letters (a-z), digits (0-9), and underscores (_)
 ///
 /// # Returns
-/// * `Ok(())` if the name only contains valid characters (a-z, 0-9, '_').
-/// * `Err(String)` if the name is empty or contains invalid characters.
-///
-pub fn validate_key(s: &str) -> Result<(), String> {
+/// - Ok(()) if valid
+/// - Err(String) with error message if invalid
+pub fn validate_str(s: &str) -> Result<(), String> {
     if s.is_empty() {
         return Err("empty string".to_string());
     }
@@ -47,6 +57,15 @@ pub fn validate_key(s: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Validates a set of principals
+///
+/// # Rules
+/// - Set must not be empty
+/// - Set must not contain anonymous principal
+///
+/// # Returns
+/// - Ok(()) if valid
+/// - Err(String) with error message if invalid
 pub fn validate_principals(principals: &BTreeSet<Principal>) -> Result<(), String> {
     if principals.is_empty() {
         return Err("principals cannot be empty".to_string());
@@ -57,12 +76,16 @@ pub fn validate_principals(principals: &BTreeSet<Principal>) -> Result<(), Strin
     Ok(())
 }
 
+/// A smart pointer that can hold either a reference or an owned value
 pub enum OwnedRef<'a, T> {
+    /// Holds a reference to a value
     Ref(&'a T),
+    /// Holds an owned value
     Owned(T),
 }
 
 impl<T> AsRef<T> for OwnedRef<'_, T> {
+    /// Returns a reference to the contained value
     fn as_ref(&self) -> &T {
         match self {
             OwnedRef::Ref(r) => r,
@@ -74,6 +97,7 @@ impl<T> AsRef<T> for OwnedRef<'_, T> {
 impl<T> Deref for OwnedRef<'_, T> {
     type Target = T;
 
+    /// Dereferences to the contained value
     fn deref(&self) -> &Self::Target {
         match self {
             OwnedRef::Ref(r) => r,

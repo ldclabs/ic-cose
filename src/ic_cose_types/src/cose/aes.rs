@@ -2,6 +2,17 @@ use aes_gcm::{aead::KeyInit, AeadInPlace, Aes256Gcm, Key, Nonce, Tag};
 
 use super::format_error;
 
+/// Encrypts data using AES-256-GCM algorithm.
+///
+/// # Arguments
+/// * `key` - 32-byte encryption key
+/// * `nonce` - 12-byte nonce (unique value for each encryption)
+/// * `aad` - Additional authenticated data (optional)
+/// * `plain_data` - Data to be encrypted
+///
+/// # Returns
+/// Encrypted data with appended authentication tag (16 bytes) on success,
+/// or error message if encryption fails.
 pub fn aes256_gcm_encrypt(
     key: &[u8; 32],
     nonce: &[u8; 12],
@@ -17,6 +28,16 @@ pub fn aes256_gcm_encrypt(
     Ok(buf)
 }
 
+/// Decrypts data using AES-256-GCM algorithm.
+///
+/// # Arguments
+/// * `key` - 32-byte decryption key
+/// * `nonce` - 12-byte nonce (must match encryption nonce)
+/// * `aad` - Additional authenticated data (must match encryption aad)
+/// * `cipher_data` - Encrypted data with appended authentication tag
+///
+/// # Returns
+/// Decrypted data on success, or error message if decryption fails
 pub fn aes256_gcm_decrypt(
     key: &[u8; 32],
     nonce: &[u8; 12],
@@ -33,7 +54,17 @@ pub fn aes256_gcm_decrypt(
     Ok(buf)
 }
 
-fn aes256_gcm_encrypt_in(
+/// Encrypts data in-place using AES-256-GCM.
+///
+/// # Arguments
+/// * `cipher` - Initialized AES-256-GCM cipher
+/// * `nonce` - 12-byte unique value
+/// * `aad` - Additional authenticated data
+/// * `data` - Mutable buffer containing plaintext (will be overwritten with ciphertext)
+///
+/// # Returns
+/// Authentication tag (16 bytes) on success, or error message
+pub fn aes256_gcm_encrypt_in(
     cipher: &Aes256Gcm,
     nonce: &[u8; 12],
     aad: &[u8],
@@ -45,7 +76,18 @@ fn aes256_gcm_encrypt_in(
     Ok(tag.into())
 }
 
-fn aes256_gcm_decrypt_in(
+/// Decrypts data in-place using AES-256-GCM.
+///
+/// # Arguments
+/// * `cipher` - Initialized AES-256-GCM cipher
+/// * `nonce` - 12-byte nonce (must match encryption nonce)
+/// * `aad` - Additional authenticated data (must match encryption aad)
+/// * `data` - Mutable buffer containing ciphertext (will be overwritten with plaintext)
+/// * `tag` - 16-byte authentication tag
+///
+/// # Returns
+/// Unit on success, or error message if decryption fails
+pub fn aes256_gcm_decrypt_in(
     cipher: &Aes256Gcm,
     nonce: &[u8; 12],
     aad: &[u8],

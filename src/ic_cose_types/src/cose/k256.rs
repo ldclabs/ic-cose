@@ -5,7 +5,16 @@ use k256::ecdsa::signature::hazmat::PrehashVerifier;
 
 pub use k256::{ecdsa, schnorr};
 
-pub fn secp256k1_verify(
+/// Verifies an ECDSA signature using secp256k1 curve.
+///
+/// # Arguments
+/// * `public_key` - SEC1 encoded public key bytes
+/// * `message_hash` - 32-byte message hash to verify
+/// * `signature` - ECDSA signature bytes
+///
+/// # Returns
+/// Ok(()) if verification succeeds, Err(String) with error message otherwise
+pub fn secp256k1_verify_ecdsa(
     public_key: &[u8],
     message_hash: &[u8],
     signature: &[u8],
@@ -21,7 +30,16 @@ pub fn secp256k1_verify(
     }
 }
 
-pub fn secp256k1_verify_any(
+/// Verifies ECDSA signature against multiple public keys.
+///
+/// # Arguments
+/// * `public_keys` - List of SEC1 encoded public keys
+/// * `message_hash` - 32-byte message hash to verify
+/// * `signature` - ECDSA signature bytes
+///
+/// # Returns
+/// Ok(()) if any key verifies the signature, Err(String) otherwise
+pub fn secp256k1_verify_ecdsa_any(
     public_keys: &[ecdsa::VerifyingKey],
     message_hash: &[u8],
     signature: &[u8],
@@ -40,7 +58,16 @@ pub fn secp256k1_verify_any(
     }
 }
 
-pub fn schnorr_secp256k1_verify(
+/// Verifies BIP-340 Schnorr signature using secp256k1 curve.
+///
+/// # Arguments
+/// * `public_key` - Public key in bytes (33 bytes with prefix or 32 bytes raw)
+/// * `message` - Message to verify (raw bytes)
+/// * `signature` - Signature to verify (64 bytes)
+///
+/// # Returns
+/// Ok(()) if verification succeeds, Err(String) with error message otherwise
+pub fn secp256k1_verify_bip340(
     public_key: &[u8],
     message: &[u8],
     signature: &[u8],
@@ -58,7 +85,16 @@ pub fn schnorr_secp256k1_verify(
     }
 }
 
-pub fn schnorr_secp256k1_verify_any(
+/// Verifies BIP-340 Schnorr signature against multiple public keys.
+///
+/// # Arguments
+/// * `public_keys` - List of BIP-340 public keys
+/// * `message` - Raw message bytes to verify
+/// * `signature` - 64-byte signature to verify
+///
+/// # Returns
+/// Ok(()) if any key verifies the signature, Err(String) otherwise
+pub fn secp256k1_verify_bip340_any(
     public_keys: &[schnorr::VerifyingKey],
     message: &[u8],
     signature: &[u8],
@@ -98,11 +134,11 @@ mod test {
         let message =
             decode("6233976850d2fc6ab653306b332dde4389a4e87b79d521a331683cf90102c478").unwrap();
         let signature = decode("f17f8cb96a9e8845a3fd9a33fee76d9c54c1949b16ca23537d4f6f75a07ecdd355dd7ac662b9ae7a2d779ea6cb1ad399240f450024eef46d6e6ab1493fe1eb95").unwrap();
-        assert!(secp256k1_verify(&pk, &message, &signature).is_ok());
+        assert!(secp256k1_verify_ecdsa(&pk, &message, &signature).is_ok());
 
         let signature = decode("6d8983dbeaf2977d2a41d69e0a6fb46b51fb7c1616a8ddd8bb948e1b08bb10e31eee92ef0f8b44ff62f231e6afd7f443a132414d431b57a6ce6dd23ffac8f878").unwrap();
-        assert!(secp256k1_verify(&pk, &message, &signature).is_ok());
-        assert!(schnorr_secp256k1_verify(&pk, &message, &signature).is_err());
+        assert!(secp256k1_verify_ecdsa(&pk, &message, &signature).is_ok());
+        assert!(secp256k1_verify_bip340(&pk, &message, &signature).is_err());
     }
 
     #[test]
@@ -124,7 +160,7 @@ mod test {
         let message =
             decode("6233976850d2fc6ab653306b332dde4389a4e87b79d521a331683cf90102c478").unwrap();
         let signature = decode("a45e4cb08af0dd0eecc1afe26d6d65fc86de0fac1a5e81fb9e85f776afafb3165278ca25ddc3f53114bae8e42938cedbc3bdcbd423ce5cb8104a8c0c46b4c17b").unwrap();
-        assert!(schnorr_secp256k1_verify(&pk, &message, &signature).is_ok());
-        assert!(secp256k1_verify(&pk, &message, &signature).is_err());
+        assert!(secp256k1_verify_bip340(&pk, &message, &signature).is_ok());
+        assert!(secp256k1_verify_ecdsa(&pk, &message, &signature).is_err());
     }
 }

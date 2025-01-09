@@ -1,5 +1,15 @@
 pub use x25519_dalek::{PublicKey, SharedSecret, StaticSecret};
 
+/// Performs X25519 Elliptic Curve Diffie-Hellman key exchange.
+///
+/// # Arguments
+/// * `secret` - 32-byte private key
+/// * `their_public` - 32-byte public key of the other party
+///
+/// # Returns
+/// A tuple containing:
+/// * Shared secret for symmetric encryption
+/// * Public key corresponding to the input secret
 pub fn ecdh_x25519(secret: [u8; 32], their_public: [u8; 32]) -> (SharedSecret, PublicKey) {
     let secret = StaticSecret::from(secret);
     let public = PublicKey::from(&secret);
