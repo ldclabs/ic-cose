@@ -4,6 +4,9 @@ use rand::RngCore;
 pub mod agent;
 pub mod client;
 
+pub use agent::*;
+pub use client::*;
+
 /// Generates an array of random bytes of specified size.
 ///
 /// # Examples

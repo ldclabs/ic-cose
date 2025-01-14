@@ -8,9 +8,10 @@ use ic_cose_types::{
     cose::aes::{aes256_gcm_decrypt_in, aes256_gcm_encrypt_in},
     types::object_store::*,
 };
-use object_store::{path::Path, MultipartUpload, ObjectStore};
 use serde_bytes::{ByteArray, ByteBuf, Bytes};
 use std::{collections::BTreeSet, ops::Range, sync::Arc};
+
+pub use object_store::{self, path::Path, DynObjectStore, MultipartUpload, ObjectStore};
 
 use crate::{
     agent::{query_call, update_call},
@@ -611,6 +612,7 @@ impl MultipartUpload for MultipartUploader {
 }
 
 /// Main client for interacting with the object store
+#[derive(Clone)]
 pub struct ObjectStoreClient {
     client: Arc<Client>,
 }
@@ -896,11 +898,11 @@ pub fn from_error(err: Error) -> object_store::Error {
             source: error.into(),
         },
         Error::NotImplemented => object_store::Error::NotImplemented,
-        Error::PermissionDenied { path, error } => object_store::Error::PermissionDenied {
+        Error::PermissionDenied { path, error } => object_store::Error::Precondition {
             path,
             source: error.into(),
         },
-        Error::Unauthenticated { path, error } => object_store::Error::Unauthenticated {
+        Error::Unauthenticated { path, error } => object_store::Error::Precondition {
             path,
             source: error.into(),
         },
@@ -1089,11 +1091,11 @@ mod tests {
         assert_eq!(res.meta.size, payload.len());
         let res = match res.payload {
             object_store::GetResultPayload::Stream(mut stream) => {
-                let mut buf = Vec::new();
+                let mut buf = bytes::BytesMut::new();
                 while let Some(data) = stream.next().await {
                     buf.extend_from_slice(&data.unwrap());
                 }
-                buf
+                buf.freeze() // Convert to immutable Bytes
             }
             _ => panic!("unexpected payload"),
         };
