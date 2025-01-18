@@ -162,6 +162,26 @@ fn namespace_remove_users(namespace: String, args: BTreeSet<Principal>) -> Resul
     })
 }
 
+#[ic_cdk::query(guard = "is_authenticated")]
+fn namespace_is_member(
+    namespace: String,
+    member_kind: String,
+    user: Principal,
+) -> Result<bool, String> {
+    let caller = ic_cdk::caller();
+    store::ns::with(&namespace, |ns| {
+        if !ns.can_read_namespace(&caller) {
+            Err("no permission".to_string())?;
+        }
+        match member_kind.as_str() {
+            "manager" => Ok(ns.managers.contains(&user)),
+            "auditor" => Ok(ns.auditors.contains(&user)),
+            "user" => Ok(ns.users.contains(&user)),
+            _ => Err(format!("invalid member kind: {}", member_kind)),
+        }
+    })
+}
+
 const MIN_CYCLES: u128 = 1_000_000_000_000;
 
 #[ic_cdk::update(guard = "is_authenticated")]

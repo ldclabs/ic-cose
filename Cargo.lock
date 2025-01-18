@@ -247,9 +247,9 @@ dependencies = [
 
 [[package]]
 name = "bitflags"
-version = "2.7.0"
+version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1be3f42a67d6d345ecd59f675f3f012d6974981560836e938c22b424b85ce1be"
+checksum = "8f68f53c83ab957f72c32642f3868eec03eb974d1fb82e453128456482613d36"
 
 [[package]]
 name = "block-buffer"
@@ -324,9 +324,9 @@ dependencies = [
 
 [[package]]
 name = "candid"
-version = "0.10.11"
+version = "0.10.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d04aa85a9ba2542bded33d1eff0ffb17cb98b1be8117e0a25e1ad8c62bedc881"
+checksum = "51e129c4051c57daf943586e01ef72faae48b04a8f692d5f646febf17a264c38"
 dependencies = [
  "anyhow",
  "binread",
@@ -359,9 +359,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.9"
+version = "1.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8293772165d9345bdaaa39b45b2109591e63fe5e6fbc23c6ff930a048aa310b"
+checksum = "13208fcbb66eaeffe09b99fffbe1af420f00a7b35aa99ad683dfc1aa76145229"
 dependencies = [
  "shlex",
 ]
@@ -664,9 +664,9 @@ dependencies = [
 
 [[package]]
 name = "data-encoding"
-version = "2.6.0"
+version = "2.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8566979429cf69b49a5c740c60791108e86440e8be149bbea4fe54d2c32d6e2"
+checksum = "0e60eed09d8c01d3cee5b7d30acb059b76614c918fa0f992e0dd6eeb10daad6f"
 
 [[package]]
 name = "der"
@@ -1943,7 +1943,7 @@ dependencies = [
 
 [[package]]
 name = "ic_cose"
-version = "0.6.6"
+version = "0.6.7"
 dependencies = [
  "async-trait",
  "candid",
@@ -1956,7 +1956,7 @@ dependencies = [
 
 [[package]]
 name = "ic_cose_canister"
-version = "0.6.6"
+version = "0.6.7"
 dependencies = [
  "candid",
  "ciborium",
@@ -1977,7 +1977,7 @@ dependencies = [
 
 [[package]]
 name = "ic_cose_types"
-version = "0.6.6"
+version = "0.6.7"
 dependencies = [
  "aes-gcm",
  "candid",
@@ -2001,7 +2001,7 @@ dependencies = [
 
 [[package]]
 name = "ic_object_store"
-version = "0.6.6"
+version = "0.6.7"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -2020,7 +2020,7 @@ dependencies = [
 
 [[package]]
 name = "ic_object_store_canister"
-version = "0.6.6"
+version = "0.6.7"
 dependencies = [
  "candid",
  "ciborium",
@@ -2047,22 +2047,38 @@ dependencies = [
 ]
 
 [[package]]
-name = "icrc-ledger-types"
-version = "0.1.6"
+name = "icrc-cbor"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "589f7f6b54df25295dd0ce2722d583c15e2ee7eec9cef58c10b424feb54561b2"
+checksum = "90569d2894d9536c5416943556ac6339df249f06611b3c41029196b39e0dd119"
+dependencies = [
+ "candid",
+ "minicbor",
+ "num-bigint",
+ "num-traits",
+]
+
+[[package]]
+name = "icrc-ledger-types"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6892e56ad2a8a08d2371b204103209ad335f63e9f0c1fcd00116d3df9e422a6f"
 dependencies = [
  "base32",
  "candid",
  "crc32fast",
  "hex",
+ "ic-stable-structures",
+ "icrc-cbor",
  "itertools 0.12.1",
+ "minicbor",
  "num-bigint",
  "num-traits",
  "serde",
  "serde_bytes",
  "sha2 0.10.8",
  "strum",
+ "strum_macros",
  "time",
 ]
 
@@ -2337,9 +2353,9 @@ dependencies = [
 
 [[package]]
 name = "log"
-version = "0.4.22"
+version = "0.4.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7a70ba024b9dc04c27ea2f0c0548feb474ec5c54bba33a7f72f873a39d07b24"
+checksum = "04cbf5b083de1c7e0222a7a51dbfdba1cbe1c6ab0b15e29fff3f6c077fd9cd9f"
 
 [[package]]
 name = "maplit"
@@ -2370,6 +2386,26 @@ name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
+
+[[package]]
+name = "minicbor"
+version = "0.19.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7005aaf257a59ff4de471a9d5538ec868a21586534fff7f85dd97d4043a6139"
+dependencies = [
+ "minicbor-derive",
+]
+
+[[package]]
+name = "minicbor-derive"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1154809406efdb7982841adb6311b3d095b46f78342dd646736122fe6b19e267"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
 
 [[package]]
 name = "miniz_oxide"

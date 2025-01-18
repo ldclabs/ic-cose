@@ -63,13 +63,14 @@ type PublicKeyInput = record { ns : text; derivation_path : vec blob };
 type PublicKeyOutput = record { public_key : blob; chain_code : blob };
 type Result = variant { Ok; Err : text };
 type Result_1 = variant { Ok : NamespaceInfo; Err : text };
-type Result_10 = variant { Ok : SignDelegationOutput; Err : text };
-type Result_11 = variant { Ok : nat; Err : text };
-type Result_12 = variant { Ok : CreateSettingOutput; Err : text };
-type Result_13 = variant { Ok : SettingInfo; Err : text };
-type Result_14 = variant { Ok : SettingArchivedPayload; Err : text };
-type Result_15 = variant { Ok : StateInfo; Err : text };
-type Result_16 = variant { Ok : text; Err : text };
+type Result_10 = variant { Ok : vec record { principal; blob }; Err : text };
+type Result_11 = variant { Ok : SignDelegationOutput; Err : text };
+type Result_12 = variant { Ok : nat; Err : text };
+type Result_13 = variant { Ok : CreateSettingOutput; Err : text };
+type Result_14 = variant { Ok : SettingInfo; Err : text };
+type Result_15 = variant { Ok : SettingArchivedPayload; Err : text };
+type Result_16 = variant { Ok : StateInfo; Err : text };
+type Result_17 = variant { Ok : text; Err : text };
 type Result_2 = variant { Ok : vec NamespaceInfo; Err : text };
 type Result_3 = variant { Ok : ECDHOutput; Err : text };
 type Result_4 = variant { Ok : PublicKeyOutput; Err : text };
@@ -77,7 +78,7 @@ type Result_5 = variant { Ok : blob; Err : text };
 type Result_6 = variant { Ok : SignedDelegation; Err : text };
 type Result_7 = variant { Ok : vec principal; Err : text };
 type Result_8 = variant { Ok : principal; Err : text };
-type Result_9 = variant { Ok : vec record { principal; blob }; Err : text };
+type Result_9 = variant { Ok : bool; Err : text };
 type SchnorrAlgorithm = variant { ed25519; bip340secp256k1 };
 type SettingArchivedPayload = record {
   dek : opt blob;
@@ -186,13 +187,16 @@ service : (opt InstallArgs) -> {
   namespace_get_delegators : (text, text) -> (Result_7) query;
   namespace_get_fixed_identity : (text, text) -> (Result_8) query;
   namespace_get_info : (text) -> (Result_1) query;
-  namespace_list_setting_keys : (text, bool, opt principal) -> (Result_9) query;
+  namespace_is_member : (text, text, principal) -> (Result_9) query;
+  namespace_list_setting_keys : (text, bool, opt principal) -> (
+      Result_10,
+    ) query;
   namespace_remove_auditors : (text, vec principal) -> (Result);
   namespace_remove_delegator : (NamespaceDelegatorsInput) -> (Result);
   namespace_remove_managers : (text, vec principal) -> (Result);
   namespace_remove_users : (text, vec principal) -> (Result);
-  namespace_sign_delegation : (SignDelegationInput) -> (Result_10);
-  namespace_top_up : (text, nat) -> (Result_11);
+  namespace_sign_delegation : (SignDelegationInput) -> (Result_11);
+  namespace_top_up : (text, nat) -> (Result_12);
   namespace_update_info : (UpdateNamespaceInput) -> (Result);
   schnorr_public_key : (SchnorrAlgorithm, opt PublicKeyInput) -> (
       Result_4,
@@ -200,23 +204,23 @@ service : (opt InstallArgs) -> {
   schnorr_sign : (SchnorrAlgorithm, SignInput) -> (Result_5);
   schnorr_sign_identity : (SchnorrAlgorithm, SignIdentityInput) -> (Result_5);
   setting_add_readers : (SettingPath, vec principal) -> (Result);
-  setting_create : (SettingPath, CreateSettingInput) -> (Result_12);
+  setting_create : (SettingPath, CreateSettingInput) -> (Result_13);
   setting_delete : (SettingPath) -> (Result);
-  setting_get : (SettingPath) -> (Result_13) query;
-  setting_get_archived_payload : (SettingPath) -> (Result_14) query;
-  setting_get_info : (SettingPath) -> (Result_13) query;
+  setting_get : (SettingPath) -> (Result_14) query;
+  setting_get_archived_payload : (SettingPath) -> (Result_15) query;
+  setting_get_info : (SettingPath) -> (Result_14) query;
   setting_remove_readers : (SettingPath, vec principal) -> (Result);
-  setting_update_info : (SettingPath, UpdateSettingInfoInput) -> (Result_12);
+  setting_update_info : (SettingPath, UpdateSettingInfoInput) -> (Result_13);
   setting_update_payload : (SettingPath, UpdateSettingPayloadInput) -> (
-      Result_12,
+      Result_13,
     );
-  state_get_info : () -> (Result_15) query;
-  validate2_admin_add_allowed_apis : (vec text) -> (Result_16);
-  validate2_admin_add_auditors : (vec principal) -> (Result_16);
-  validate2_admin_add_managers : (vec principal) -> (Result_16);
-  validate2_admin_remove_allowed_apis : (vec text) -> (Result_16);
-  validate2_admin_remove_auditors : (vec principal) -> (Result_16);
-  validate2_admin_remove_managers : (vec principal) -> (Result_16);
+  state_get_info : () -> (Result_16) query;
+  validate2_admin_add_allowed_apis : (vec text) -> (Result_17);
+  validate2_admin_add_auditors : (vec principal) -> (Result_17);
+  validate2_admin_add_managers : (vec principal) -> (Result_17);
+  validate2_admin_remove_allowed_apis : (vec text) -> (Result_17);
+  validate2_admin_remove_auditors : (vec principal) -> (Result_17);
+  validate2_admin_remove_managers : (vec principal) -> (Result_17);
   validate_admin_add_allowed_apis : (vec text) -> (Result);
   validate_admin_add_auditors : (vec principal) -> (Result);
   validate_admin_add_managers : (vec principal) -> (Result);

@@ -123,6 +123,12 @@ pub trait ObjectStoreSDK: CanisterCaller + Sized {
             .map_err(format_error)?
     }
 
+    async fn is_member(&self, member_kind: &str, user: &Principal) -> Result<bool, String> {
+        self.canister_query(self.canister(), "is_member", (member_kind, user))
+            .await
+            .map_err(format_error)?
+    }
+
     /// Adds managers to the canister (requires controller privileges)
     async fn admin_add_managers(&self, args: &BTreeSet<Principal>) -> Result<(), String> {
         self.canister_update(self.canister(), "admin_add_managers", (args,))

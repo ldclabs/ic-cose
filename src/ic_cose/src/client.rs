@@ -428,6 +428,21 @@ pub trait CoseSDK: CanisterCaller + Sized {
             .map_err(format_error)?
     }
 
+    async fn namespace_is_member(
+        &self,
+        namespace: &str,
+        kind: &str,
+        user: &Principal,
+    ) -> Result<bool, String> {
+        self.canister_query(
+            self.canister(),
+            "namespace_is_member",
+            (namespace, kind, user),
+        )
+        .await
+        .map_err(format_error)?
+    }
+
     async fn namespace_top_up(&self, namespace: &str, cycles: u128) -> Result<u128, String> {
         self.canister_update(self.canister(), "namespace_top_up", (namespace, cycles))
             .await

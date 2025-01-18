@@ -1,3 +1,4 @@
+use candid::Principal;
 use ic_cose_types::{types::object_store::*, MILLISECONDS};
 use object_store::path::Path;
 use serde_bytes::ByteBuf;
@@ -15,6 +16,15 @@ fn get_state() -> Result<StateInfo, String> {
             objects: s.locations.len() as u64,
             next_etag: s.next_etag,
         })
+    })
+}
+
+#[ic_cdk::query]
+fn is_member(member_kind: String, user: Principal) -> Result<bool, String> {
+    store::state::with(|s| match member_kind.as_str() {
+        "manager" => Ok(s.managers.contains(&user)),
+        "auditor" => Ok(s.auditors.contains(&user)),
+        _ => Err(format!("invalid member kind: {}", member_kind)),
     })
 }
 
