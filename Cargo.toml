@@ -15,7 +15,7 @@ strip = true
 opt-level = 's'
 
 [workspace.package]
-version = "0.6.5"
+version = "0.6.6"
 edition = "2021"
 repository = "https://github.com/ldclabs/ic-cose"
 keywords = ["config", "cbor", "canister", "icp", "encryption"]

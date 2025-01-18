@@ -1943,8 +1943,9 @@ dependencies = [
 
 [[package]]
 name = "ic_cose"
-version = "0.6.5"
+version = "0.6.6"
 dependencies = [
+ "async-trait",
  "candid",
  "ic-agent",
  "ic_cose_types",
@@ -1955,7 +1956,7 @@ dependencies = [
 
 [[package]]
 name = "ic_cose_canister"
-version = "0.6.5"
+version = "0.6.6"
 dependencies = [
  "candid",
  "ciborium",
@@ -1976,7 +1977,7 @@ dependencies = [
 
 [[package]]
 name = "ic_cose_types"
-version = "0.6.5"
+version = "0.6.6"
 dependencies = [
  "aes-gcm",
  "candid",
@@ -2000,7 +2001,7 @@ dependencies = [
 
 [[package]]
 name = "ic_object_store"
-version = "0.6.5"
+version = "0.6.6"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -2019,7 +2020,7 @@ dependencies = [
 
 [[package]]
 name = "ic_object_store_canister"
-version = "0.6.5"
+version = "0.6.6"
 dependencies = [
  "candid",
  "ciborium",

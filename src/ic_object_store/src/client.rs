@@ -1,22 +1,24 @@
 use aes_gcm::{aead::KeyInit, Aes256Gcm, Key};
 use async_trait::async_trait;
-use candid::Principal;
+use candid::{
+    utils::{encode_args, ArgumentEncoder},
+    CandidType, Decode, Principal,
+};
 use chrono::DateTime;
 use futures::{stream::BoxStream, StreamExt, TryStreamExt};
 use ic_agent::Agent;
 use ic_cose_types::{
     cose::aes::{aes256_gcm_decrypt_in, aes256_gcm_encrypt_in},
+    format_error,
     types::object_store::*,
+    BoxError, CanisterCaller,
 };
 use serde_bytes::{ByteArray, ByteBuf, Bytes};
 use std::{collections::BTreeSet, ops::Range, sync::Arc};
 
 pub use object_store::{self, path::Path, DynObjectStore, MultipartUpload, ObjectStore};
 
-use crate::{
-    agent::{query_call, update_call},
-    rand_bytes,
-};
+use crate::rand_bytes;
 
 pub static STORE_NAME: &str = "ICObjectStore";
 
@@ -55,46 +57,102 @@ impl Client {
             cipher,
         }
     }
+}
+
+impl ObjectStoreSDK for Client {
+    fn canister(&self) -> &Principal {
+        &self.canister
+    }
+
+    fn cipher(&self) -> Option<Arc<Aes256Gcm>> {
+        self.cipher.clone()
+    }
+}
+
+impl CanisterCaller for Client {
+    async fn canister_query<
+        In: ArgumentEncoder + Send,
+        Out: CandidType + for<'a> candid::Deserialize<'a>,
+    >(
+        &self,
+        canister: &Principal,
+        method: &str,
+        args: In,
+    ) -> Result<Out, BoxError> {
+        let input = encode_args(args)?;
+        let res = self
+            .agent
+            .query(canister, method)
+            .with_arg(input)
+            .call()
+            .await?;
+        let output = Decode!(res.as_slice(), Out)?;
+        Ok(output)
+    }
+
+    async fn canister_update<
+        In: ArgumentEncoder + Send,
+        Out: CandidType + for<'a> candid::Deserialize<'a>,
+    >(
+        &self,
+        canister: &Principal,
+        method: &str,
+        args: In,
+    ) -> Result<Out, BoxError> {
+        let input = encode_args(args)?;
+        let res = self
+            .agent
+            .update(canister, method)
+            .with_arg(input)
+            .call_and_wait()
+            .await?;
+        let output = Decode!(res.as_slice(), Out)?;
+        Ok(output)
+    }
+}
+
+#[async_trait]
+pub trait ObjectStoreSDK: CanisterCaller + Sized {
+    fn canister(&self) -> &Principal;
+    fn cipher(&self) -> Option<Arc<Aes256Gcm>>;
 
     /// Retrieves the current state of the object store
-    pub async fn get_state(&self) -> Result<StateInfo, String> {
-        query_call(&self.agent, &self.canister, "get_state", ()).await?
+    async fn get_state(&self) -> Result<StateInfo, String> {
+        self.canister_query(self.canister(), "get_state", ())
+            .await
+            .map_err(format_error)?
     }
 
     /// Adds managers to the canister (requires controller privileges)
-    pub async fn admin_add_managers(&self, args: &BTreeSet<Principal>) -> Result<(), String> {
-        update_call(&self.agent, &self.canister, "admin_add_managers", (args,)).await?
+    async fn admin_add_managers(&self, args: &BTreeSet<Principal>) -> Result<(), String> {
+        self.canister_update(self.canister(), "admin_add_managers", (args,))
+            .await
+            .map_err(format_error)?
     }
 
     /// Removes managers from the canister (requires controller privileges)
-    pub async fn admin_remove_managers(&self, args: &BTreeSet<Principal>) -> Result<(), String> {
-        update_call(
-            &self.agent,
-            &self.canister,
-            "admin_remove_managers",
-            (args,),
-        )
-        .await?
+    async fn admin_remove_managers(&self, args: &BTreeSet<Principal>) -> Result<(), String> {
+        self.canister_update(self.canister(), "admin_remove_managers", (args,))
+            .await
+            .map_err(format_error)?
     }
 
     /// Adds auditors to the canister (requires controller privileges)
-    pub async fn admin_add_auditors(&self, args: &BTreeSet<Principal>) -> Result<(), String> {
-        update_call(&self.agent, &self.canister, "admin_add_auditors", (args,)).await?
+    async fn admin_add_auditors(&self, args: &BTreeSet<Principal>) -> Result<(), String> {
+        self.canister_update(self.canister(), "admin_add_auditors", (args,))
+            .await
+            .map_err(format_error)?
     }
 
     /// Removes auditors from the canister (requires controller privileges)
-    pub async fn admin_remove_auditors(&self, args: &BTreeSet<Principal>) -> Result<(), String> {
-        update_call(
-            &self.agent,
-            &self.canister,
-            "admin_remove_auditors",
-            (args,),
-        )
-        .await?
+    async fn admin_remove_auditors(&self, args: &BTreeSet<Principal>) -> Result<(), String> {
+        self.canister_update(self.canister(), "admin_remove_auditors", (args,))
+            .await
+            .map_err(format_error)?
     }
 
     /// Stores data at specified path with options
-    pub async fn put_opts(
+    async fn put_opts(
         &self,
         path: &Path,
         payload: &Bytes,
@@ -111,7 +169,7 @@ impl Client {
             });
         }
 
-        let res = if let Some(cipher) = &self.cipher {
+        let res = if let Some(cipher) = &self.cipher() {
             let nonce: [u8; 12] = rand_bytes();
             let mut data = payload.to_vec();
             let mut aes_tags: Vec<ByteArray<16>> = Vec::new();
@@ -125,167 +183,152 @@ impl Client {
             }
             opts.aes_nonce = Some(nonce.into());
             opts.aes_tags = Some(aes_tags);
-            update_call(
-                &self.agent,
-                &self.canister,
+            self.canister_update(
+                self.canister(),
                 "put_opts",
                 (path.as_ref(), Bytes::new(&data), opts),
             )
             .await
         } else {
-            update_call(
-                &self.agent,
-                &self.canister,
-                "put_opts",
-                (path.as_ref(), payload, opts),
-            )
-            .await
+            self.canister_update(self.canister(), "put_opts", (path.as_ref(), payload, opts))
+                .await
         };
 
-        res.map_err(|error| Error::Generic { error })?
+        res.map_err(|error| Error::Generic {
+            error: format_error(error),
+        })?
     }
 
     /// Deletes data at specified path
-    pub async fn delete(&self, path: &Path) -> Result<()> {
-        update_call(&self.agent, &self.canister, "delete", (path.as_ref(),))
+    async fn delete(&self, path: &Path) -> Result<()> {
+        self.canister_update(self.canister(), "delete", (path.as_ref(),))
             .await
-            .map_err(|error| Error::Generic { error })?
+            .map_err(|error| Error::Generic {
+                error: format_error(error),
+            })?
     }
 
     /// Copies data from one path to another
-    pub async fn copy(&self, from: &Path, to: &Path) -> Result<()> {
-        update_call(
-            &self.agent,
-            &self.canister,
-            "copy",
-            (from.as_ref(), to.as_ref()),
-        )
-        .await
-        .map_err(|error| Error::Generic { error })?
+    async fn copy(&self, from: &Path, to: &Path) -> Result<()> {
+        self.canister_update(self.canister(), "copy", (from.as_ref(), to.as_ref()))
+            .await
+            .map_err(|error| Error::Generic {
+                error: format_error(error),
+            })?
     }
 
     /// Copies data only if destination doesn't exist
-    pub async fn copy_if_not_exists(&self, from: &Path, to: &Path) -> Result<()> {
-        update_call(
-            &self.agent,
-            &self.canister,
+    async fn copy_if_not_exists(&self, from: &Path, to: &Path) -> Result<()> {
+        self.canister_update(
+            self.canister(),
             "copy_if_not_exists",
             (from.as_ref(), to.as_ref()),
         )
         .await
-        .map_err(|error| Error::Generic { error })?
+        .map_err(|error| Error::Generic {
+            error: format_error(error),
+        })?
     }
 
     /// Renames/moves data from one path to another
-    pub async fn rename(&self, from: &Path, to: &Path) -> Result<()> {
-        update_call(
-            &self.agent,
-            &self.canister,
-            "rename",
-            (from.as_ref(), to.as_ref()),
-        )
-        .await
-        .map_err(|error| Error::Generic { error })?
+    async fn rename(&self, from: &Path, to: &Path) -> Result<()> {
+        self.canister_update(self.canister(), "rename", (from.as_ref(), to.as_ref()))
+            .await
+            .map_err(|error| Error::Generic {
+                error: format_error(error),
+            })?
     }
 
     /// Renames/moves data only if destination doesn't exist
-    pub async fn rename_if_not_exists(&self, from: &Path, to: &Path) -> Result<()> {
-        update_call(
-            &self.agent,
-            &self.canister,
+    async fn rename_if_not_exists(&self, from: &Path, to: &Path) -> Result<()> {
+        self.canister_update(
+            self.canister(),
             "rename_if_not_exists",
             (from.as_ref(), to.as_ref()),
         )
         .await
-        .map_err(|error| Error::Generic { error })?
+        .map_err(|error| Error::Generic {
+            error: format_error(error),
+        })?
     }
 
     /// Initiates a multipart upload
-    pub async fn create_multipart(&self, path: &Path) -> Result<MultipartId> {
-        update_call(
-            &self.agent,
-            &self.canister,
-            "create_multipart",
-            (path.as_ref(),),
-        )
-        .await
-        .map_err(|error| Error::Generic { error })?
+    async fn create_multipart(&self, path: &Path) -> Result<MultipartId> {
+        self.canister_update(self.canister(), "create_multipart", (path.as_ref(),))
+            .await
+            .map_err(|error| Error::Generic {
+                error: format_error(error),
+            })?
     }
 
     /// Uploads a part in a multipart upload
-    pub async fn put_part(
+    async fn put_part(
         &self,
         path: &Path,
         id: &MultipartId,
         part_idx: usize,
         payload: &Bytes,
     ) -> Result<PartId> {
-        update_call(
-            &self.agent,
-            &self.canister,
+        self.canister_update(
+            self.canister(),
             "put_part",
             (path.as_ref(), id, part_idx, payload),
         )
         .await
-        .map_err(|error| Error::Generic { error })?
+        .map_err(|error| Error::Generic {
+            error: format_error(error),
+        })?
     }
 
     /// Completes a multipart upload
-    pub async fn complete_multipart(
+    async fn complete_multipart(
         &self,
         path: &Path,
         id: &MultipartId,
         opts: &PutMultipartOpts,
     ) -> Result<PutResult> {
-        update_call(
-            &self.agent,
-            &self.canister,
+        self.canister_update(
+            self.canister(),
             "complete_multipart",
             (path.as_ref(), id, opts),
         )
         .await
-        .map_err(|error| Error::Generic { error })?
+        .map_err(|error| Error::Generic {
+            error: format_error(error),
+        })?
     }
 
     /// Aborts a multipart upload
-    pub async fn abort_multipart(&self, path: &Path, id: &MultipartId) -> Result<()> {
-        update_call(
-            &self.agent,
-            &self.canister,
-            "abort_multipart",
-            (path.as_ref(), id),
-        )
-        .await
-        .map_err(|error| Error::Generic { error })?
+    async fn abort_multipart(&self, path: &Path, id: &MultipartId) -> Result<()> {
+        self.canister_update(self.canister(), "abort_multipart", (path.as_ref(), id))
+            .await
+            .map_err(|error| Error::Generic {
+                error: format_error(error),
+            })?
     }
 
     /// Retrieves a specific part of data
-    pub async fn get_part(&self, path: &Path, part_idx: usize) -> Result<ByteBuf> {
-        query_call(
-            &self.agent,
-            &self.canister,
-            "get_part",
-            (path.as_ref(), part_idx),
-        )
-        .await
-        .map_err(|error| Error::Generic { error })?
+    async fn get_part(&self, path: &Path, part_idx: usize) -> Result<ByteBuf> {
+        self.canister_query(self.canister(), "get_part", (path.as_ref(), part_idx))
+            .await
+            .map_err(|error| Error::Generic {
+                error: format_error(error),
+            })?
     }
 
     /// Retrieves data with options (range, if_match, etc.)
-    pub async fn get_opts(&self, path: &Path, mut opts: GetOptions) -> Result<GetResult> {
-        if let Some(cipher) = &self.cipher {
+    async fn get_opts(&self, path: &Path, mut opts: GetOptions) -> Result<GetResult> {
+        if let Some(cipher) = &self.cipher() {
             let range = opts.range.clone();
             opts.range = None;
             // use head to get metadata for decryption
             opts.head = true;
-            let res: Result<GetResult> = query_call(
-                &self.agent,
-                &self.canister,
-                "get_opts",
-                (path.as_ref(), opts),
-            )
-            .await
-            .map_err(|error| Error::Generic { error })?;
+            let res: Result<GetResult> = self
+                .canister_query(self.canister(), "get_opts", (path.as_ref(), opts))
+                .await
+                .map_err(|error| Error::Generic {
+                    error: format_error(error),
+                })?;
 
             let mut res = res?;
             if res.meta.size == 0 {
@@ -356,23 +399,20 @@ impl Client {
             return Ok(res);
         }
 
-        query_call(
-            &self.agent,
-            &self.canister,
-            "get_opts",
-            (path.as_ref(), opts),
-        )
-        .await
-        .map_err(|error| Error::Generic { error })?
+        self.canister_query(self.canister(), "get_opts", (path.as_ref(), opts))
+            .await
+            .map_err(|error| Error::Generic {
+                error: format_error(error),
+            })?
     }
 
     /// Retrieves multiple ranges of data
-    pub async fn get_ranges(&self, path: &Path, ranges: &[(usize, usize)]) -> Result<Vec<ByteBuf>> {
+    async fn get_ranges(&self, path: &Path, ranges: &[(usize, usize)]) -> Result<Vec<ByteBuf>> {
         if ranges.is_empty() {
             return Ok(Vec::new());
         }
 
-        if let Some(cipher) = &self.cipher {
+        if let Some(cipher) = &self.cipher() {
             let meta = self.head(path).await?;
             let nonce = meta.aes_nonce.as_ref().ok_or_else(|| Error::Generic {
                 error: "missing AES256 nonce".to_string(),
@@ -432,61 +472,59 @@ impl Client {
             return Ok(result);
         }
 
-        query_call(
-            &self.agent,
-            &self.canister,
-            "get_ranges",
-            (path.as_ref(), ranges),
-        )
-        .await
-        .map_err(|error| Error::Generic { error })?
+        self.canister_query(self.canister(), "get_ranges", (path.as_ref(), ranges))
+            .await
+            .map_err(|error| Error::Generic {
+                error: format_error(error),
+            })?
     }
 
     /// Retrieves metadata for a path
-    pub async fn head(&self, path: &Path) -> Result<ObjectMeta> {
-        query_call(&self.agent, &self.canister, "head", (path.as_ref(),))
+    async fn head(&self, path: &Path) -> Result<ObjectMeta> {
+        self.canister_query(self.canister(), "head", (path.as_ref(),))
             .await
-            .map_err(|error| Error::Generic { error })?
+            .map_err(|error| Error::Generic {
+                error: format_error(error),
+            })?
     }
 
     /// Lists objects under a prefix
-    pub async fn list(&self, prefix: Option<&Path>) -> Result<Vec<ObjectMeta>> {
-        query_call(
-            &self.agent,
-            &self.canister,
-            "list",
-            (prefix.map(|p| p.as_ref()),),
-        )
-        .await
-        .map_err(|error| Error::Generic { error })?
+    async fn list(&self, prefix: Option<&Path>) -> Result<Vec<ObjectMeta>> {
+        self.canister_query(self.canister(), "list", (prefix.map(|p| p.as_ref()),))
+            .await
+            .map_err(|error| Error::Generic {
+                error: format_error(error),
+            })?
     }
 
     /// Lists objects with an offset
-    pub async fn list_with_offset(
+    async fn list_with_offset(
         &self,
         prefix: Option<&Path>,
         offset: &Path,
     ) -> Result<Vec<ObjectMeta>> {
-        query_call(
-            &self.agent,
-            &self.canister,
+        self.canister_query(
+            self.canister(),
             "list_with_offset",
             (prefix.map(|p| p.as_ref()), offset.as_ref()),
         )
         .await
-        .map_err(|error| Error::Generic { error })?
+        .map_err(|error| Error::Generic {
+            error: format_error(error),
+        })?
     }
 
     /// Lists objects with directory delimiter
-    pub async fn list_with_delimiter(&self, prefix: Option<&Path>) -> Result<ListResult> {
-        query_call(
-            &self.agent,
-            &self.canister,
+    async fn list_with_delimiter(&self, prefix: Option<&Path>) -> Result<ListResult> {
+        self.canister_query(
+            self.canister(),
             "list_with_delimiter",
             (prefix.map(|p| p.as_ref()),),
         )
         .await
-        .map_err(|error| Error::Generic { error })?
+        .map_err(|error| Error::Generic {
+            error: format_error(error),
+        })?
     }
 }
 
