@@ -5,7 +5,7 @@ use std::sync::Arc;
 /// Creates and configures an IC agent with the given host URL and identity.
 ///
 /// # Arguments
-/// * `host` - The IC host URL (e.g., "https://ic0.app" or "http://localhost:8000")
+/// * `host` - The IC host URL (e.g., "https://ic0.app" or "http://localhost:4943")
 /// * `identity` - Arc-wrapped identity for authentication
 ///
 /// # Returns
@@ -18,7 +18,7 @@ pub async fn build_agent(host: &str, identity: Arc<dyn Identity>) -> Result<Agen
     let agent = Agent::builder()
         .with_url(host)
         .with_arc_identity(identity)
-        .with_verify_query_signatures(true)
+        .with_verify_query_signatures(false)
         .build()
         .map_err(format_error)?;
     if host.starts_with("http://") {

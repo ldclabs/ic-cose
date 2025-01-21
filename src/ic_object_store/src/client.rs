@@ -665,6 +665,10 @@ impl ObjectStoreClient {
     pub fn new(client: Arc<Client>) -> ObjectStoreClient {
         ObjectStoreClient { client }
     }
+
+    pub async fn get_state(&self) -> Result<StateInfo, String> {
+        self.client.get_state().await
+    }
 }
 
 impl std::fmt::Display for ObjectStoreClient {

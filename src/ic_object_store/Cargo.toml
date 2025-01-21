@@ -25,3 +25,4 @@ ic_cose_types = { path = "../ic_cose_types", version = "0.6" }
 [dev-dependencies]
 tokio = { workspace = true }
 ed25519-consensus = { workspace = true }
+const-hex = { workspace = true }
