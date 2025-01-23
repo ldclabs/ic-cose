@@ -2001,7 +2001,7 @@ dependencies = [
 
 [[package]]
 name = "ic_object_store"
-version = "0.6.8"
+version = "0.6.9-patch1"
 dependencies = [
  "aes-gcm",
  "async-trait",
