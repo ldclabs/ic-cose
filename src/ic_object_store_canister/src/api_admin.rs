@@ -40,6 +40,12 @@ fn admin_remove_auditors(args: BTreeSet<Principal>) -> Result<(), String> {
     })
 }
 
+#[ic_cdk::update(guard = "is_controller")]
+fn admin_clear() -> Result<(), String> {
+    store::state::clear();
+    Ok(())
+}
+
 #[ic_cdk::update]
 fn validate_admin_add_managers(args: BTreeSet<Principal>) -> Result<String, String> {
     validate_principals(&args)?;
@@ -61,5 +67,10 @@ fn validate_admin_add_auditors(args: BTreeSet<Principal>) -> Result<String, Stri
 #[ic_cdk::update]
 fn validate_admin_remove_auditors(args: BTreeSet<Principal>) -> Result<String, String> {
     validate_principals(&args)?;
+    Ok("ok".to_string())
+}
+
+#[ic_cdk::update]
+fn validate_admin_clear() -> Result<String, String> {
     Ok("ok".to_string())
 }

@@ -177,6 +177,17 @@ pub mod state {
             });
         });
     }
+
+    pub fn clear() {
+        MULTIPART_UPLOAD.with_borrow_mut(|mu| mu.clear());
+        OBJECT_META.with_borrow_mut(|om| om.clear_new());
+        OBJECT_DATA.with_borrow_mut(|od| od.clear_new());
+        STATE.with_borrow_mut(|s| {
+            s.locations.clear();
+            s.next_etag = 0;
+        });
+        save();
+    }
 }
 
 pub mod object {

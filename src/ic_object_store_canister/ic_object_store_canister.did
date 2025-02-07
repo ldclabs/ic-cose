@@ -100,6 +100,7 @@ service : (opt InstallArgs) -> {
   abort_multipart : (text, text) -> (Result);
   admin_add_auditors : (vec principal) -> (Result_1);
   admin_add_managers : (vec principal) -> (Result_1);
+  admin_clear : () -> (Result_1);
   admin_remove_auditors : (vec principal) -> (Result_1);
   admin_remove_managers : (vec principal) -> (Result_1);
   complete_multipart : (text, text, PutMultipartOpts) -> (Result_2);
@@ -122,6 +123,7 @@ service : (opt InstallArgs) -> {
   rename_if_not_exists : (text, text) -> (Result);
   validate_admin_add_auditors : (vec principal) -> (Result_13);
   validate_admin_add_managers : (vec principal) -> (Result_13);
+  validate_admin_clear : () -> (Result_13);
   validate_admin_remove_auditors : (vec principal) -> (Result_13);
   validate_admin_remove_managers : (vec principal) -> (Result_13);
 }
