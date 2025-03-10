@@ -7,10 +7,10 @@ pub fn derive_public_key(
     ecdsa_public_key: &PublicKeyOutput,
     derivation_path: Vec<Vec<u8>>,
 ) -> Result<PublicKeyOutput, String> {
-    let path = ic_crypto_secp256k1::DerivationPath::new(
+    let path = ic_secp256k1::DerivationPath::new(
         derivation_path
             .into_iter()
-            .map(ic_crypto_secp256k1::DerivationIndex)
+            .map(ic_secp256k1::DerivationIndex)
             .collect(),
     );
 
@@ -19,7 +19,7 @@ pub fn derive_public_key(
         .to_vec()
         .try_into()
         .map_err(format_error)?;
-    let pk = ic_crypto_secp256k1::PublicKey::deserialize_sec1(&ecdsa_public_key.public_key)
+    let pk = ic_secp256k1::PublicKey::deserialize_sec1(&ecdsa_public_key.public_key)
         .map_err(format_error)?;
     let (derived_public_key, derived_chain_code) =
         pk.derive_subkey_with_chain_code(&path, &chain_code);
