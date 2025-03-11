@@ -1,5 +1,6 @@
 use candid::Principal;
 use ciborium::into_writer;
+use ic_auth_verifier::{user_public_key_from_der, verify_basic_sig};
 use ic_canister_sig_creation::{delegation_signature_msg, CanisterSigPublicKey};
 use ic_cose_types::{
     types::{
@@ -7,9 +8,6 @@ use ic_cose_types::{
         SignedDelegation,
     },
     MILLISECONDS,
-};
-use ic_crypto_standalone_sig_verifier::{
-    user_public_key_from_bytes, verify_basic_sig_by_public_key,
 };
 use serde_bytes::ByteBuf;
 use std::collections::BTreeSet;
@@ -89,11 +87,10 @@ fn namespace_sign_delegation(input: SignDelegationInput) -> Result<SignDelegatio
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
     let name = input.name.to_ascii_lowercase();
 
-    let (pk, _) = user_public_key_from_bytes(input.pubkey.as_slice())
-        .map_err(|err| format!("invalid public key: {:?}", err))?;
+    let (alg, pk) = user_public_key_from_der(input.pubkey.as_slice())?;
     let mut msg = vec![];
     into_writer(&(&input.ns, &name, &caller), &mut msg).expect("failed to encode Delegations data");
-    verify_basic_sig_by_public_key(pk.algorithm_id, &msg, input.sig.as_slice(), &pk.key)
+    verify_basic_sig(alg, &pk, &msg, input.sig.as_slice())
         .map_err(|err| format!("challenge verification failed: {:?}", err))?;
 
     let mut seed = vec![];
