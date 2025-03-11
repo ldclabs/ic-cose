@@ -143,11 +143,7 @@ pub mod state {
     }
 
     pub fn is_controller(caller: &Principal) -> bool {
-        STATE.with_borrow(|s| {
-            s.governance_canister
-                .as_ref()
-                .map_or(false, |p| p == caller)
-        })
+        STATE.with_borrow(|s| s.governance_canister.as_ref() == Some(caller))
     }
 
     pub fn is_writer(caller: &Principal) -> bool {

@@ -1329,11 +1329,12 @@ dependencies = [
 
 [[package]]
 name = "ic_cose"
-version = "0.6.11"
+version = "0.6.12"
 dependencies = [
  "async-trait",
  "candid",
  "ic-agent",
+ "ic_auth_types",
  "ic_cose_types",
  "rand",
  "serde_bytes",
@@ -1342,7 +1343,7 @@ dependencies = [
 
 [[package]]
 name = "ic_cose_canister"
-version = "0.6.11"
+version = "0.6.12"
 dependencies = [
  "candid",
  "ciborium",
@@ -1355,6 +1356,7 @@ dependencies = [
  "ic-ed25519",
  "ic-secp256k1",
  "ic-stable-structures",
+ "ic_auth_types",
  "ic_auth_verifier",
  "ic_cose_types",
  "serde",
@@ -1363,7 +1365,7 @@ dependencies = [
 
 [[package]]
 name = "ic_cose_types"
-version = "0.6.11"
+version = "0.6.12"
 dependencies = [
  "aes-gcm",
  "candid",
@@ -1387,7 +1389,7 @@ dependencies = [
 
 [[package]]
 name = "ic_object_store"
-version = "0.6.11"
+version = "0.6.12"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -1406,7 +1408,7 @@ dependencies = [
 
 [[package]]
 name = "ic_object_store_canister"
-version = "0.6.11"
+version = "0.6.12"
 dependencies = [
  "candid",
  "ciborium",

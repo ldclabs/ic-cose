@@ -1,12 +1,10 @@
 use candid::Principal;
 use ciborium::into_writer;
+use ic_auth_types::{Delegation, SignInResponse, SignedDelegation};
 use ic_auth_verifier::{user_public_key_from_der, verify_basic_sig};
 use ic_canister_sig_creation::{delegation_signature_msg, CanisterSigPublicKey};
 use ic_cose_types::{
-    types::{
-        namespace::NamespaceDelegatorsInput, Delegation, SignDelegationInput, SignDelegationOutput,
-        SignedDelegation,
-    },
+    types::{namespace::NamespaceDelegatorsInput, SignDelegationInput},
     MILLISECONDS,
 };
 use serde_bytes::ByteBuf;
@@ -81,7 +79,7 @@ fn namespace_remove_delegator(input: NamespaceDelegatorsInput) -> Result<(), Str
 }
 
 #[ic_cdk::update]
-fn namespace_sign_delegation(input: SignDelegationInput) -> Result<SignDelegationOutput, String> {
+fn namespace_sign_delegation(input: SignDelegationInput) -> Result<SignInResponse, String> {
     store::state::allowed_api("namespace_sign_delegation")?;
     let caller = ic_cdk::caller();
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
@@ -112,7 +110,7 @@ fn namespace_sign_delegation(input: SignDelegationInput) -> Result<SignDelegatio
     let delegation_hash = delegation_signature_msg(input.pubkey.as_slice(), expiration, None);
     store::state::add_signature(user_key.seed.as_slice(), delegation_hash.as_slice());
 
-    Ok(SignDelegationOutput {
+    Ok(SignInResponse {
         expiration,
         user_key: user_key.to_der().into(),
         seed: user_key.seed.into(),

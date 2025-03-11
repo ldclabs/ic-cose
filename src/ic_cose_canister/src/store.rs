@@ -469,11 +469,7 @@ pub mod state {
     }
 
     pub fn is_controller(caller: &Principal) -> bool {
-        STATE.with_borrow(|s| {
-            s.governance_canister
-                .as_ref()
-                .map_or(false, |p| p == caller)
-        })
+        STATE.with_borrow(|s| s.governance_canister.as_ref() == Some(caller))
     }
 
     pub fn is_manager(caller: &Principal) -> bool {
@@ -720,7 +716,7 @@ pub mod ns {
             }
 
             let setting = SETTINGS_STORE.with_borrow(|m| m.get(&spk.v0()));
-            Ok(setting.map_or(false, |s| s.readers.contains(caller)))
+            Ok(setting.is_some_and(|s| s.readers.contains(caller)))
         })
         .unwrap_or(false)
     }

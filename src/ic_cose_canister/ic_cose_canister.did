@@ -64,7 +64,7 @@ type PublicKeyOutput = record { public_key : blob; chain_code : blob };
 type Result = variant { Ok; Err : text };
 type Result_1 = variant { Ok : NamespaceInfo; Err : text };
 type Result_10 = variant { Ok : vec record { principal; blob }; Err : text };
-type Result_11 = variant { Ok : SignDelegationOutput; Err : text };
+type Result_11 = variant { Ok : SignInResponse; Err : text };
 type Result_12 = variant { Ok : nat; Err : text };
 type Result_13 = variant { Ok : CreateSettingOutput; Err : text };
 type Result_14 = variant { Ok : SettingInfo; Err : text };
@@ -113,12 +113,12 @@ type SignDelegationInput = record {
   name : text;
   pubkey : blob;
 };
-type SignDelegationOutput = record {
+type SignIdentityInput = record { ns : text; audience : text };
+type SignInResponse = record {
   user_key : blob;
   seed : blob;
   expiration : nat64;
 };
-type SignIdentityInput = record { ns : text; audience : text };
 type SignInput = record {
   ns : text;
   derivation_path : vec blob;

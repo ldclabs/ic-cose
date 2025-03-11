@@ -16,4 +16,5 @@ serde_bytes = { workspace = true }
 rand = { workspace = true }
 ic-agent = { workspace = true }
 x25519-dalek = { workspace = true }
+ic_auth_types = { workspace = true }
 ic_cose_types = { path = "../ic_cose_types", version = "0.6" }

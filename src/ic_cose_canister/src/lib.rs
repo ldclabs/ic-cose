@@ -1,4 +1,5 @@
 use candid::Principal;
+use ic_auth_types::*;
 use ic_cose_types::{
     format_error, types::namespace::*, types::setting::*, types::state::StateInfo, types::*,
     ANONYMOUS,

@@ -4,6 +4,7 @@ use candid::{
     CandidType, Decode, Principal,
 };
 use ic_agent::Agent;
+use ic_auth_types::{SignInResponse, SignedDelegation};
 use ic_cose_types::{
     cose::{
         ecdh::ecdh_x25519, encrypt0::cose_decrypt0, get_cose_key_secret, CborSerializable, CoseKey,
@@ -13,8 +14,7 @@ use ic_cose_types::{
     types::setting::*,
     types::{
         state::StateInfo, ECDHInput, ECDHOutput, PublicKeyInput, PublicKeyOutput, SchnorrAlgorithm,
-        SettingPath, SignDelegationInput, SignDelegationOutput, SignIdentityInput, SignInput,
-        SignedDelegation,
+        SettingPath, SignDelegationInput, SignIdentityInput, SignInput,
     },
     BoxError, CanisterCaller,
 };
@@ -306,7 +306,7 @@ pub trait CoseSDK: CanisterCaller + Sized {
     async fn namespace_sign_delegation(
         &self,
         input: &SignDelegationInput,
-    ) -> Result<SignDelegationOutput, String> {
+    ) -> Result<SignInResponse, String> {
         self.canister_update(self.canister(), "namespace_sign_delegation", (input,))
             .await
             .map_err(format_error)?
