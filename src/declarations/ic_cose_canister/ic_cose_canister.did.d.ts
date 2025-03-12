@@ -82,19 +82,21 @@ export type Result = { 'Ok' : null } |
   { 'Err' : string };
 export type Result_1 = { 'Ok' : NamespaceInfo } |
   { 'Err' : string };
-export type Result_10 = { 'Ok' : SignDelegationOutput } |
+export type Result_10 = { 'Ok' : Array<[Principal, Uint8Array | number[]]> } |
   { 'Err' : string };
-export type Result_11 = { 'Ok' : bigint } |
+export type Result_11 = { 'Ok' : SignInResponse } |
   { 'Err' : string };
-export type Result_12 = { 'Ok' : CreateSettingOutput } |
+export type Result_12 = { 'Ok' : bigint } |
   { 'Err' : string };
-export type Result_13 = { 'Ok' : SettingInfo } |
+export type Result_13 = { 'Ok' : CreateSettingOutput } |
   { 'Err' : string };
-export type Result_14 = { 'Ok' : SettingArchivedPayload } |
+export type Result_14 = { 'Ok' : SettingInfo } |
   { 'Err' : string };
-export type Result_15 = { 'Ok' : StateInfo } |
+export type Result_15 = { 'Ok' : SettingArchivedPayload } |
   { 'Err' : string };
-export type Result_16 = { 'Ok' : string } |
+export type Result_16 = { 'Ok' : StateInfo } |
+  { 'Err' : string };
+export type Result_17 = { 'Ok' : string } |
   { 'Err' : string };
 export type Result_2 = { 'Ok' : Array<NamespaceInfo> } |
   { 'Err' : string };
@@ -110,7 +112,7 @@ export type Result_7 = { 'Ok' : Array<Principal> } |
   { 'Err' : string };
 export type Result_8 = { 'Ok' : Principal } |
   { 'Err' : string };
-export type Result_9 = { 'Ok' : Array<[Principal, Uint8Array | number[]]> } |
+export type Result_9 = { 'Ok' : boolean } |
   { 'Err' : string };
 export type SchnorrAlgorithm = { 'ed25519' : null } |
   { 'bip340secp256k1' : null };
@@ -147,12 +149,12 @@ export interface SignDelegationInput {
   'name' : string,
   'pubkey' : Uint8Array | number[],
 }
-export interface SignDelegationOutput {
+export interface SignIdentityInput { 'ns' : string, 'audience' : string }
+export interface SignInResponse {
   'user_key' : Uint8Array | number[],
   'seed' : Uint8Array | number[],
   'expiration' : bigint,
 }
-export interface SignIdentityInput { 'ns' : string, 'audience' : string }
 export interface SignInput {
   'ns' : string,
   'derivation_path' : Array<Uint8Array | number[]>,
@@ -230,9 +232,10 @@ export interface _SERVICE {
   'namespace_get_delegators' : ActorMethod<[string, string], Result_7>,
   'namespace_get_fixed_identity' : ActorMethod<[string, string], Result_8>,
   'namespace_get_info' : ActorMethod<[string], Result_1>,
+  'namespace_is_member' : ActorMethod<[string, string, Principal], Result_9>,
   'namespace_list_setting_keys' : ActorMethod<
     [string, boolean, [] | [Principal]],
-    Result_9
+    Result_10
   >,
   'namespace_remove_auditors' : ActorMethod<[string, Array<Principal>], Result>,
   'namespace_remove_delegator' : ActorMethod<
@@ -241,8 +244,8 @@ export interface _SERVICE {
   >,
   'namespace_remove_managers' : ActorMethod<[string, Array<Principal>], Result>,
   'namespace_remove_users' : ActorMethod<[string, Array<Principal>], Result>,
-  'namespace_sign_delegation' : ActorMethod<[SignDelegationInput], Result_10>,
-  'namespace_top_up' : ActorMethod<[string, bigint], Result_11>,
+  'namespace_sign_delegation' : ActorMethod<[SignDelegationInput], Result_11>,
+  'namespace_top_up' : ActorMethod<[string, bigint], Result_12>,
   'namespace_update_info' : ActorMethod<[UpdateNamespaceInput], Result>,
   'schnorr_public_key' : ActorMethod<
     [SchnorrAlgorithm, [] | [PublicKeyInput]],
@@ -254,38 +257,38 @@ export interface _SERVICE {
     Result_5
   >,
   'setting_add_readers' : ActorMethod<[SettingPath, Array<Principal>], Result>,
-  'setting_create' : ActorMethod<[SettingPath, CreateSettingInput], Result_12>,
+  'setting_create' : ActorMethod<[SettingPath, CreateSettingInput], Result_13>,
   'setting_delete' : ActorMethod<[SettingPath], Result>,
-  'setting_get' : ActorMethod<[SettingPath], Result_13>,
-  'setting_get_archived_payload' : ActorMethod<[SettingPath], Result_14>,
-  'setting_get_info' : ActorMethod<[SettingPath], Result_13>,
+  'setting_get' : ActorMethod<[SettingPath], Result_14>,
+  'setting_get_archived_payload' : ActorMethod<[SettingPath], Result_15>,
+  'setting_get_info' : ActorMethod<[SettingPath], Result_14>,
   'setting_remove_readers' : ActorMethod<
     [SettingPath, Array<Principal>],
     Result
   >,
   'setting_update_info' : ActorMethod<
     [SettingPath, UpdateSettingInfoInput],
-    Result_12
+    Result_13
   >,
   'setting_update_payload' : ActorMethod<
     [SettingPath, UpdateSettingPayloadInput],
-    Result_12
+    Result_13
   >,
-  'state_get_info' : ActorMethod<[], Result_15>,
-  'validate2_admin_add_allowed_apis' : ActorMethod<[Array<string>], Result_16>,
-  'validate2_admin_add_auditors' : ActorMethod<[Array<Principal>], Result_16>,
-  'validate2_admin_add_managers' : ActorMethod<[Array<Principal>], Result_16>,
+  'state_get_info' : ActorMethod<[], Result_16>,
+  'validate2_admin_add_allowed_apis' : ActorMethod<[Array<string>], Result_17>,
+  'validate2_admin_add_auditors' : ActorMethod<[Array<Principal>], Result_17>,
+  'validate2_admin_add_managers' : ActorMethod<[Array<Principal>], Result_17>,
   'validate2_admin_remove_allowed_apis' : ActorMethod<
     [Array<string>],
-    Result_16
+    Result_17
   >,
   'validate2_admin_remove_auditors' : ActorMethod<
     [Array<Principal>],
-    Result_16
+    Result_17
   >,
   'validate2_admin_remove_managers' : ActorMethod<
     [Array<Principal>],
-    Result_16
+    Result_17
   >,
   'validate_admin_add_allowed_apis' : ActorMethod<[Array<string>], Result>,
   'validate_admin_add_auditors' : ActorMethod<[Array<Principal>], Result>,

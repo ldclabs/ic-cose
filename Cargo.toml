@@ -15,7 +15,7 @@ strip = true
 opt-level = 's'
 
 [workspace.package]
-version = "0.6.12"
+version = "0.6.13"
 edition = "2021"
 repository = "https://github.com/ldclabs/ic-cose"
 keywords = ["config", "cbor", "canister", "icp", "encryption"]
@@ -53,7 +53,7 @@ rand = "0.8"
 coset = "0.3"
 aes-gcm = "0.10"
 # keep in sync with lancedb
-object_store = { version = "0.10.2" }
+object_store = { version = "0.11" }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 thiserror = "2"
 ic-secp256k1 = { version = "0.1" }

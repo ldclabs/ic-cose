@@ -77,11 +77,13 @@ export type Result = { 'Ok' : null } |
   { 'Err' : Error };
 export type Result_1 = { 'Ok' : null } |
   { 'Err' : string };
-export type Result_10 = { 'Ok' : ListResult } |
+export type Result_10 = { 'Ok' : Array<ObjectMeta> } |
   { 'Err' : Error };
-export type Result_11 = { 'Ok' : PartId } |
+export type Result_11 = { 'Ok' : ListResult } |
   { 'Err' : Error };
-export type Result_12 = { 'Ok' : string } |
+export type Result_12 = { 'Ok' : PartId } |
+  { 'Err' : Error };
+export type Result_13 = { 'Ok' : string } |
   { 'Err' : string };
 export type Result_2 = { 'Ok' : UpdateVersion } |
   { 'Err' : Error };
@@ -97,8 +99,8 @@ export type Result_7 = { 'Ok' : StateInfo } |
   { 'Err' : string };
 export type Result_8 = { 'Ok' : ObjectMeta } |
   { 'Err' : Error };
-export type Result_9 = { 'Ok' : Array<ObjectMeta> } |
-  { 'Err' : Error };
+export type Result_9 = { 'Ok' : boolean } |
+  { 'Err' : string };
 export interface StateInfo {
   'next_etag' : bigint,
   'managers' : Array<Principal>,
@@ -119,6 +121,7 @@ export interface _SERVICE {
   'abort_multipart' : ActorMethod<[string, string], Result>,
   'admin_add_auditors' : ActorMethod<[Array<Principal>], Result_1>,
   'admin_add_managers' : ActorMethod<[Array<Principal>], Result_1>,
+  'admin_clear' : ActorMethod<[], Result_1>,
   'admin_remove_auditors' : ActorMethod<[Array<Principal>], Result_1>,
   'admin_remove_managers' : ActorMethod<[Array<Principal>], Result_1>,
   'complete_multipart' : ActorMethod<
@@ -134,23 +137,25 @@ export interface _SERVICE {
   'get_ranges' : ActorMethod<[string, Array<[bigint, bigint]>], Result_6>,
   'get_state' : ActorMethod<[], Result_7>,
   'head' : ActorMethod<[string], Result_8>,
-  'list' : ActorMethod<[[] | [string]], Result_9>,
-  'list_with_delimiter' : ActorMethod<[[] | [string]], Result_10>,
-  'list_with_offset' : ActorMethod<[[] | [string], string], Result_9>,
+  'is_member' : ActorMethod<[string, Principal], Result_9>,
+  'list' : ActorMethod<[[] | [string]], Result_10>,
+  'list_with_delimiter' : ActorMethod<[[] | [string]], Result_11>,
+  'list_with_offset' : ActorMethod<[[] | [string], string], Result_10>,
   'put_opts' : ActorMethod<
     [string, Uint8Array | number[], PutOptions],
     Result_2
   >,
   'put_part' : ActorMethod<
     [string, string, bigint, Uint8Array | number[]],
-    Result_11
+    Result_12
   >,
   'rename' : ActorMethod<[string, string], Result>,
   'rename_if_not_exists' : ActorMethod<[string, string], Result>,
-  'validate_admin_add_auditors' : ActorMethod<[Array<Principal>], Result_12>,
-  'validate_admin_add_managers' : ActorMethod<[Array<Principal>], Result_12>,
-  'validate_admin_remove_auditors' : ActorMethod<[Array<Principal>], Result_12>,
-  'validate_admin_remove_managers' : ActorMethod<[Array<Principal>], Result_12>,
+  'validate_admin_add_auditors' : ActorMethod<[Array<Principal>], Result_13>,
+  'validate_admin_add_managers' : ActorMethod<[Array<Principal>], Result_13>,
+  'validate_admin_clear' : ActorMethod<[], Result_13>,
+  'validate_admin_remove_auditors' : ActorMethod<[Array<Principal>], Result_13>,
+  'validate_admin_remove_managers' : ActorMethod<[Array<Principal>], Result_13>,
 }
 export declare const idlFactory: IDL.InterfaceFactory;
 export declare const init: (args: { IDL: typeof IDL }) => IDL.Type[];

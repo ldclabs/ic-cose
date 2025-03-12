@@ -71,9 +71,10 @@ type PutOptions = record {
 };
 type Result = variant { Ok; Err : Error };
 type Result_1 = variant { Ok; Err : text };
-type Result_10 = variant { Ok : ListResult; Err : Error };
-type Result_11 = variant { Ok : PartId; Err : Error };
-type Result_12 = variant { Ok : text; Err : text };
+type Result_10 = variant { Ok : vec ObjectMeta; Err : Error };
+type Result_11 = variant { Ok : ListResult; Err : Error };
+type Result_12 = variant { Ok : PartId; Err : Error };
+type Result_13 = variant { Ok : text; Err : text };
 type Result_2 = variant { Ok : UpdateVersion; Err : Error };
 type Result_3 = variant { Ok : text; Err : Error };
 type Result_4 = variant { Ok : GetResult; Err : Error };
@@ -81,7 +82,7 @@ type Result_5 = variant { Ok : blob; Err : Error };
 type Result_6 = variant { Ok : vec blob; Err : Error };
 type Result_7 = variant { Ok : StateInfo; Err : text };
 type Result_8 = variant { Ok : ObjectMeta; Err : Error };
-type Result_9 = variant { Ok : vec ObjectMeta; Err : Error };
+type Result_9 = variant { Ok : bool; Err : text };
 type StateInfo = record {
   next_etag : nat64;
   managers : vec principal;
@@ -99,6 +100,7 @@ service : (opt InstallArgs) -> {
   abort_multipart : (text, text) -> (Result);
   admin_add_auditors : (vec principal) -> (Result_1);
   admin_add_managers : (vec principal) -> (Result_1);
+  admin_clear : () -> (Result_1);
   admin_remove_auditors : (vec principal) -> (Result_1);
   admin_remove_managers : (vec principal) -> (Result_1);
   complete_multipart : (text, text, PutMultipartOpts) -> (Result_2);
@@ -111,15 +113,17 @@ service : (opt InstallArgs) -> {
   get_ranges : (text, vec record { nat64; nat64 }) -> (Result_6) query;
   get_state : () -> (Result_7) query;
   head : (text) -> (Result_8) query;
-  list : (opt text) -> (Result_9) query;
-  list_with_delimiter : (opt text) -> (Result_10) query;
-  list_with_offset : (opt text, text) -> (Result_9) query;
+  is_member : (text, principal) -> (Result_9) query;
+  list : (opt text) -> (Result_10) query;
+  list_with_delimiter : (opt text) -> (Result_11) query;
+  list_with_offset : (opt text, text) -> (Result_10) query;
   put_opts : (text, blob, PutOptions) -> (Result_2);
-  put_part : (text, text, nat64, blob) -> (Result_11);
+  put_part : (text, text, nat64, blob) -> (Result_12);
   rename : (text, text) -> (Result);
   rename_if_not_exists : (text, text) -> (Result);
-  validate_admin_add_auditors : (vec principal) -> (Result_12);
-  validate_admin_add_managers : (vec principal) -> (Result_12);
-  validate_admin_remove_auditors : (vec principal) -> (Result_12);
-  validate_admin_remove_managers : (vec principal) -> (Result_12);
+  validate_admin_add_auditors : (vec principal) -> (Result_13);
+  validate_admin_add_managers : (vec principal) -> (Result_13);
+  validate_admin_clear : () -> (Result_13);
+  validate_admin_remove_auditors : (vec principal) -> (Result_13);
+  validate_admin_remove_managers : (vec principal) -> (Result_13);
 }

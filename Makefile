@@ -10,7 +10,7 @@ fix:
 	@cargo clippy --fix --workspace --tests
 
 test:
-	@cargo test --workspace -- --nocapture
+	@cargo test --workspace --all-features -- --nocapture
 
 # cargo install ic-wasm
 build-wasm:
@@ -20,3 +20,4 @@ build-wasm:
 build-did:
 	candid-extractor target/wasm32-unknown-unknown/release/ic_cose_canister.wasm > src/ic_cose_canister/ic_cose_canister.did
 	candid-extractor target/wasm32-unknown-unknown/release/ic_object_store_canister.wasm > src/ic_object_store_canister/ic_object_store_canister.did
+	dfx generate
