@@ -128,10 +128,10 @@ fn get_delegation(
 
     Ok(SignedDelegation {
         delegation: Delegation {
-            pubkey,
+            pubkey: pubkey.into(),
             expiration,
             targets: None,
         },
-        signature: ByteBuf::from(signature),
+        signature: signature.into(),
     })
 }
