@@ -5,6 +5,7 @@ members = [
   "src/ic_cose_types",
   "src/ic_object_store",
   "src/ic_object_store_canister",
+  "src/ic_wasm_canister",
 ]
 resolver = "2"
 
@@ -15,7 +16,7 @@ strip = true
 opt-level = 's'
 
 [workspace.package]
-version = "0.6.14"
+version = "0.7.0"
 edition = "2021"
 repository = "https://github.com/ldclabs/ic-cose"
 keywords = ["config", "cbor", "canister", "icp", "encryption"]

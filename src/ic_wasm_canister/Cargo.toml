@@ -1,8 +1,8 @@
 [package]
-name = "ic_object_store_canister"
-description = "A Object Store of Apache Arrow on the Internet Computer."
+name = "ic_wasm_canister"
+description = "An ICP canister wasm module management service on the Internet Computer."
 publish = false
-repository = "https://github.com/ldclabs/ic-cose/tree/main/src/ic_object_store_canister"
+repository = "https://github.com/ldclabs/ic-cose/tree/main/src/ic_wasm_canister"
 version.workspace = true
 edition.workspace = true
 keywords.workspace = true
@@ -16,11 +16,13 @@ crate-type = ["cdylib"]
 
 [dependencies]
 candid = { workspace = true }
-ciborium = { workspace = true }
+futures = { workspace = true }
 ic-cdk = { workspace = true }
+ic-stable-structures = { workspace = true }
+ciborium = { workspace = true }
+const-hex = { workspace = true }
+num-traits = { workspace = true }
 serde = { workspace = true }
 serde_bytes = { workspace = true }
-ic-stable-structures = { workspace = true }
-object_store = { workspace = true }
 getrandom = { workspace = true }
 ic_cose_types = { path = "../ic_cose_types", version = "0.7" }

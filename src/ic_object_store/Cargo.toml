@@ -20,7 +20,7 @@ ic-agent = { workspace = true }
 object_store = { workspace = true }
 chrono = { workspace = true }
 aes-gcm = { workspace = true }
-ic_cose_types = { path = "../ic_cose_types", version = "0.6" }
+ic_cose_types = { path = "../ic_cose_types", version = "0.7" }
 
 [dev-dependencies]
 tokio = { workspace = true }

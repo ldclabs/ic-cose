@@ -16,7 +16,7 @@ jobs:
         cargo install ic-wasm
         mkdir out
         cargo build --target wasm32-unknown-unknown --release --locked -p ic_cose_canister -p ic_object_store_canister
-        for CAN in ic_cose_canister ic_object_store_canister
+        for CAN in ic_cose_canister ic_object_store_canister ic_wasm_canister
         do
           cp "target/wasm32-unknown-unknown/release/$CAN.wasm" out/
           cp "src/$CAN/$CAN.did" "out/$CAN.did"

@@ -17,6 +17,15 @@
       "package": "ic_object_store_canister",
       "optimize": "cycles",
       "type": "rust"
+    },
+    "ic_wasm_canister": {
+      "candid": "src/ic_wasm_canister/ic_wasm_canister.did",
+      "declarations": {
+        "node_compatibility": true
+      },
+      "package": "ic_wasm_canister",
+      "optimize": "cycles",
+      "type": "rust"
     }
   },
   "defaults": {

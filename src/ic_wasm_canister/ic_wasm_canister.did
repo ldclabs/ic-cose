@@ -1,0 +1,142 @@
+type AddWasmInput = record { name : text; wasm : blob; description : text };
+type CanisterSettings = record {
+  freezing_threshold : opt nat;
+  controllers : opt vec principal;
+  reserved_cycles_limit : opt nat;
+  log_visibility : opt LogVisibility;
+  wasm_memory_limit : opt nat;
+  memory_allocation : opt nat;
+  compute_allocation : opt nat;
+};
+type CanisterStatusResponse = record {
+  status : CanisterStatusType;
+  memory_size : nat;
+  cycles : nat;
+  settings : DefiniteCanisterSettings;
+  query_stats : QueryStats;
+  idle_cycles_burned_per_day : nat;
+  module_hash : opt blob;
+  reserved_cycles : nat;
+};
+type CanisterStatusType = variant { stopped; stopping; running };
+type ChainArgs = variant { Upgrade : UpgradeArgs; Init : InitArgs };
+type DefiniteCanisterSettings = record {
+  freezing_threshold : nat;
+  controllers : vec principal;
+  reserved_cycles_limit : nat;
+  log_visibility : LogVisibility;
+  wasm_memory_limit : nat;
+  memory_allocation : nat;
+  compute_allocation : nat;
+};
+type DeployWasmInput = record {
+  args : opt blob;
+  name : text;
+  canister : principal;
+};
+type DeploymentInfo = record {
+  args : opt blob;
+  name : text;
+  prev_hash : blob;
+  error : opt text;
+  deploy_at : nat64;
+  canister : principal;
+  wasm_hash : blob;
+};
+type InitArgs = record {
+  governance_canister : opt principal;
+  name : text;
+  topup_threshold : nat;
+  topup_amount : nat;
+};
+type LogVisibility = variant {
+  controllers;
+  public;
+  allowed_viewers : vec principal;
+};
+type QueryStats = record {
+  response_payload_bytes_total : nat;
+  num_instructions_total : nat;
+  num_calls_total : nat;
+  request_payload_bytes_total : nat;
+};
+type Result = variant { Ok; Err : text };
+type Result_1 = variant { Ok : vec blob; Err : text };
+type Result_2 = variant { Ok : nat; Err : text };
+type Result_3 = variant { Ok : principal; Err : text };
+type Result_4 = variant { Ok : vec DeploymentInfo; Err : text };
+type Result_5 = variant { Ok : CanisterStatusResponse; Err : text };
+type Result_6 = variant { Ok : vec principal; Err : text };
+type Result_7 = variant { Ok : StateInfo; Err : text };
+type Result_8 = variant { Ok : WasmInfo; Err : text };
+type Result_9 = variant { Ok : text; Err : text };
+type StateInfo = record {
+  managers : vec principal;
+  governance_canister : opt principal;
+  name : text;
+  deployment_logs : nat64;
+  deployed_total : nat64;
+  wasm_total : nat64;
+  latest_version : vec record { text; blob };
+  committers : vec principal;
+};
+type UpdateSettingsArgument = record {
+  canister_id : principal;
+  settings : CanisterSettings;
+};
+type UpgradeArgs = record {
+  governance_canister : opt principal;
+  name : opt text;
+  token_expiration : opt nat64;
+  topup_threshold : opt nat;
+  topup_amount : opt nat;
+};
+type WasmInfo = record {
+  hash : blob;
+  name : text;
+  wasm : blob;
+  description : text;
+  created_at : nat64;
+  created_by : principal;
+};
+service : (opt ChainArgs) -> {
+  admin_add_committers : (vec principal) -> (Result);
+  admin_add_managers : (vec principal) -> (Result);
+  admin_add_wasm : (AddWasmInput, opt blob) -> (Result);
+  admin_batch_call : (vec principal, text, opt blob) -> (Result_1);
+  admin_batch_topup : () -> (Result_2);
+  admin_create_canister : (text, opt CanisterSettings, opt blob) -> (Result_3);
+  admin_create_on : (principal, text, opt CanisterSettings, opt blob) -> (
+      Result_3,
+    );
+  admin_deploy : (DeployWasmInput, opt blob) -> (Result);
+  admin_remove_committers : (vec principal) -> (Result);
+  admin_remove_managers : (vec principal) -> (Result);
+  admin_update_canister_settings : (UpdateSettingsArgument) -> (Result);
+  deployment_logs : (text, opt nat, opt nat) -> (Result_4) query;
+  get_canister_status : (opt principal) -> (Result_5);
+  get_deployed_canisters : () -> (Result_6) query;
+  get_deployed_canisters_info : () -> (Result_4) query;
+  get_state : () -> (Result_7) query;
+  get_wasm : (blob) -> (Result_8) query;
+  validate_admin_add_committers : (vec principal) -> (Result_9);
+  validate_admin_add_managers : (vec principal) -> (Result_9);
+  validate_admin_add_wasm : (AddWasmInput, opt blob) -> (Result_9);
+  validate_admin_batch_call : (vec principal, text, opt blob) -> (Result_9);
+  validate_admin_batch_topup : () -> (Result_9);
+  validate_admin_create_canister : (text, opt CanisterSettings, opt blob) -> (
+      Result_9,
+    );
+  validate_admin_create_on : (
+      principal,
+      text,
+      opt CanisterSettings,
+      opt blob,
+    ) -> (Result_9);
+  validate_admin_deploy : (DeployWasmInput, opt blob) -> (Result_9);
+  validate_admin_remove_committers : (vec principal) -> (Result_9);
+  validate_admin_remove_managers : (vec principal) -> (Result_9);
+  validate_admin_update_canister_settings : (UpdateSettingsArgument) -> (
+      Result_9,
+    );
+}

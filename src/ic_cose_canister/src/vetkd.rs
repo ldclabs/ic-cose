@@ -54,8 +54,8 @@ pub async fn vetkd_encrypted_key(
     Ok(response.encrypted_key)
 }
 
-// https://github.com/dfinity/vetkd-devkit/blob/main/cdk/key_manager/src/lib.rs
-const VETKD_SYSTEM_API_CANISTER_ID: &str = "aaaaa-aa";
+// https://github.com/dfinity/examples/blob/master/rust/vetkd/README.md
+const VETKD_SYSTEM_API_CANISTER_ID: &str = "s55qq-oqaaa-aaaaa-aaakq-cai";
 
 fn vetkd_system_api_canister_id() -> Principal {
     Principal::from_text(VETKD_SYSTEM_API_CANISTER_ID).expect("failed to create canister ID")

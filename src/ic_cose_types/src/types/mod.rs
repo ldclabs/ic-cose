@@ -8,6 +8,7 @@ pub mod namespace;
 pub mod object_store;
 pub mod setting;
 pub mod state;
+pub mod wasm;
 
 pub use setting::SettingPath;
 
