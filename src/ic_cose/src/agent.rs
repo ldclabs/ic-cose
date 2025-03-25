@@ -6,8 +6,7 @@ pub async fn build_agent(host: &str, identity: Arc<dyn Identity>) -> Result<Agen
     let agent = Agent::builder()
         .with_url(host)
         .with_arc_identity(identity)
-        .with_verify_query_signatures(true)
-        // .with_background_dynamic_routing()
+        .with_background_dynamic_routing()
         .build()
         .map_err(format_error)?;
     if host.starts_with("http://") {

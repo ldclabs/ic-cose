@@ -32,12 +32,11 @@ dfx canister call ic_wasm_canister get_state '()'
 MYID=$(dfx identity get-principal)
 dfx canister call ic_wasm_canister admin_add_managers "(vec {principal \"$MYID\"})"
 
-# create a bucket with default settings
 dfx canister call ic_wasm_canister admin_create_canister '("ic_object_store_canister", null, null)'
 # (variant { Ok = principal "ctiya-peaaa-aaaaa-qaaja-cai" })
 
-# Get bucket status
-dfx canister call ic_wasm_canister get_canister_status '(opt principal "YOUR_BUCKET_ID")'
+# Get canister status
+dfx canister call ic_wasm_canister get_canister_status '(opt principal "YOUR_CANISTER_ID")'
 ```
 
 ## API Reference

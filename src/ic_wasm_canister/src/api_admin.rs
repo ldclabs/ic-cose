@@ -426,7 +426,7 @@ async fn admin_batch_topup() -> Result<u128, String> {
 async fn admin_update_canister_settings(args: UpdateSettingsArgument) -> Result<(), String> {
     store::state::with(|s| {
         if !s.deployed_list.contains_key(&args.canister_id) {
-            return Err("bucket not found".to_string());
+            return Err("canister not found".to_string());
         }
         Ok(())
     })?;

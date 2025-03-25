@@ -47,7 +47,7 @@ async fn get_canister_status(
     if canister != self_id {
         store::state::with(|s| {
             if !s.deployed_list.contains_key(&canister) {
-                return Err("bucket not found".to_string());
+                return Err("canister not found".to_string());
             }
             Ok(())
         })?;

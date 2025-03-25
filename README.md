@@ -12,11 +12,11 @@ A imaginative use case is serving as a state persistence service for enclaves ru
 
 ## Features
 
-- [x] Supports message signing and configuration data encryption (COSE, Threshold ECDSA, Threshold Schnorr, VetKeys (TODO)).
-- [x] Organizes configuration data by namespaces and client subjects with fine-grained access control.
-- [x] Serve as a state persistence service for enclaves, aiding in loading and persisting confidential data during startup and runtime.
-- [x] Supports horizontal scalability, WASM upgrade management, and Cycles recharge management.
-- [x] Can be used as a cluster management center for both Web3 and Web2 services.
+- Supports message signing and configuration data encryption (COSE, Threshold ECDSA, Threshold Schnorr, VetKeys).
+- Organizes configuration data by namespaces and client subjects with fine-grained access control.
+- Serve as a state persistence service for enclaves, aiding in loading and persisting confidential data during startup and runtime.
+- Supports horizontal scalability, WASM module management, and Cycles recharge management.
+- Can be used as a cluster management center for both Web3 and Web2 services.
 
 ## Packages
 
@@ -31,9 +31,9 @@ A imaginative use case is serving as a state persistence service for enclaves ru
 
 ## Who's using?
 
-- [dMsg.net](https://dmsg.net): The world's 1st decentralized end-to-end encrypted messaging application fully running on the Internet Computer blockchain. dMsg.net uses ic-cose to store user avatars (public), channel logos and encrypted files (private).
-- [IC-TEE](https://github.com/ldclabs/ic-tee): Make Trusted Execution Environments (TEEs) work with the Internet Computer.
-- [Anda](https://github.com/ldclabs/anda): An AI agent framework built with Rust, powered by ICP and TEEs.
+- [dMsg.net](https://dmsg.net): The world's 1st decentralized end-to-end encrypted messaging application fully running on the Internet Computer blockchain. dMsg.net uses `ic_cose_canister` to store encrypted keys for user.
+- [IC-TEE](https://github.com/ldclabs/ic-tee): Make Trusted Execution Environments (TEEs) work with the Internet Computer. IC-TEE uses `ic_cose_canister` to store configs and confidential data (TLS cert/key, root keys).
+- [Anda](https://github.com/ldclabs/anda): An AI agent framework built with Rust, powered by ICP and TEEs. Anda uses `ic_cose_canister` to store agent configs, uses `ic_object_store_canister` to store AI memory states.
 
 If you plan to use this project and have any questions, feel free to open an issue. I will address it as soon as possible.
 
