@@ -3,11 +3,8 @@
 
 ## Features
 
-- [x] Supports message signing and configuration data encryption (COSE, Threshold ECDSA, Threshold Schnorr, VetKeys (TODO)).
-- [x] Organizes configuration data by namespaces and client subjects with fine-grained access control.
-- [ ] Supports horizontal scalability, WASM upgrade management, and Cycles recharge management.
-- [ ] Serve as a state persistence service for enclaves, aiding in loading and persisting confidential data during startup and runtime.
-- [ ] Can be used as a cluster management center for both Web3 and Web2 services.
+- Supports message signing and configuration data encryption (COSE, Threshold ECDSA, Threshold Schnorr, VetKeys).
+- Organizes configuration data by namespaces and client subjects with fine-grained access control.
 
 ## Demo
 

@@ -2,7 +2,7 @@
 
 Native Rust implementation of Apache Arrow object store on the Internet Computer.
 
-More detail: https://github.com/apache/arrow-rs/blob/main/object_store/README.md
+More detail: https://github.com/apache/arrow-rs-object-store
 
 ## Features
 
