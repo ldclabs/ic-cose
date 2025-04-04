@@ -34,7 +34,7 @@ pub struct ObjectMetadata {
     #[serde(rename = "m")]
     last_modified: u64,
     #[serde(rename = "s")]
-    size: usize,
+    size: u64,
     #[serde(rename = "t")]
     tags: String,
     #[serde(rename = "a")]
@@ -195,11 +195,13 @@ pub mod object {
             let payload = payload.into_vec();
             if prev_size > payload.len() {
                 // remove the remaining chunks
-                for idx in payload.len().div_ceil(CHUNK_SIZE)..prev_size.div_ceil(CHUNK_SIZE) {
+                for idx in payload.len().div_ceil(CHUNK_SIZE as usize)
+                    ..prev_size.div_ceil(CHUNK_SIZE as usize)
+                {
                     od.remove(&ObjectId(etag, idx as u32));
                 }
             }
-            for (idx, chunk) in payload.chunks(CHUNK_SIZE).enumerate() {
+            for (idx, chunk) in payload.chunks(CHUNK_SIZE as usize).enumerate() {
                 od.insert(ObjectId(etag, idx as u32), Chunk(chunk.to_owned()));
             }
         });
@@ -209,11 +211,13 @@ pub mod object {
         OBJECT_DATA.with_borrow_mut(|od| {
             if prev_size > size {
                 // remove the remaining chunks
-                for idx in size.div_ceil(CHUNK_SIZE)..prev_size.div_ceil(CHUNK_SIZE) {
+                for idx in
+                    size.div_ceil(CHUNK_SIZE as usize)..prev_size.div_ceil(CHUNK_SIZE as usize)
+                {
                     od.remove(&ObjectId(to, idx as u32));
                 }
             }
-            for idx in 0..size.div_ceil(CHUNK_SIZE) {
+            for idx in 0..size.div_ceil(CHUNK_SIZE as usize) {
                 if let Some(chunk) = od.get(&ObjectId(from, idx as u32)) {
                     od.insert(ObjectId(to, idx as u32), chunk);
                 }
@@ -221,13 +225,13 @@ pub mod object {
         });
     }
 
-    fn get_object_ranges(etag: u64, ranges: &[(usize, usize)]) -> Result<Vec<ByteBuf>> {
+    fn get_object_ranges(etag: u64, ranges: &[(u64, u64)]) -> Result<Vec<ByteBuf>> {
         OBJECT_DATA.with_borrow(|od| {
             let mut result = Vec::with_capacity(ranges.len());
             let mut chunk_cache: Option<(u32, Chunk)> = None; // cache the last chunk read
 
             for &(start, end) in ranges {
-                let mut buf = Vec::with_capacity(end - start);
+                let mut buf = Vec::with_capacity((end - start) as usize);
 
                 // Calculate the chunk indices we need to read
                 let start_chunk = (start / CHUNK_SIZE) as u32;
@@ -236,15 +240,15 @@ pub mod object {
                 for idx in start_chunk..=end_chunk {
                     // Calculate the byte range within this chunk
                     let chunk_start = if idx == start_chunk {
-                        start % CHUNK_SIZE
+                        (start % CHUNK_SIZE) as usize
                     } else {
                         0
                     };
 
                     let chunk_end = if idx == end_chunk {
-                        (end - 1) % CHUNK_SIZE + 1
+                        ((end - 1) % CHUNK_SIZE + 1) as usize
                     } else {
-                        CHUNK_SIZE
+                        CHUNK_SIZE as usize
                     };
 
                     match &chunk_cache {
@@ -272,7 +276,7 @@ pub mod object {
 
     fn delete_object_data(etag: u64, size: usize) {
         OBJECT_DATA.with_borrow_mut(|od| {
-            for idx in 0..size.div_ceil(CHUNK_SIZE) {
+            for idx in 0..size.div_ceil(CHUNK_SIZE as usize) {
                 od.remove(&ObjectId(etag, idx as u32));
             }
         });
@@ -287,7 +291,7 @@ pub mod object {
         STATE.with_borrow_mut(|s| {
             let mut meta = ObjectMetadata {
                 last_modified: now_ms,
-                size: payload.len(),
+                size: payload.len() as u64,
                 tags: opts.tags,
                 attributes: opts.attributes,
                 aes_nonce: opts.aes_nonce,
@@ -296,7 +300,7 @@ pub mod object {
             };
 
             if let Some(tags) = &meta.aes_tags {
-                let parts = payload.len().div_ceil(CHUNK_SIZE);
+                let parts = payload.len().div_ceil(CHUNK_SIZE as usize);
                 if tags.len() != parts {
                     return Err(Error::Precondition {
                         path,
@@ -596,7 +600,7 @@ pub mod object {
                 let mut size = 0;
                 for idx in 0..parts {
                     if let Some(chunk) = od.get(&ObjectId(etag, idx)) {
-                        if idx != parts - 1 && chunk.0.len() != CHUNK_SIZE {
+                        if idx != parts - 1 && chunk.0.len() != CHUNK_SIZE as usize {
                             return Err(Error::Precondition {
                                 path,
                                 error: format!("invalid part size {} at {}", chunk.0.len(), idx),
@@ -616,7 +620,7 @@ pub mod object {
                         etag,
                         ObjectMetadata {
                             last_modified: now_ms,
-                            size,
+                            size: size as u64,
                             tags: opts.tags,
                             attributes: opts.attributes,
                             aes_nonce: opts.aes_nonce,
@@ -735,12 +739,14 @@ pub mod object {
             }
 
             let r = match opts.range {
-                Some(range) => range
-                    .into_range(me.size)
-                    .map_err(|error| Error::Precondition {
-                        path: path.clone(),
-                        error,
-                    })?,
+                Some(range) => {
+                    range
+                        .into_range(me.size)
+                        .map_err(|error| Error::Precondition {
+                            path: path.clone(),
+                            error,
+                        })?
+                }
                 None => 0..me.size,
             };
 
@@ -762,7 +768,7 @@ pub mod object {
         })
     }
 
-    pub fn get_ranges(path: String, ranges: Vec<(usize, usize)>) -> Result<Vec<ByteBuf>> {
+    pub fn get_ranges(path: String, ranges: Vec<(u64, u64)>) -> Result<Vec<ByteBuf>> {
         STATE.with_borrow(|s| {
             let (etag, size) = s
                 .locations
@@ -777,8 +783,10 @@ pub mod object {
 
             let size = *size as usize;
             let mut total = 0;
-            for (start, end) in &ranges {
-                if start >= end || end > &size {
+            for &(start, end) in &ranges {
+                let start = start as usize;
+                let end = end as usize;
+                if start >= end || end > size {
                     return Err(Error::Precondition {
                         path: path.clone(),
                         error: format!("invalid range ({start}, {end})"),
@@ -787,7 +795,7 @@ pub mod object {
                 total += end - start;
             }
 
-            if total > MAX_PAYLOAD_SIZE {
+            if total > MAX_PAYLOAD_SIZE as usize {
                 return Err(Error::Precondition {
                     path,
                     error: "payload size exceeds max size".to_string(),
@@ -1000,7 +1008,7 @@ mod test {
 
         // Test head
         let meta = object::head(path.clone()).unwrap();
-        assert_eq!(meta.size, payload.len());
+        assert_eq!(meta.size as usize, payload.len());
         assert_eq!(meta.e_tag, Some("0".to_string()));
 
         // Test create again
@@ -1022,7 +1030,7 @@ mod test {
 
         let res = object::get_opts(path.clone(), GetOptions::default()).unwrap();
         assert_eq!(res.payload, payload);
-        assert_eq!(res.meta.size, payload.len());
+        assert_eq!(res.meta.size as usize, payload.len());
 
         // Test update
         let payload = ByteBuf::from("hello Anda 2");
@@ -1058,7 +1066,7 @@ mod test {
         assert_eq!(res.payload, payload);
         assert_eq!(res.meta.location, path);
         assert_eq!(res.meta.e_tag, Some("0".to_string()));
-        assert_eq!(res.meta.size, payload.len());
+        assert_eq!(res.meta.size as usize, payload.len());
         assert_eq!(res.meta.version, Some("1".to_string()));
 
         // Test copy
@@ -1077,7 +1085,7 @@ mod test {
         assert_eq!(res.payload, payload);
         assert_eq!(res.meta.location, to);
         assert_eq!(res.meta.e_tag, Some("1".to_string()));
-        assert_eq!(res.meta.size, payload.len());
+        assert_eq!(res.meta.size as usize, payload.len());
         assert_eq!(res.meta.version, Some("1".to_string()));
 
         object::copy_if_not_exists(to.clone(), path.clone()).unwrap();
@@ -1085,7 +1093,7 @@ mod test {
         assert_eq!(res.payload, payload);
         assert_eq!(res.meta.location, path);
         assert_eq!(res.meta.e_tag, Some("2".to_string()));
-        assert_eq!(res.meta.size, payload.len());
+        assert_eq!(res.meta.size as usize, payload.len());
         assert_eq!(res.meta.version, Some("1".to_string()));
 
         // Test rename
@@ -1097,7 +1105,7 @@ mod test {
         assert_eq!(res.payload, payload);
         assert_eq!(res.meta.location, rename);
         assert_eq!(res.meta.e_tag, Some("1".to_string()));
-        assert_eq!(res.meta.size, payload.len());
+        assert_eq!(res.meta.size as usize, payload.len());
         assert_eq!(res.meta.version, Some("1".to_string()));
 
         assert!(object::rename_if_not_exists(path.clone(), rename.clone()).is_err());
@@ -1108,7 +1116,7 @@ mod test {
         assert_eq!(res.payload, payload);
         assert_eq!(res.meta.location, rename);
         assert_eq!(res.meta.e_tag, Some("2".to_string()));
-        assert_eq!(res.meta.size, payload.len());
+        assert_eq!(res.meta.size as usize, payload.len());
         assert_eq!(res.meta.version, Some("1".to_string()));
 
         // Test rename with overwrite
@@ -1119,7 +1127,7 @@ mod test {
         assert_eq!(res.payload, payload);
         assert_eq!(res.meta.location, rename);
         assert_eq!(res.meta.e_tag, Some("1".to_string()));
-        assert_eq!(res.meta.size, payload.len());
+        assert_eq!(res.meta.size as usize, payload.len());
         assert_eq!(res.meta.version, Some("1".to_string()));
     }
 
@@ -1207,13 +1215,13 @@ mod test {
     fn test_large_objects() {
         // Test basic put/get
         let path = "test/a.bin".to_string();
-        let count = 10000usize;
+        let count = 10000u64;
         let len = count * 32;
-        let mut payload = Vec::with_capacity(len);
+        let mut payload = Vec::with_capacity(len as usize);
         for i in 0..count {
             payload.extend_from_slice(sha3_256(&i.to_be_bytes()).as_slice());
         }
-        assert_eq!(payload.len(), len);
+        assert_eq!(payload.len(), len as usize);
 
         object::put_opts(
             path.clone(),
@@ -1228,15 +1236,15 @@ mod test {
         let res = object::get_opts(path.clone(), GetOptions::default()).unwrap();
         assert_eq!(&res.payload, &payload);
         assert_eq!(res.meta.location, path);
-        assert_eq!(res.meta.size, payload.len());
+        assert_eq!(res.meta.size as usize, payload.len());
 
         let res = object::get_part(path.clone(), 0).unwrap();
-        assert_eq!(res, payload[0..CHUNK_SIZE]);
+        assert_eq!(res, payload[0..CHUNK_SIZE as usize]);
         let res = object::get_part(path.clone(), 1).unwrap();
-        assert_eq!(res, payload[CHUNK_SIZE..]);
+        assert_eq!(res, payload[CHUNK_SIZE as usize..]);
         assert!(object::get_part(path.clone(), 2).is_err());
 
-        let ranges = vec![(0usize, 1000), (10usize, 10000), (100usize, len)];
+        let ranges = vec![(0u64, 1000), (10, 10000), (100, len)];
         let rt = object::get_ranges(path.clone(), ranges.clone()).unwrap();
         assert_eq!(rt.len(), ranges.len());
         for (i, (start, end)) in ranges.into_iter().enumerate() {
@@ -1249,9 +1257,9 @@ mod test {
             )
             .unwrap();
             assert_eq!(rt[i], &res.payload);
-            assert_eq!(&res.payload, &payload[start..end]);
+            assert_eq!(&res.payload, &payload[start as usize..end as usize]);
             assert_eq!(res.meta.location, path);
-            assert_eq!(res.meta.size, payload.len());
+            assert_eq!(res.meta.size as usize, payload.len());
         }
 
         assert!(object::get_opts(
@@ -1285,18 +1293,18 @@ mod test {
     fn test_multipart() {
         // Test basic put/get
         let path = "test/b.bin".to_string();
-        let count = 100000usize;
+        let count = 100000u64;
         let len = count * 32;
-        let mut payload = Vec::with_capacity(len);
+        let mut payload = Vec::with_capacity(len as usize);
         for i in 0..count {
             payload.extend_from_slice(sha3_256(&i.to_be_bytes()).as_slice());
         }
-        assert_eq!(payload.len(), len);
+        assert_eq!(payload.len(), len as usize);
 
         let id = object::create_multipart(path.clone()).unwrap();
         assert!(object::create_multipart(path.clone()).is_err());
 
-        let chunks: Vec<&[u8]> = payload.chunks(CHUNK_SIZE).collect();
+        let chunks: Vec<&[u8]> = payload.chunks(CHUNK_SIZE as usize).collect();
         for (i, chunk) in chunks.iter().enumerate().skip(1) {
             object::put_part(
                 path.clone(),
@@ -1328,8 +1336,8 @@ mod test {
             .unwrap();
 
         let ranges = vec![
-            (0usize, 1000),
-            (100usize, 100000),
+            (0u64, 1000),
+            (100, 100000),
             (len - CHUNK_SIZE * 2, len),
         ];
         let rt = object::get_ranges(path.clone(), ranges.clone()).unwrap();
@@ -1344,9 +1352,9 @@ mod test {
             )
             .unwrap();
             assert_eq!(rt[i], &res.payload);
-            assert_eq!(&res.payload, &payload[start..end]);
+            assert_eq!(&res.payload, &payload[start as usize..end as usize]);
             assert_eq!(res.meta.location, path);
-            assert_eq!(res.meta.size, payload.len());
+            assert_eq!(res.meta.size as usize, payload.len());
         }
     }
 }

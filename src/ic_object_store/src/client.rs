@@ -164,7 +164,7 @@ pub trait ObjectStoreSDK: CanisterCaller + Sized {
         payload: &Bytes,
         mut opts: PutOptions,
     ) -> Result<PutResult> {
-        if payload.len() > MAX_PAYLOAD_SIZE {
+        if payload.len() > MAX_PAYLOAD_SIZE as usize {
             return Err(Error::Precondition {
                 path: path.as_ref().to_string(),
                 error: format!(
@@ -179,7 +179,7 @@ pub trait ObjectStoreSDK: CanisterCaller + Sized {
             let nonce: [u8; 12] = rand_bytes();
             let mut data = payload.to_vec();
             let mut aes_tags: Vec<ByteArray<16>> = Vec::new();
-            for chunk in data.chunks_mut(CHUNK_SIZE) {
+            for chunk in data.chunks_mut(CHUNK_SIZE as usize) {
                 let tag = aes256_gcm_encrypt_in(cipher, &nonce, &[], chunk).map_err(|err| {
                     Error::Generic {
                         error: format!("AES256 encrypt failed: {}", err),
@@ -272,7 +272,7 @@ pub trait ObjectStoreSDK: CanisterCaller + Sized {
         &self,
         path: &Path,
         id: &MultipartId,
-        part_idx: usize,
+        part_idx: u64,
         payload: &Bytes,
     ) -> Result<PartId> {
         self.canister_update(
@@ -314,7 +314,7 @@ pub trait ObjectStoreSDK: CanisterCaller + Sized {
     }
 
     /// Retrieves a specific part of data
-    async fn get_part(&self, path: &Path, part_idx: usize) -> Result<ByteBuf> {
+    async fn get_part(&self, path: &Path, part_idx: u64) -> Result<ByteBuf> {
         self.canister_query(self.canister(), "get_part", (path.as_ref(), part_idx))
             .await
             .map_err(|error| Error::Generic {
@@ -357,7 +357,7 @@ pub trait ObjectStoreSDK: CanisterCaller + Sized {
                 error: "missing AES256 tags".to_string(),
             })?;
             let mut chunk_cache: Option<(u32, Vec<u8>)> = None; // cache the last chunk read
-            let mut buf = Vec::with_capacity(r.end - r.start);
+            let mut buf = Vec::with_capacity((r.end - r.start) as usize);
 
             // Calculate the chunk indices we need to read
             let start_chunk = (r.start / CHUNK_SIZE) as u32;
@@ -379,10 +379,12 @@ pub trait ObjectStoreSDK: CanisterCaller + Sized {
 
                 match &chunk_cache {
                     Some((cached_idx, cached_chunk)) if *cached_idx == idx => {
-                        buf.extend_from_slice(&cached_chunk[chunk_start..chunk_end]);
+                        buf.extend_from_slice(
+                            &cached_chunk[chunk_start as usize..chunk_end as usize],
+                        );
                     }
                     _ => {
-                        let chunk = self.get_part(path, idx as usize).await?;
+                        let chunk = self.get_part(path, idx as u64).await?;
                         let mut chunk = chunk.into_vec();
                         aes256_gcm_decrypt_in(
                             cipher,
@@ -394,7 +396,7 @@ pub trait ObjectStoreSDK: CanisterCaller + Sized {
                         .map_err(|err| Error::Generic {
                             error: format!("AES256 decrypt failed: {}", err),
                         })?;
-                        buf.extend_from_slice(&chunk[chunk_start..chunk_end]);
+                        buf.extend_from_slice(&chunk[chunk_start as usize..chunk_end as usize]);
                         chunk_cache = Some((idx, chunk));
                     }
                 }
@@ -413,7 +415,7 @@ pub trait ObjectStoreSDK: CanisterCaller + Sized {
     }
 
     /// Retrieves multiple ranges of data
-    async fn get_ranges(&self, path: &Path, ranges: &[(usize, usize)]) -> Result<Vec<ByteBuf>> {
+    async fn get_ranges(&self, path: &Path, ranges: &[(u64, u64)]) -> Result<Vec<ByteBuf>> {
         if ranges.is_empty() {
             return Ok(Vec::new());
         }
@@ -430,7 +432,7 @@ pub trait ObjectStoreSDK: CanisterCaller + Sized {
             let mut result = Vec::with_capacity(ranges.len());
             let mut chunk_cache: Option<(u32, Vec<u8>)> = None; // cache the last chunk read
             for &(start, end) in ranges {
-                let mut buf = Vec::with_capacity(end - start);
+                let mut buf = Vec::with_capacity((end - start) as usize);
 
                 // Calculate the chunk indices we need to read
                 let start_chunk = (start / CHUNK_SIZE) as u32;
@@ -452,10 +454,12 @@ pub trait ObjectStoreSDK: CanisterCaller + Sized {
 
                     match &chunk_cache {
                         Some((cached_idx, cached_chunk)) if *cached_idx == idx => {
-                            buf.extend_from_slice(&cached_chunk[chunk_start..chunk_end]);
+                            buf.extend_from_slice(
+                                &cached_chunk[chunk_start as usize..chunk_end as usize],
+                            );
                         }
                         _ => {
-                            let chunk = self.get_part(path, idx as usize).await?;
+                            let chunk = self.get_part(path, idx as u64).await?;
                             let mut chunk = chunk.into_vec();
                             aes256_gcm_decrypt_in(
                                 cipher,
@@ -467,7 +471,7 @@ pub trait ObjectStoreSDK: CanisterCaller + Sized {
                             .map_err(|err| Error::Generic {
                                 error: format!("AES256 decrypt failed: {}", err),
                             })?;
-                            buf.extend_from_slice(&chunk[chunk_start..chunk_end]);
+                            buf.extend_from_slice(&chunk[chunk_start as usize..chunk_end as usize]);
                             chunk_cache = Some((idx, chunk));
                         }
                     }
@@ -537,7 +541,7 @@ pub trait ObjectStoreSDK: CanisterCaller + Sized {
 /// Handles multipart upload operations
 #[derive(Debug)]
 pub struct MultipartUploader {
-    part_idx: usize,
+    part_idx: u64,
     parts_cache: Vec<u8>,
     opts: PutMultipartOpts,
     state: Arc<UploadState>,
@@ -562,12 +566,12 @@ impl MultipartUpload for MultipartUploader {
     fn put_part(&mut self, payload: object_store::PutPayload) -> object_store::UploadPart {
         let payload = bytes::Bytes::from(payload);
         self.parts_cache.extend_from_slice(&payload);
-        if self.parts_cache.len() < CHUNK_SIZE {
+        if self.parts_cache.len() < CHUNK_SIZE as usize {
             return Box::pin(futures::future::ready(Ok(())));
         }
 
-        let mut part = Vec::with_capacity(CHUNK_SIZE);
-        part.extend_from_slice(self.parts_cache.drain(..CHUNK_SIZE).as_slice());
+        let mut part = Vec::with_capacity(CHUNK_SIZE as usize);
+        part.extend_from_slice(self.parts_cache.drain(..CHUNK_SIZE as usize).as_slice());
 
         if let Some(cipher) = &self.state.client.cipher {
             let tag = aes256_gcm_encrypt_in(
@@ -604,7 +608,7 @@ impl MultipartUpload for MultipartUploader {
 
     /// Finalizes the multipart upload and returns result
     async fn complete(&mut self) -> object_store::Result<object_store::PutResult> {
-        for part in self.parts_cache.chunks_mut(CHUNK_SIZE) {
+        for part in self.parts_cache.chunks_mut(CHUNK_SIZE as usize) {
             let part_idx = self.part_idx;
             self.part_idx += 1;
 
@@ -787,7 +791,7 @@ impl ObjectStore for ObjectStoreClient {
     async fn get_range(
         &self,
         path: &Path,
-        range: Range<usize>,
+        range: Range<u64>,
     ) -> object_store::Result<bytes::Bytes> {
         #[allow(clippy::single_range_in_vec_init)]
         let mut res = self.get_ranges(path, &[range.start..range.end]).await?;
@@ -801,9 +805,9 @@ impl ObjectStore for ObjectStoreClient {
     async fn get_ranges(
         &self,
         location: &Path,
-        ranges: &[Range<usize>],
+        ranges: &[Range<u64>],
     ) -> object_store::Result<Vec<bytes::Bytes>> {
-        let ranges: Vec<(usize, usize)> = ranges.iter().map(|r| (r.start, r.end)).collect();
+        let ranges: Vec<(u64, u64)> = ranges.iter().map(|r| (r.start, r.end)).collect();
         let res = self
             .client
             .get_ranges(location, &ranges)
@@ -831,10 +835,11 @@ impl ObjectStore for ObjectStoreClient {
     fn list(
         &self,
         prefix: Option<&Path>,
-    ) -> BoxStream<'_, object_store::Result<object_store::ObjectMeta>> {
+    ) -> BoxStream<'static, object_store::Result<object_store::ObjectMeta>> {
         let prefix = prefix.cloned();
+        let client = self.client.clone();
         futures::stream::once(async move {
-            let res = self.client.list(prefix.as_ref()).await;
+            let res = client.list(prefix.as_ref()).await;
             let values: Vec<object_store::Result<object_store::ObjectMeta, object_store::Error>> =
                 match res {
                     Ok(res) => res.into_iter().map(|v| Ok(from_object_meta(v))).collect(),
@@ -852,11 +857,12 @@ impl ObjectStore for ObjectStoreClient {
         &self,
         prefix: Option<&Path>,
         offset: &Path,
-    ) -> BoxStream<'_, object_store::Result<object_store::ObjectMeta>> {
+    ) -> BoxStream<'static, object_store::Result<object_store::ObjectMeta>> {
         let prefix = prefix.cloned();
         let offset = offset.clone();
+        let client = self.client.clone();
         futures::stream::once(async move {
-            let res = self.client.list_with_offset(prefix.as_ref(), &offset).await;
+            let res = client.list_with_offset(prefix.as_ref(), &offset).await;
             let values: Vec<object_store::Result<object_store::ObjectMeta, object_store::Error>> =
                 match res {
                     Ok(res) => res.into_iter().map(|v| Ok(from_object_meta(v))).collect(),
@@ -1091,7 +1097,7 @@ mod tests {
 
         let res = oc.get_opts(&path, Default::default()).await.unwrap();
         println!("get result: {:?}", res);
-        assert_eq!(res.meta.size, payload.len());
+        assert_eq!(res.meta.size as usize, payload.len());
         let res = match res.payload {
             object_store::GetResultPayload::Stream(mut stream) => {
                 let mut buf = Vec::new();
@@ -1100,13 +1106,12 @@ mod tests {
                 }
                 buf
             }
-            _ => panic!("unexpected payload"),
         };
         assert_eq!(res, payload);
 
         let res = cli.get_opts(&path, Default::default()).await.unwrap();
         println!("get result: {:?}", res);
-        assert_eq!(res.meta.size, payload.len());
+        assert_eq!(res.meta.size as usize, payload.len());
         assert_eq!(&res.payload, &payload);
         let aes_nonce = res.meta.aes_nonce.unwrap();
         assert_eq!(aes_nonce.len(), 12);
@@ -1115,9 +1120,9 @@ mod tests {
 
         let now = chrono::Utc::now();
         let path = Path::from(format!("test/{}.bin", now.timestamp_millis()));
-        let count = 20000usize;
+        let count = 20000u64;
         let len = count * 32;
-        let mut payload = Vec::with_capacity(len);
+        let mut payload = Vec::with_capacity(len as usize);
         {
             let mut uploder = oc
                 .put_multipart_opts(&path, Default::default())
@@ -1136,7 +1141,7 @@ mod tests {
             uploder.complete().await.unwrap();
         }
         let res = oc.get_opts(&path, Default::default()).await.unwrap();
-        assert_eq!(res.meta.size, payload.len());
+        assert_eq!(res.meta.size as usize, payload.len());
         let res = match res.payload {
             object_store::GetResultPayload::Stream(mut stream) => {
                 let mut buf = bytes::BytesMut::new();
@@ -1145,23 +1150,18 @@ mod tests {
                 }
                 buf.freeze() // Convert to immutable Bytes
             }
-            _ => panic!("unexpected payload"),
         };
         assert_eq!(res, payload);
 
         let res = cli.get_opts(&path, Default::default()).await.unwrap();
-        assert_eq!(res.meta.size, payload.len());
+        assert_eq!(res.meta.size as usize, payload.len());
         assert_eq!(&res.payload, &payload);
         let aes_nonce = res.meta.aes_nonce.unwrap();
         assert_eq!(aes_nonce.len(), 12);
         let aes_tags = res.meta.aes_tags.unwrap();
-        assert_eq!(aes_tags.len(), len.div_ceil(CHUNK_SIZE));
+        assert_eq!(aes_tags.len(), len.div_ceil(CHUNK_SIZE) as usize);
 
-        let ranges = vec![
-            (0usize, 1000),
-            (100usize, 100000),
-            (len - CHUNK_SIZE - 1, len),
-        ];
+        let ranges = vec![(0u64, 1000), (100, 100000), (len - CHUNK_SIZE - 1, len)];
 
         let rt = cli.get_ranges(&path, &ranges).await.unwrap();
         assert_eq!(rt.len(), ranges.len());
@@ -1177,9 +1177,9 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(rt[i], &res.payload);
-            assert_eq!(&res.payload, &payload[start..end]);
+            assert_eq!(&res.payload, &payload[start as usize..end as usize]);
             assert_eq!(res.meta.location, path.as_ref());
-            assert_eq!(res.meta.size, payload.len());
+            assert_eq!(res.meta.size as usize, payload.len());
         }
     }
 }

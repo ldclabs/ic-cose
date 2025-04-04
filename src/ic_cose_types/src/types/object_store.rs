@@ -6,10 +6,10 @@ use std::{
     ops::Range,
 };
 
-pub const CHUNK_SIZE: usize = 256 * 1024;
-pub const MAX_PARTS: usize = 1024;
+pub const CHUNK_SIZE: u64 = 256 * 1024;
+pub const MAX_PARTS: u64 = 1024;
 // https://internetcomputer.org/docs/current/developer-docs/smart-contracts/maintain/resource-limits
-pub const MAX_PAYLOAD_SIZE: usize = 2000 * 1024;
+pub const MAX_PAYLOAD_SIZE: u64 = 2000 * 1024;
 
 // https://github.com/apache/arrow-rs/blob/main/object_store/src/lib.rs
 
@@ -199,16 +199,16 @@ pub enum GetRange {
     /// an error will be returned. Additionally, if the range ends after the end
     /// of the object, the entire remainder of the object will be returned.
     /// Otherwise, the exact requested range will be returned.
-    Bounded(usize, usize),
+    Bounded(u64, u64),
     /// Request all bytes starting from a given byte offset
-    Offset(usize),
+    Offset(u64),
     /// Request up to the last n bytes
-    Suffix(usize),
+    Suffix(u64),
 }
 
 impl GetRange {
     /// Convert to a [`Range`] if valid.
-    pub fn into_range(self, len: usize) -> Result<Range<usize>, String> {
+    pub fn into_range(self, len: u64) -> Result<Range<u64>, String> {
         match self {
             Self::Bounded(start, end) => {
                 if start >= end {
@@ -244,7 +244,7 @@ impl GetRange {
 pub struct GetResult {
     pub payload: ByteBuf,
     pub meta: ObjectMeta,
-    pub range: (usize, usize),
+    pub range: (u64, u64),
     pub attributes: BTreeMap<Attribute, String>,
 }
 
@@ -255,7 +255,7 @@ pub struct ObjectMeta {
     /// The last modified time
     pub last_modified: u64,
     /// The size in bytes of the object
-    pub size: usize,
+    pub size: u64,
     /// The unique identifier for the object
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9110#name-etag>

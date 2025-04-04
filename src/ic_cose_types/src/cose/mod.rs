@@ -1,6 +1,6 @@
 use coset::{CoseKeyBuilder, Label, RegisteredLabel};
 use hmac::{Hmac, Mac};
-use sha3::{Digest, Sha3_256};
+use sha3::Digest;
 
 pub mod aes;
 pub mod cwt;
@@ -31,13 +31,19 @@ pub fn sha256(data: &[u8]) -> [u8; 32] {
 }
 
 pub fn sha3_256(data: &[u8]) -> [u8; 32] {
-    let mut hasher = Sha3_256::new();
+    let mut hasher = sha3::Sha3_256::new();
+    hasher.update(data);
+    hasher.finalize().into()
+}
+
+pub fn keccak256(data: &[u8]) -> [u8; 32] {
+    let mut hasher = sha3::Keccak256::new();
     hasher.update(data);
     hasher.finalize().into()
 }
 
 pub fn sha3_256_n<const N: usize>(array: [&[u8]; N]) -> [u8; 32] {
-    let mut hasher = Sha3_256::new();
+    let mut hasher = sha3::Sha3_256::new();
     for data in array {
         hasher.update(data);
     }
@@ -45,7 +51,8 @@ pub fn sha3_256_n<const N: usize>(array: [&[u8]; N]) -> [u8; 32] {
 }
 
 pub fn mac3_256(key: &[u8], data: &[u8]) -> [u8; 32] {
-    let mut mac = Hmac::<Sha3_256>::new_from_slice(key).expect("HMAC can take key of any size");
+    let mut mac =
+        Hmac::<sha3::Sha3_256>::new_from_slice(key).expect("HMAC can take key of any size");
     mac.update(data);
     mac.finalize().into_bytes().into()
 }

@@ -32,7 +32,7 @@ fn is_member(member_kind: String, user: Principal) -> Result<bool, String> {
 fn put_opts(path: String, payload: ByteBuf, opts: PutOptions) -> Result<PutResult> {
     is_writer()?;
     parse_path(&path)?;
-    if payload.len() > MAX_PAYLOAD_SIZE {
+    if payload.len() as u64 > MAX_PAYLOAD_SIZE {
         return Err(Error::Precondition {
             path,
             error: format!(
@@ -118,7 +118,7 @@ fn create_multipart(path: String) -> Result<MultipartId> {
 }
 
 #[ic_cdk::update]
-fn put_part(path: String, id: MultipartId, part_idx: usize, payload: ByteBuf) -> Result<PartId> {
+fn put_part(path: String, id: MultipartId, part_idx: u64, payload: ByteBuf) -> Result<PartId> {
     is_writer()?;
     if part_idx >= MAX_PARTS {
         return Err(Error::Precondition {
@@ -130,7 +130,8 @@ fn put_part(path: String, id: MultipartId, part_idx: usize, payload: ByteBuf) ->
             ),
         });
     }
-    if payload.len() > CHUNK_SIZE {
+
+    if payload.len() as u64 > CHUNK_SIZE {
         return Err(Error::Precondition {
             path,
             error: format!(
@@ -157,7 +158,7 @@ fn abort_multipart(path: String, id: MultipartId) -> Result<()> {
 }
 
 #[ic_cdk::query]
-fn get_part(path: String, part_idx: usize) -> Result<ByteBuf> {
+fn get_part(path: String, part_idx: u64) -> Result<ByteBuf> {
     is_reader()?;
     if part_idx > MAX_PARTS {
         return Err(Error::Precondition {
@@ -180,7 +181,7 @@ fn get_opts(path: String, opts: GetOptions) -> Result<GetResult> {
 }
 
 #[ic_cdk::query]
-fn get_ranges(path: String, ranges: Vec<(usize, usize)>) -> Result<Vec<ByteBuf>> {
+fn get_ranges(path: String, ranges: Vec<(u64, u64)>) -> Result<Vec<ByteBuf>> {
     is_reader()?;
     store::object::get_ranges(path, ranges)
 }

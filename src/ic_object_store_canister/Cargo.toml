@@ -21,6 +21,6 @@ ic-cdk = { workspace = true }
 serde = { workspace = true }
 serde_bytes = { workspace = true }
 ic-stable-structures = { workspace = true }
-object_store = { workspace = true }
+object_store = { workspace = true, default-features = false }
 getrandom = { workspace = true }
 ic_cose_types = { path = "../ic_cose_types", version = "0.7" }
