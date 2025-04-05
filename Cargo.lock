@@ -1343,9 +1343,9 @@ checksum = "8de254dd67bbd58073e23dc1c8553ba12fa1dc610a19de94ad2bbcd0460c067f"
 
 [[package]]
 name = "ic_auth_types"
-version = "0.2.3"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4966c59cca6920b316d67a44fd4849d591a805ab34556b1112ad6004f40efe2c"
+checksum = "06bbb5ec7e8ebafbc2e23a6768226721eb7ea61040413cbde9a11c97b9e0dfda"
 dependencies = [
  "base64 0.22.1",
  "candid",
@@ -1355,9 +1355,9 @@ dependencies = [
 
 [[package]]
 name = "ic_auth_verifier"
-version = "0.2.3"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5bd14243421400b4f13056feddc079938dc37785f2705a1e8c00377026c800dc"
+checksum = "7005ce7351fb903f8f26e0d4f68e73369d437dfd1560794ebe40938385c82e59"
 dependencies = [
  "candid",
  "ciborium",
@@ -1367,7 +1367,6 @@ dependencies = [
  "k256",
  "p256",
  "serde",
- "serde_bytes",
  "sha2 0.10.8",
  "sha3",
  "simple_asn1",
@@ -1389,7 +1388,7 @@ dependencies = [
 
 [[package]]
 name = "ic_cose"
-version = "0.7.0"
+version = "0.7.2"
 dependencies = [
  "async-trait",
  "candid",
@@ -1403,7 +1402,7 @@ dependencies = [
 
 [[package]]
 name = "ic_cose_canister"
-version = "0.7.0"
+version = "0.7.2"
 dependencies = [
  "candid",
  "ciborium",
@@ -1426,7 +1425,7 @@ dependencies = [
 
 [[package]]
 name = "ic_cose_types"
-version = "0.7.0"
+version = "0.7.2"
 dependencies = [
  "aes-gcm",
  "candid",
@@ -1450,7 +1449,7 @@ dependencies = [
 
 [[package]]
 name = "ic_object_store"
-version = "0.7.0"
+version = "0.7.2"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -1469,11 +1468,11 @@ dependencies = [
 
 [[package]]
 name = "ic_object_store_canister"
-version = "0.7.0"
+version = "0.7.2"
 dependencies = [
  "candid",
  "ciborium",
- "getrandom 0.2.15",
+ "getrandom 0.3.2",
  "ic-cdk",
  "ic-stable-structures",
  "ic_cose_types",
@@ -1497,13 +1496,13 @@ dependencies = [
 
 [[package]]
 name = "ic_wasm_canister"
-version = "0.7.0"
+version = "0.7.2"
 dependencies = [
  "candid",
  "ciborium",
  "const-hex",
  "futures",
- "getrandom 0.2.15",
+ "getrandom 0.3.2",
  "ic-cdk",
  "ic-stable-structures",
  "ic_cose_types",
@@ -1706,9 +1705,9 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.8.0"
+version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3954d50fe15b02142bf25d3b8bdadb634ec3948f103d04ffe3031bc8fe9d7058"
+checksum = "cea70ddb795996207ad57735b50c5982d8844f38ba9ee5f1aedcfb708a2aa11e"
 dependencies = [
  "equivalent",
  "hashbrown 0.15.2",
@@ -2604,7 +2603,7 @@ dependencies = [
  "chrono",
  "hex",
  "indexmap 1.9.3",
- "indexmap 2.8.0",
+ "indexmap 2.9.0",
  "serde",
  "serde_derive",
  "serde_json",
@@ -2715,9 +2714,9 @@ dependencies = [
 
 [[package]]
 name = "smallvec"
-version = "1.14.0"
+version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7fcf8323ef1faaee30a44a340193b1ac6814fd9b7b4e88e9d4519a3e4abe1cfd"
+checksum = "8917285742e9f3e1683f0a9c4e6b57960b7314d0b08d30d1ecd426713ee2eee9"
 
 [[package]]
 name = "socket2"
