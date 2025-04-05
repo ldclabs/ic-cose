@@ -13,7 +13,7 @@ An ICP canister wasm module management service on the Internet Computer.
 
 ```bash
 # dfx canister create --specified-id be2us-64aaa-aaaaa-qaabq-cai ic_wasm_canister
-dfx deploy ic_wasm_canister --argument "(opt variant {Init =
+RUSTFLAGS="--cfg=getrandom_backend=\"custom\"" dfx deploy ic_wasm_canister --argument "(opt variant {Init =
   record {
     name = \"LDC Labs\";
     topup_threshold = 1_000_000_000_000;

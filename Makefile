@@ -14,7 +14,7 @@ test:
 
 # cargo install ic-wasm
 build-wasm:
-	@cargo build --release --target wasm32-unknown-unknown --package ic_cose_canister --package ic_object_store_canister --package ic_wasm_canister
+	@RUSTFLAGS="--cfg=getrandom_backend=\"custom\"" cargo build --release --target wasm32-unknown-unknown --package ic_cose_canister --package ic_object_store_canister --package ic_wasm_canister
 
 # cargo install candid-extractor
 build-did:

@@ -15,7 +15,7 @@ jobs:
         rustup target add wasm32-unknown-unknown
         cargo install ic-wasm
         mkdir out
-        cargo build --target wasm32-unknown-unknown --release --locked -p ic_cose_canister -p ic_object_store_canister -p ic_wasm_canister
+        RUSTFLAGS="--cfg=getrandom_backend=\"custom\"" cargo build --target wasm32-unknown-unknown --release --locked -p ic_cose_canister -p ic_object_store_canister -p ic_wasm_canister
         for CAN in ic_cose_canister ic_object_store_canister ic_wasm_canister
         do
           cp "target/wasm32-unknown-unknown/release/$CAN.wasm" out/

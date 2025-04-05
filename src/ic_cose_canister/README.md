@@ -16,11 +16,11 @@ Try it online: https://a4gq6-oaaaa-aaaab-qaa4q-cai.raw.icp0.io/?id=53cyg-yyaaa-a
 
 Deploy the canister:
 ```bash
-dfx deploy ic_cose_canister
+RUSTFLAGS="--cfg=getrandom_backend=\"custom\"" dfx deploy ic_cose_canister
 
 # or with arguments
 # dfx canister create --specified-id 53cyg-yyaaa-aaaap-ahpua-cai ic_cose_canister
-dfx deploy ic_cose_canister --argument "(opt variant {Init =
+RUSTFLAGS="--cfg=getrandom_backend=\"custom\"" dfx deploy ic_cose_canister --argument "(opt variant {Init =
   record {
     name = \"LDC Labs\";
     ecdsa_key_name = \"dfx_test_key\";

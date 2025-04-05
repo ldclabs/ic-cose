@@ -19,21 +19,18 @@ fn is_controller() -> Result<(), String> {
     }
 }
 
+/// A getrandom implementation that always fails
+#[no_mangle]
 #[cfg(all(
     target_arch = "wasm32",
     target_vendor = "unknown",
     target_os = "unknown"
 ))]
-/// A getrandom implementation that always fails
-pub fn always_fail(_buf: &mut [u8]) -> Result<(), getrandom::Error> {
+unsafe extern "Rust" fn __getrandom_v03_custom(
+    _dest: *mut u8,
+    _len: usize,
+) -> Result<(), getrandom::Error> {
     Err(getrandom::Error::UNSUPPORTED)
 }
-
-#[cfg(all(
-    target_arch = "wasm32",
-    target_vendor = "unknown",
-    target_os = "unknown"
-))]
-getrandom::register_custom_getrandom!(always_fail);
 
 ic_cdk::export_candid!();
