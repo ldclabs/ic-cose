@@ -224,7 +224,7 @@ fn list_with_delimiter(prefix: Option<String>) -> Result<ListResult> {
 }
 
 fn is_writer() -> Result<()> {
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     if store::state::is_writer(&caller) {
         Ok(())
     } else {
@@ -236,7 +236,7 @@ fn is_writer() -> Result<()> {
 }
 
 fn is_reader() -> Result<()> {
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     if store::state::is_reader(&caller) {
         Ok(())
     } else {

@@ -16,7 +16,7 @@ use crate::store;
 fn namespace_get_fixed_identity(namespace: String, name: String) -> Result<Principal, String> {
     let mut seed = vec![];
     into_writer(&(&namespace, &name), &mut seed).expect("failed to encode seed");
-    let user_key = CanisterSigPublicKey::new(ic_cdk::id(), seed);
+    let user_key = CanisterSigPublicKey::new(ic_cdk::api::canister_self(), seed);
     Ok(Principal::self_authenticating(user_key.to_der().as_slice()))
 }
 
@@ -25,7 +25,7 @@ fn namespace_get_delegators(
     namespace: String,
     name: String,
 ) -> Result<BTreeSet<Principal>, String> {
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     store::ns::with(&namespace, |ns| {
         if !ns.can_read_namespace(&caller) {
             return Err("no permission".to_string());
@@ -45,7 +45,7 @@ fn namespace_add_delegator(
     store::state::allowed_api("namespace_add_delegator")?;
     input.validate()?;
 
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     store::ns::with_mut(input.ns, |ns| {
         if !ns.can_write_namespace(&caller) {
             return Err("no permission".to_string());
@@ -62,7 +62,7 @@ fn namespace_remove_delegator(input: NamespaceDelegatorsInput) -> Result<(), Str
     store::state::allowed_api("namespace_remove_delegator")?;
     input.validate()?;
 
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     store::ns::with_mut(input.ns, |ns| {
         if !ns.can_write_namespace(&caller) {
             return Err("no permission".to_string());
@@ -81,7 +81,7 @@ fn namespace_remove_delegator(input: NamespaceDelegatorsInput) -> Result<(), Str
 #[ic_cdk::update]
 fn namespace_sign_delegation(input: SignDelegationInput) -> Result<SignInResponse, String> {
     store::state::allowed_api("namespace_sign_delegation")?;
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
     let name = input.name.to_ascii_lowercase();
 
@@ -93,7 +93,7 @@ fn namespace_sign_delegation(input: SignDelegationInput) -> Result<SignInRespons
 
     let mut seed = vec![];
     into_writer(&(&input.ns, &name), &mut seed).expect("failed to encode seed");
-    let user_key = CanisterSigPublicKey::new(ic_cdk::id(), seed);
+    let user_key = CanisterSigPublicKey::new(ic_cdk::api::canister_self(), seed);
     let session_expires_in_ms = store::ns::with(&input.ns, |ns| {
         if let Some(delegators) = ns.fixed_id_names.get(&name) {
             if delegators.contains(&caller) {

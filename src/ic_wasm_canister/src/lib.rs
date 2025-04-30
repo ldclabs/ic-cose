@@ -1,7 +1,5 @@
 use candid::{utils::ArgumentEncoder, CandidType, Nat, Principal};
-use ic_cdk::api::management_canister::main::{
-    CanisterSettings, CanisterStatusResponse, UpdateSettingsArgument,
-};
+use ic_cdk::management_canister as mgt;
 use ic_cose_types::types::wasm::{
     AddWasmInput, DeployWasmInput, DeploymentInfo, StateInfo, WasmInfo,
 };
@@ -22,7 +20,7 @@ static CMC_PRINCIPAL: Principal = Principal::from_slice(&[0, 0, 0, 0, 0, 0, 0, 4
 const MILLISECONDS: u64 = 1_000_000;
 
 fn is_controller() -> Result<(), String> {
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     if ic_cdk::api::is_controller(&caller) || store::state::is_controller(&caller) {
         Ok(())
     } else {
@@ -31,7 +29,7 @@ fn is_controller() -> Result<(), String> {
 }
 
 fn is_controller_or_manager() -> Result<(), String> {
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     if ic_cdk::api::is_controller(&caller)
         || store::state::is_controller(&caller)
         || store::state::is_manager(&caller)
@@ -43,7 +41,7 @@ fn is_controller_or_manager() -> Result<(), String> {
 }
 
 fn is_controller_or_manager_or_committer() -> Result<(), String> {
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     if ic_cdk::api::is_controller(&caller)
         || store::state::is_controller(&caller)
         || store::state::is_manager(&caller)
@@ -70,15 +68,17 @@ where
     In: ArgumentEncoder + Send,
     Out: candid::CandidType + for<'a> candid::Deserialize<'a>,
 {
-    let (res,): (Out,) = ic_cdk::api::call::call_with_payment128(id, method, args, cycles)
+    let res = ic_cdk::call::Call::bounded_wait(id, method)
+        .with_args(&args)
+        .with_cycles(cycles)
         .await
-        .map_err(|(code, msg)| {
-            format!(
-                "failed to call {} on {:?}, code: {}, message: {}",
-                method, &id, code as u32, msg
-            )
-        })?;
-    Ok(res)
+        .map_err(|err| format!("failed to call {} on {:?}, error: {:?}", method, &id, err))?;
+    res.candid().map_err(|err| {
+        format!(
+            "failed to decode response from {} on {:?}, error: {:?}",
+            method, &id, err
+        )
+    })
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
@@ -96,7 +96,7 @@ pub enum SubnetSelection {
 
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
 struct CreateCanisterInput {
-    pub settings: Option<CanisterSettings>,
+    pub settings: Option<mgt::CanisterSettings>,
     pub subnet_selection: Option<SubnetSelection>,
     pub subnet_type: Option<String>,
 }
@@ -112,7 +112,7 @@ pub enum CreateCanisterOutput {
 
 async fn create_canister_on(
     subnet: Principal,
-    settings: Option<CanisterSettings>,
+    settings: Option<mgt::CanisterSettings>,
     cycles: u128,
 ) -> Result<Principal, String> {
     let arg = CreateCanisterInput {

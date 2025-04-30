@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_bytes::{ByteArray, ByteBuf};
 use std::collections::BTreeMap;
 
-pub use ic_cdk::api::management_canister::schnorr::SchnorrAlgorithm;
+pub use ic_cdk::management_canister::SchnorrAlgorithm;
 pub mod namespace;
 pub mod object_store;
 pub mod setting;

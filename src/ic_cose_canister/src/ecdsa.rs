@@ -1,4 +1,4 @@
-use ic_cdk::api::management_canister::ecdsa;
+use ic_cdk::management_canister as mgt;
 use ic_cose_types::{format_error, types::PublicKeyOutput};
 use serde_bytes::ByteBuf;
 
@@ -39,41 +39,41 @@ pub async fn sign_with_ecdsa(
         return Err("message must be 32 bytes".to_string());
     }
 
-    let args = ecdsa::SignWithEcdsaArgument {
+    let args = mgt::SignWithEcdsaArgs {
         message_hash,
         derivation_path,
-        key_id: ecdsa::EcdsaKeyId {
-            curve: ecdsa::EcdsaCurve::Secp256k1,
+        key_id: mgt::EcdsaKeyId {
+            curve: mgt::EcdsaCurve::Secp256k1,
             name: key_name,
         },
     };
 
-    let (response,): (ecdsa::SignWithEcdsaResponse,) = ecdsa::sign_with_ecdsa(args)
+    let rt = mgt::sign_with_ecdsa(&args)
         .await
         .map_err(|err| format!("sign_with_ecdsa failed {:?}", err))?;
 
-    Ok(response.signature)
+    Ok(rt.signature)
 }
 
 pub async fn ecdsa_public_key(
     key_name: String,
     derivation_path: Vec<Vec<u8>>,
 ) -> Result<PublicKeyOutput, String> {
-    let args = ecdsa::EcdsaPublicKeyArgument {
+    let args = mgt::EcdsaPublicKeyArgs {
         canister_id: None,
         derivation_path,
-        key_id: ecdsa::EcdsaKeyId {
-            curve: ecdsa::EcdsaCurve::Secp256k1,
+        key_id: mgt::EcdsaKeyId {
+            curve: mgt::EcdsaCurve::Secp256k1,
             name: key_name,
         },
     };
 
-    let (response,): (ecdsa::EcdsaPublicKeyResponse,) = ecdsa::ecdsa_public_key(args)
+    let rt = mgt::ecdsa_public_key(&args)
         .await
         .map_err(|err| format!("ecdsa_public_key failed {:?}", err))?;
 
     Ok(PublicKeyOutput {
-        public_key: ByteBuf::from(response.public_key),
-        chain_code: ByteBuf::from(response.chain_code),
+        public_key: ByteBuf::from(rt.public_key),
+        chain_code: ByteBuf::from(rt.chain_code),
     })
 }

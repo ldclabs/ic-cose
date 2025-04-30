@@ -1,5 +1,5 @@
 use candid::Principal;
-use ic_cdk::api::management_canister::main::*;
+use ic_cdk::management_canister as mgt;
 use ic_cose_types::{
     format_error,
     types::wasm::{AddWasmInput, DeployWasmInput},
@@ -82,7 +82,7 @@ async fn admin_add_wasm(
     force_prev_hash: Option<ByteArray<32>>,
 ) -> Result<(), String> {
     store::wasm::add_wasm(
-        ic_cdk::caller(),
+        ic_cdk::api::msg_caller(),
         ic_cdk::api::time() / MILLISECONDS,
         args,
         force_prev_hash,
@@ -96,7 +96,7 @@ async fn validate_admin_add_wasm(
     force_prev_hash: Option<ByteArray<32>>,
 ) -> Result<String, String> {
     store::wasm::add_wasm(
-        ic_cdk::caller(),
+        ic_cdk::api::msg_caller(),
         ic_cdk::api::time() / MILLISECONDS,
         args,
         force_prev_hash,
@@ -108,10 +108,10 @@ async fn validate_admin_add_wasm(
 #[ic_cdk::update(guard = "is_controller")]
 async fn admin_create_canister(
     wasm_name: String,
-    settings: Option<CanisterSettings>,
+    settings: Option<mgt::CanisterSettings>,
     args: Option<ByteBuf>,
 ) -> Result<Principal, String> {
-    let self_id = ic_cdk::id();
+    let self_id = ic_cdk::api::canister_self();
     let mut settings = settings.unwrap_or_default();
     let controllers = settings.controllers.get_or_insert_with(Default::default);
     if !controllers.contains(&self_id) {
@@ -119,19 +119,19 @@ async fn admin_create_canister(
     }
 
     let (hash, wasm) = store::wasm::get_latest(&wasm_name)?;
-    let res = create_canister(
-        CreateCanisterArgument {
+    let res = mgt::create_canister_with_extra_cycles(
+        &mgt::CreateCanisterArgs {
             settings: Some(settings),
         },
         2_000_000_000_000,
     )
     .await
     .map_err(format_error)?;
-    let canister_id = res.0.canister_id;
+    let canister_id = res.canister_id;
 
     let arg = args.unwrap_or_else(|| ByteBuf::from(EMPTY_CANDID_ARGS));
-    let res = install_code(InstallCodeArgument {
-        mode: CanisterInstallMode::Install,
+    let res = mgt::install_code(&mgt::InstallCodeArgs {
+        mode: mgt::CanisterInstallMode::Install,
         canister_id,
         wasm_module: wasm.wasm.into_vec(),
         arg: arg.clone().into_vec(),
@@ -161,10 +161,10 @@ async fn admin_create_canister(
 async fn admin_create_on(
     subnet: Principal,
     wasm_name: String,
-    settings: Option<CanisterSettings>,
+    settings: Option<mgt::CanisterSettings>,
     args: Option<ByteBuf>,
 ) -> Result<Principal, String> {
-    let self_id = ic_cdk::id();
+    let self_id = ic_cdk::api::canister_self();
     let mut settings = settings.unwrap_or_default();
     let controllers = settings.controllers.get_or_insert_with(Default::default);
     if !controllers.contains(&self_id) {
@@ -176,8 +176,8 @@ async fn admin_create_on(
         .await
         .map_err(format_error)?;
     let arg = args.unwrap_or_else(|| ByteBuf::from(EMPTY_CANDID_ARGS));
-    let res = install_code(InstallCodeArgument {
-        mode: CanisterInstallMode::Install,
+    let res = mgt::install_code(&mgt::InstallCodeArgs {
+        mode: mgt::CanisterInstallMode::Install,
         canister_id,
         wasm_module: wasm.wasm.into_vec(),
         arg: arg.clone().into_vec(),
@@ -206,7 +206,7 @@ async fn admin_create_on(
 #[ic_cdk::update]
 fn validate_admin_create_canister(
     wasm_name: String,
-    _settings: Option<CanisterSettings>,
+    _settings: Option<mgt::CanisterSettings>,
     _args: Option<ByteBuf>,
 ) -> Result<String, String> {
     let _ = store::wasm::get_latest(&wasm_name)?;
@@ -217,7 +217,7 @@ fn validate_admin_create_canister(
 fn validate_admin_create_on(
     _subnet: Principal,
     wasm_name: String,
-    _settings: Option<CanisterSettings>,
+    _settings: Option<mgt::CanisterSettings>,
     _args: Option<ByteBuf>,
 ) -> Result<String, String> {
     let _ = store::wasm::get_latest(&wasm_name)?;
@@ -229,13 +229,13 @@ async fn admin_deploy(
     args: DeployWasmInput,
     ignore_prev_hash: Option<ByteArray<32>>,
 ) -> Result<(), String> {
-    let (info,) = canister_info(CanisterInfoRequest {
+    let info = mgt::canister_info(&mgt::CanisterInfoArgs {
         canister_id: args.canister,
         num_requested_changes: None,
     })
     .await
     .map_err(format_error)?;
-    let id = ic_cdk::id();
+    let id = ic_cdk::api::canister_self();
     if !info.controllers.contains(&id) {
         Err(format!(
             "{} is not a controller of the canister {}",
@@ -245,9 +245,9 @@ async fn admin_deploy(
     }
 
     let mode = if info.module_hash.is_none() {
-        CanisterInstallMode::Install
+        mgt::CanisterInstallMode::Install
     } else {
-        CanisterInstallMode::Upgrade(None)
+        mgt::CanisterInstallMode::Upgrade(None)
     };
 
     let prev_hash: [u8; 32] = if let Some(hash) = info.module_hash {
@@ -272,7 +272,7 @@ async fn admin_deploy(
     let arg = args
         .args
         .unwrap_or_else(|| ByteBuf::from(EMPTY_CANDID_ARGS));
-    let res = install_code(InstallCodeArgument {
+    let res = mgt::install_code(&mgt::InstallCodeArgs {
         mode,
         canister_id: args.canister,
         wasm_module: wasm.wasm.into_vec(),
@@ -304,13 +304,13 @@ async fn validate_admin_deploy(
     args: DeployWasmInput,
     ignore_prev_hash: Option<ByteArray<32>>,
 ) -> Result<String, String> {
-    let (info,) = canister_info(CanisterInfoRequest {
+    let info = mgt::canister_info(&mgt::CanisterInfoArgs {
         canister_id: args.canister,
         num_requested_changes: None,
     })
     .await
     .map_err(format_error)?;
-    let id = ic_cdk::id();
+    let id = ic_cdk::api::canister_self();
     if !info.controllers.contains(&id) {
         Err(format!(
             "{} is not a controller of the canister {}",
@@ -370,10 +370,11 @@ async fn admin_batch_call(
     let args = args.unwrap_or_else(|| ByteBuf::from(EMPTY_CANDID_ARGS));
     let mut res = Vec::with_capacity(ids.len());
     for id in ids {
-        let data = ic_cdk::api::call::call_raw(id, &method, &args, 0)
+        let data = ic_cdk::call::Call::bounded_wait(id, &method)
+            .with_raw_args(&args)
             .await
             .map_err(format_error)?;
-        res.push(ByteBuf::from(data));
+        res.push(ByteBuf::from(data.into_bytes()));
     }
 
     Ok(res)
@@ -399,7 +400,7 @@ async fn admin_batch_topup() -> Result<u128, String> {
     let mut total = 0u128;
     for ids in canisters.chunks(7) {
         let res = futures::future::try_join_all(ids.iter().map(|id| async {
-            let balance = ic_cdk::api::canister_balance128();
+            let balance = ic_cdk::api::canister_cycle_balance();
             if balance < threshold + amount {
                 Err(format!(
                     "balance {} is less than threshold {} + amount {}",
@@ -407,10 +408,12 @@ async fn admin_batch_topup() -> Result<u128, String> {
                 ))?;
             }
 
-            let arg = CanisterIdRecord { canister_id: *id };
-            let (status,) = canister_status(arg).await.map_err(format_error)?;
+            let arg = mgt::CanisterStatusArgs { canister_id: *id };
+            let status = mgt::canister_status(&arg).await.map_err(format_error)?;
             if status.cycles <= threshold {
-                deposit_cycles(arg, amount).await.map_err(format_error)?;
+                mgt::deposit_cycles(&arg, amount)
+                    .await
+                    .map_err(format_error)?;
                 return Ok::<u128, String>(amount);
             }
             Ok::<u128, String>(0)
@@ -423,14 +426,14 @@ async fn admin_batch_topup() -> Result<u128, String> {
 }
 
 #[ic_cdk::update(guard = "is_controller")]
-async fn admin_update_canister_settings(args: UpdateSettingsArgument) -> Result<(), String> {
+async fn admin_update_canister_settings(args: mgt::UpdateSettingsArgs) -> Result<(), String> {
     store::state::with(|s| {
         if !s.deployed_list.contains_key(&args.canister_id) {
             return Err("canister not found".to_string());
         }
         Ok(())
     })?;
-    update_settings(args).await.map_err(format_error)?;
+    mgt::update_settings(&args).await.map_err(format_error)?;
     Ok(())
 }
 
@@ -450,7 +453,7 @@ async fn validate_admin_batch_topup() -> Result<String, String> {
 
 #[ic_cdk::update]
 async fn validate_admin_update_canister_settings(
-    args: UpdateSettingsArgument,
+    args: mgt::UpdateSettingsArgs,
 ) -> Result<String, String> {
     store::state::with(|s| {
         if !s.deployed_list.contains_key(&args.canister_id) {

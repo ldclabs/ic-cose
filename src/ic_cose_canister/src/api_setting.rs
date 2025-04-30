@@ -7,7 +7,7 @@ use crate::{is_authenticated, store};
 #[ic_cdk::query]
 fn setting_get_info(path: SettingPath) -> Result<SettingInfo, String> {
     path.validate()?;
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     let spk = store::SettingPathKey::from_path(path, caller);
     store::ns::get_setting_info(caller, spk)
 }
@@ -16,7 +16,7 @@ fn setting_get_info(path: SettingPath) -> Result<SettingInfo, String> {
 #[ic_cdk::query]
 fn setting_get(path: SettingPath) -> Result<SettingInfo, String> {
     path.validate()?;
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     let spk = store::SettingPathKey::from_path(path, caller);
     store::ns::get_setting(caller, spk)
 }
@@ -24,7 +24,7 @@ fn setting_get(path: SettingPath) -> Result<SettingInfo, String> {
 #[ic_cdk::query]
 fn setting_get_archived_payload(path: SettingPath) -> Result<SettingArchivedPayload, String> {
     path.validate()?;
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     let spk = store::SettingPathKey::from_path(path, caller);
     store::ns::get_setting_archived_payload(caller, spk)
 }
@@ -38,7 +38,7 @@ fn setting_create(
     path.validate()?;
     input.validate()?;
 
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     let subject = path.subject.unwrap_or(caller);
     let spk = store::SettingPathKey::from_path(path, subject);
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
@@ -54,7 +54,7 @@ fn setting_update_info(
     path.validate()?;
     input.validate()?;
 
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     let subject = path.subject.unwrap_or(caller);
     let spk = store::SettingPathKey::from_path(path, subject);
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
@@ -70,7 +70,7 @@ fn setting_update_payload(
     path.validate()?;
     input.validate()?;
 
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     let subject = path.subject.unwrap_or(caller);
     let spk = store::SettingPathKey::from_path(path, subject);
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
@@ -83,7 +83,7 @@ fn setting_add_readers(path: SettingPath, mut input: BTreeSet<Principal>) -> Res
     path.validate()?;
     validate_principals(&input)?;
 
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     let subject = path.subject.unwrap_or(caller);
     let spk = store::SettingPathKey::from_path(path, subject);
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
@@ -100,7 +100,7 @@ fn setting_remove_readers(path: SettingPath, input: BTreeSet<Principal>) -> Resu
     path.validate()?;
     validate_principals(&input)?;
 
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     let subject = path.subject.unwrap_or(caller);
     let spk = store::SettingPathKey::from_path(path, subject);
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
@@ -116,7 +116,7 @@ fn setting_delete(path: SettingPath) -> Result<(), String> {
     store::state::allowed_api("setting_delete")?;
     path.validate()?;
 
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     let subject = path.subject.unwrap_or(caller);
     let spk = store::SettingPathKey::from_path(path, subject);
     store::ns::delete_setting(&caller, &spk)

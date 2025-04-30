@@ -11,7 +11,7 @@ mod store;
 use api_init::InstallArgs;
 
 fn is_controller() -> Result<(), String> {
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     if ic_cdk::api::is_controller(&caller) || store::state::is_controller(&caller) {
         Ok(())
     } else {

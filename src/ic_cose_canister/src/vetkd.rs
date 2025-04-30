@@ -3,6 +3,8 @@ use ic_cose_types::format_error;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
+use crate::call;
+
 pub async fn vetkd_public_key(
     key_name: String,
     derivation_path: Vec<Vec<u8>>,
@@ -16,10 +18,11 @@ pub async fn vetkd_public_key(
         },
     };
 
-    let (res,): (VetKDPublicKeyReply,) = ic_cdk::call(
+    let res: VetKDPublicKeyReply = call(
         vetkd_system_api_canister_id(),
         "vetkd_public_key",
         (request,),
+        0,
     )
     .await
     .map_err(format_error)?;
@@ -43,10 +46,11 @@ pub async fn vetkd_encrypted_key(
         },
     };
 
-    let (response,): (VetKDEncryptedKeyReply,) = ic_cdk::call(
+    let response: VetKDEncryptedKeyReply = call(
         vetkd_system_api_canister_id(),
         "vetkd_derive_encrypted_key",
         (request,),
+        0,
     )
     .await
     .map_err(format_error)?;

@@ -15,7 +15,7 @@ use crate::{is_authenticated, rand_bytes, store};
 
 #[ic_cdk::query]
 fn ecdsa_public_key(input: Option<PublicKeyInput>) -> Result<PublicKeyOutput, String> {
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     match input {
         Some(input) => store::ns::ecdsa_public_key(&caller, input.ns, input.derivation_path),
         None => store::state::with(|s| {
@@ -31,7 +31,7 @@ fn ecdsa_public_key(input: Option<PublicKeyInput>) -> Result<PublicKeyOutput, St
 async fn ecdsa_sign(input: SignInput) -> Result<ByteBuf, String> {
     store::state::allowed_api("ecdsa_sign")?;
 
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     store::ns::ecdsa_sign_with(&caller, input.ns, input.derivation_path, input.message).await
 }
 
@@ -40,7 +40,7 @@ fn schnorr_public_key(
     algorithm: SchnorrAlgorithm,
     input: Option<PublicKeyInput>,
 ) -> Result<PublicKeyOutput, String> {
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     match input {
         Some(input) => {
             store::ns::schnorr_public_key(&caller, algorithm, input.ns, input.derivation_path)
@@ -64,7 +64,7 @@ fn schnorr_public_key(
 async fn schnorr_sign(algorithm: SchnorrAlgorithm, input: SignInput) -> Result<ByteBuf, String> {
     store::state::allowed_api("schnorr_sign")?;
 
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     store::ns::schnorr_sign_with(
         &caller,
         algorithm,
@@ -83,7 +83,7 @@ async fn schnorr_sign_identity(
     store::state::allowed_api("schnorr_sign_identity")?;
     validate_str(&input.ns)?;
 
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
     store::ns::sign_identity(&caller, input.ns, input.audience, now_ms, algorithm).await
 }
@@ -98,7 +98,7 @@ async fn ecdh_cose_encrypted_key(
     store::state::allowed_api("ecdh_cose_encrypted_key")?;
     path.validate()?;
 
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     let key_id = path.key.clone();
     let spk = store::SettingPathKey::from_path(path, caller);
     if !store::ns::has_kek_permission(&caller, &spk) {
@@ -129,7 +129,7 @@ async fn vetkd_public_key(path: SettingPath) -> Result<ByteBuf, String> {
     store::state::allowed_api("vetkd_public_key")?;
     path.validate()?;
 
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     let spk = store::SettingPathKey::from_path(path, caller);
     if !store::ns::has_kek_permission(&caller, &spk) {
         Err(format!(
@@ -151,7 +151,7 @@ async fn vetkd_encrypted_key(
     store::state::allowed_api("vetkd_encrypted_key")?;
     path.validate()?;
 
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     let key_id = path.key.clone();
     let spk = store::SettingPathKey::from_path(path, caller);
     if !store::ns::has_kek_permission(&caller, &spk) {

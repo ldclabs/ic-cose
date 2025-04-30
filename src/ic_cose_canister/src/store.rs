@@ -4,7 +4,7 @@ use ic_canister_sig_creation::{
     signature_map::{CanisterSigInputs, SignatureMap, LABEL_SIG},
     DELEGATION_SIG_DOMAIN,
 };
-use ic_cdk::api::set_certified_data;
+use ic_cdk::api::certified_data_set;
 use ic_certification::labeled_hash;
 use ic_cose_types::{
     cose::{
@@ -493,7 +493,7 @@ pub mod state {
             };
             sigs.add_signature(&sig_inputs);
 
-            set_certified_data(&labeled_hash(LABEL_SIG, &sigs.root_hash()));
+            certified_data_set(labeled_hash(LABEL_SIG, &sigs.root_hash()));
         });
     }
 
@@ -515,14 +515,16 @@ pub mod state {
 
         let ecdsa_public_key = ecdsa_public_key(ecdsa_key_name, vec![])
             .await
-            .map_err(|err| ic_cdk::print(format!("failed to retrieve ECDSA public key: {err}")))
+            .map_err(|err| {
+                ic_cdk::api::debug_print(format!("failed to retrieve ECDSA public key: {err}"))
+            })
             .ok();
 
         let schnorr_ed25519_public_key =
             schnorr_public_key(schnorr_key_name.clone(), SchnorrAlgorithm::Ed25519, vec![])
                 .await
                 .map_err(|err| {
-                    ic_cdk::print(format!(
+                    ic_cdk::api::debug_print(format!(
                         "failed to retrieve Schnorr Ed25519 public key: {err}"
                     ))
                 })
@@ -532,7 +534,7 @@ pub mod state {
             schnorr_public_key(schnorr_key_name, SchnorrAlgorithm::Bip340secp256k1, vec![])
                 .await
                 .map_err(|err| {
-                    ic_cdk::print(format!(
+                    ic_cdk::api::debug_print(format!(
                         "failed to retrieve Schnorr Secp256k1 public key: {err}"
                     ))
                 })
@@ -852,7 +854,7 @@ pub mod ns {
         let now_sec = (now_ms / 1000) as i64;
         let cwt_id: [u8; 16] = rand_bytes().await?;
         let claims = ClaimsSet {
-            issuer: Some(ic_cdk::id().to_text()),
+            issuer: Some(ic_cdk::api::canister_self().to_text()),
             subject: Some(caller.to_text()),
             audience: Some(audience),
             expiration_time: Some(Timestamp::WholeSeconds(now_sec + CWT_EXPIRATION_SECONDS)),

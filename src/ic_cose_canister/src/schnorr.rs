@@ -1,14 +1,14 @@
-use ic_cdk::api::management_canister::schnorr;
+use ic_cdk::management_canister as mgt;
 use ic_cose_types::{format_error, types::PublicKeyOutput};
 use serde_bytes::ByteBuf;
 
 pub fn derive_schnorr_public_key(
-    alg: schnorr::SchnorrAlgorithm,
+    alg: mgt::SchnorrAlgorithm,
     public_key: &PublicKeyOutput,
     derivation_path: Vec<Vec<u8>>,
 ) -> Result<PublicKeyOutput, String> {
     match alg {
-        schnorr::SchnorrAlgorithm::Bip340secp256k1 => {
+        mgt::SchnorrAlgorithm::Bip340secp256k1 => {
             let path = ic_secp256k1::DerivationPath::new(
                 derivation_path
                     .into_iter()
@@ -32,7 +32,7 @@ pub fn derive_schnorr_public_key(
             })
         }
 
-        schnorr::SchnorrAlgorithm::Ed25519 => {
+        mgt::SchnorrAlgorithm::Ed25519 => {
             let path = ic_ed25519::DerivationPath::new(
                 derivation_path
                     .into_iter()
@@ -60,45 +60,46 @@ pub fn derive_schnorr_public_key(
 
 pub async fn sign_with_schnorr(
     key_name: String,
-    alg: schnorr::SchnorrAlgorithm,
+    alg: mgt::SchnorrAlgorithm,
     derivation_path: Vec<Vec<u8>>,
     message: Vec<u8>,
 ) -> Result<Vec<u8>, String> {
-    let args = schnorr::SignWithSchnorrArgument {
+    let args = mgt::SignWithSchnorrArgs {
         message,
         derivation_path,
-        key_id: schnorr::SchnorrKeyId {
+        key_id: mgt::SchnorrKeyId {
             algorithm: alg,
             name: key_name,
         },
+        aux: None,
     };
 
-    let (res,): (schnorr::SignWithSchnorrResponse,) = schnorr::sign_with_schnorr(args)
+    let rt = mgt::sign_with_schnorr(&args)
         .await
         .map_err(|err| format!("sign_with_ecdsa failed: {:?}", err))?;
 
-    Ok(res.signature)
+    Ok(rt.signature)
 }
 
 pub async fn schnorr_public_key(
     key_name: String,
-    alg: schnorr::SchnorrAlgorithm,
+    alg: mgt::SchnorrAlgorithm,
     derivation_path: Vec<Vec<u8>>,
 ) -> Result<PublicKeyOutput, String> {
-    let args = schnorr::SchnorrPublicKeyArgument {
+    let args = mgt::SchnorrPublicKeyArgs {
         canister_id: None,
         derivation_path,
-        key_id: schnorr::SchnorrKeyId {
+        key_id: mgt::SchnorrKeyId {
             algorithm: alg,
             name: key_name,
         },
     };
 
-    let (res,): (schnorr::SchnorrPublicKeyResponse,) = schnorr::schnorr_public_key(args)
+    let rt = mgt::schnorr_public_key(&args)
         .await
         .map_err(|err| format!("schnorr_public_key failed {:?}", err))?;
     Ok(PublicKeyOutput {
-        public_key: ByteBuf::from(res.public_key),
-        chain_code: ByteBuf::from(res.chain_code),
+        public_key: ByteBuf::from(rt.public_key),
+        chain_code: ByteBuf::from(rt.chain_code),
     })
 }

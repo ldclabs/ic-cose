@@ -65,7 +65,7 @@ async fn admin_create_namespace(args: CreateNamespaceInput) -> Result<NamespaceI
     store::state::allowed_api("admin_create_namespace")?;
     args.validate()?;
 
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
     store::ns::create_namespace(&caller, args, now_ms).await
 }
@@ -75,7 +75,7 @@ fn admin_list_namespace(
     prev: Option<String>,
     take: Option<u32>,
 ) -> Result<Vec<NamespaceInfo>, String> {
-    let caller = ic_cdk::caller();
+    let caller = ic_cdk::api::msg_caller();
     let take = take.unwrap_or(10).min(100);
     store::state::with(|s| {
         if !s.managers.contains(&caller) && !s.auditors.contains(&caller) {
