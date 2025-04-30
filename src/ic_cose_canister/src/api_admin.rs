@@ -9,10 +9,10 @@ use std::collections::BTreeSet;
 use crate::{is_controller, store};
 
 #[ic_cdk::update(guard = "is_controller")]
-fn admin_add_managers(mut args: BTreeSet<Principal>) -> Result<(), String> {
+fn admin_add_managers(args: BTreeSet<Principal>) -> Result<(), String> {
     validate_principals(&args)?;
     store::state::with_mut(|s| {
-        s.managers.append(&mut args);
+        s.managers.extend(args);
         Ok(())
     })
 }
@@ -27,10 +27,10 @@ fn admin_remove_managers(args: BTreeSet<Principal>) -> Result<(), String> {
 }
 
 #[ic_cdk::update(guard = "is_controller")]
-fn admin_add_auditors(mut args: BTreeSet<Principal>) -> Result<(), String> {
+fn admin_add_auditors(args: BTreeSet<Principal>) -> Result<(), String> {
     validate_principals(&args)?;
     store::state::with_mut(|s| {
-        s.auditors.append(&mut args);
+        s.auditors.extend(args);
         Ok(())
     })
 }
@@ -45,9 +45,9 @@ fn admin_remove_auditors(args: BTreeSet<Principal>) -> Result<(), String> {
 }
 
 #[ic_cdk::update(guard = "is_controller")]
-fn admin_add_allowed_apis(mut args: BTreeSet<String>) -> Result<(), String> {
+fn admin_add_allowed_apis(args: BTreeSet<String>) -> Result<(), String> {
     store::state::with_mut(|s| {
-        s.allowed_apis.append(&mut args);
+        s.allowed_apis.extend(args);
         Ok(())
     })
 }

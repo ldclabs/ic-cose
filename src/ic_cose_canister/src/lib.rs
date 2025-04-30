@@ -75,18 +75,4 @@ async fn rand_bytes<const N: usize>() -> Result<[u8; N], String> {
     data.try_into().map_err(format_error)
 }
 
-/// A getrandom implementation that always fails
-#[no_mangle]
-#[cfg(all(
-    target_arch = "wasm32",
-    target_vendor = "unknown",
-    target_os = "unknown"
-))]
-unsafe extern "Rust" fn __getrandom_v03_custom(
-    _dest: *mut u8,
-    _len: usize,
-) -> Result<(), getrandom::Error> {
-    Err(getrandom::Error::UNSUPPORTED)
-}
-
 ic_cdk::export_candid!();

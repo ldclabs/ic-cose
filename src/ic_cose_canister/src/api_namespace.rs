@@ -61,7 +61,7 @@ fn namespace_delete(namespace: String) -> Result<(), String> {
 }
 
 #[ic_cdk::update(guard = "is_authenticated")]
-fn namespace_add_managers(namespace: String, mut args: BTreeSet<Principal>) -> Result<(), String> {
+fn namespace_add_managers(namespace: String, args: BTreeSet<Principal>) -> Result<(), String> {
     store::state::allowed_api("namespace_add_managers")?;
     validate_principals(&args)?;
 
@@ -71,7 +71,7 @@ fn namespace_add_managers(namespace: String, mut args: BTreeSet<Principal>) -> R
         if !ns.can_write_namespace(&caller) {
             Err("no permission".to_string())?;
         }
-        ns.managers.append(&mut args);
+        ns.managers.extend(args);
         ns.updated_at = now_ms;
         Ok(())
     })
@@ -95,7 +95,7 @@ fn namespace_remove_managers(namespace: String, args: BTreeSet<Principal>) -> Re
 }
 
 #[ic_cdk::update(guard = "is_authenticated")]
-fn namespace_add_auditors(namespace: String, mut args: BTreeSet<Principal>) -> Result<(), String> {
+fn namespace_add_auditors(namespace: String, args: BTreeSet<Principal>) -> Result<(), String> {
     store::state::allowed_api("namespace_add_auditors")?;
     validate_principals(&args)?;
 
@@ -105,7 +105,7 @@ fn namespace_add_auditors(namespace: String, mut args: BTreeSet<Principal>) -> R
         if !ns.can_write_namespace(&caller) {
             Err("no permission".to_string())?;
         }
-        ns.auditors.append(&mut args);
+        ns.auditors.extend(args);
         ns.updated_at = now_ms;
         Ok(())
     })
@@ -129,7 +129,7 @@ fn namespace_remove_auditors(namespace: String, args: BTreeSet<Principal>) -> Re
 }
 
 #[ic_cdk::update(guard = "is_authenticated")]
-fn namespace_add_users(namespace: String, mut args: BTreeSet<Principal>) -> Result<(), String> {
+fn namespace_add_users(namespace: String, args: BTreeSet<Principal>) -> Result<(), String> {
     store::state::allowed_api("namespace_add_users")?;
     validate_principals(&args)?;
 
@@ -139,7 +139,7 @@ fn namespace_add_users(namespace: String, mut args: BTreeSet<Principal>) -> Resu
         if !ns.can_write_namespace(&caller) {
             Err("no permission".to_string())?;
         }
-        ns.users.append(&mut args);
+        ns.users.extend(args);
         ns.updated_at = now_ms;
         Ok(())
     })

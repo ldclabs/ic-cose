@@ -17,10 +17,10 @@ use crate::{
 static EMPTY_CANDID_ARGS: &[u8] = &[68, 73, 68, 76, 0, 0];
 
 #[ic_cdk::update(guard = "is_controller")]
-fn admin_add_managers(mut args: BTreeSet<Principal>) -> Result<(), String> {
+fn admin_add_managers(args: BTreeSet<Principal>) -> Result<(), String> {
     validate_principals(&args)?;
     store::state::with_mut(|r| {
-        r.managers.append(&mut args);
+        r.managers.extend(args);
         Ok(())
     })
 }
@@ -35,10 +35,10 @@ fn admin_remove_managers(args: BTreeSet<Principal>) -> Result<(), String> {
 }
 
 #[ic_cdk::update(guard = "is_controller")]
-fn admin_add_committers(mut args: BTreeSet<Principal>) -> Result<(), String> {
+fn admin_add_committers(args: BTreeSet<Principal>) -> Result<(), String> {
     validate_principals(&args)?;
     store::state::with_mut(|r| {
-        r.committers.append(&mut args);
+        r.committers.extend(args);
         Ok(())
     })
 }

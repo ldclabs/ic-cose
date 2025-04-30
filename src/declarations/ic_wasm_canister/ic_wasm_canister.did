@@ -1,6 +1,7 @@
 type AddWasmInput = record { name : text; wasm : blob; description : text };
 type CanisterSettings = record {
   freezing_threshold : opt nat;
+  wasm_memory_threshold : opt nat;
   controllers : opt vec principal;
   reserved_cycles_limit : opt nat;
   log_visibility : opt LogVisibility;
@@ -8,7 +9,8 @@ type CanisterSettings = record {
   memory_allocation : opt nat;
   compute_allocation : opt nat;
 };
-type CanisterStatusResponse = record {
+type CanisterStatusResult = record {
+  memory_metrics : MemoryMetrics;
   status : CanisterStatusType;
   memory_size : nat;
   cycles : nat;
@@ -22,6 +24,7 @@ type CanisterStatusType = variant { stopped; stopping; running };
 type ChainArgs = variant { Upgrade : UpgradeArgs; Init : InitArgs };
 type DefiniteCanisterSettings = record {
   freezing_threshold : nat;
+  wasm_memory_threshold : nat;
   controllers : vec principal;
   reserved_cycles_limit : nat;
   log_visibility : LogVisibility;
@@ -54,6 +57,16 @@ type LogVisibility = variant {
   public;
   allowed_viewers : vec principal;
 };
+type MemoryMetrics = record {
+  wasm_binary_size : nat;
+  wasm_chunk_store_size : nat;
+  canister_history_size : nat;
+  stable_memory_size : nat;
+  snapshots_size : nat;
+  wasm_memory_size : nat;
+  global_memory_size : nat;
+  custom_sections_size : nat;
+};
 type QueryStats = record {
   response_payload_bytes_total : nat;
   num_instructions_total : nat;
@@ -65,7 +78,7 @@ type Result_1 = variant { Ok : vec blob; Err : text };
 type Result_2 = variant { Ok : nat; Err : text };
 type Result_3 = variant { Ok : principal; Err : text };
 type Result_4 = variant { Ok : vec DeploymentInfo; Err : text };
-type Result_5 = variant { Ok : CanisterStatusResponse; Err : text };
+type Result_5 = variant { Ok : CanisterStatusResult; Err : text };
 type Result_6 = variant { Ok : vec principal; Err : text };
 type Result_7 = variant { Ok : StateInfo; Err : text };
 type Result_8 = variant { Ok : WasmInfo; Err : text };
@@ -80,7 +93,7 @@ type StateInfo = record {
   latest_version : vec record { text; blob };
   committers : vec principal;
 };
-type UpdateSettingsArgument = record {
+type UpdateSettingsArgs = record {
   canister_id : principal;
   settings : CanisterSettings;
 };
@@ -112,7 +125,7 @@ service : (opt ChainArgs) -> {
   admin_deploy : (DeployWasmInput, opt blob) -> (Result);
   admin_remove_committers : (vec principal) -> (Result);
   admin_remove_managers : (vec principal) -> (Result);
-  admin_update_canister_settings : (UpdateSettingsArgument) -> (Result);
+  admin_update_canister_settings : (UpdateSettingsArgs) -> (Result);
   deployment_logs : (text, opt nat, opt nat) -> (Result_4) query;
   get_canister_status : (opt principal) -> (Result_5);
   get_deployed_canisters : () -> (Result_6) query;
@@ -136,7 +149,5 @@ service : (opt ChainArgs) -> {
   validate_admin_deploy : (DeployWasmInput, opt blob) -> (Result_9);
   validate_admin_remove_committers : (vec principal) -> (Result_9);
   validate_admin_remove_managers : (vec principal) -> (Result_9);
-  validate_admin_update_canister_settings : (UpdateSettingsArgument) -> (
-      Result_9,
-    );
+  validate_admin_update_canister_settings : (UpdateSettingsArgs) -> (Result_9);
 }

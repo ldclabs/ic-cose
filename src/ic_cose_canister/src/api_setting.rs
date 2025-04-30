@@ -78,7 +78,7 @@ fn setting_update_payload(
 }
 
 #[ic_cdk::update(guard = "is_authenticated")]
-fn setting_add_readers(path: SettingPath, mut input: BTreeSet<Principal>) -> Result<(), String> {
+fn setting_add_readers(path: SettingPath, input: BTreeSet<Principal>) -> Result<(), String> {
     store::state::allowed_api("setting_add_readers")?;
     path.validate()?;
     validate_principals(&input)?;
@@ -88,7 +88,7 @@ fn setting_add_readers(path: SettingPath, mut input: BTreeSet<Principal>) -> Res
     let spk = store::SettingPathKey::from_path(path, subject);
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
     store::ns::with_setting_mut(&caller, &spk, |setting| {
-        setting.readers.append(&mut input);
+        setting.readers.extend(input);
         setting.updated_at = now_ms;
         Ok(())
     })

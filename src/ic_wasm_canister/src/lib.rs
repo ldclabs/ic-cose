@@ -129,18 +129,4 @@ async fn create_canister_on(
     res.map_err(|err| format!("failed to create canister, error: {:?}", err))
 }
 
-/// A getrandom implementation that always fails
-#[no_mangle]
-#[cfg(all(
-    target_arch = "wasm32",
-    target_vendor = "unknown",
-    target_os = "unknown"
-))]
-unsafe extern "Rust" fn __getrandom_v03_custom(
-    _dest: *mut u8,
-    _len: usize,
-) -> Result<(), getrandom::Error> {
-    Err(getrandom::Error::UNSUPPORTED)
-}
-
 ic_cdk::export_candid!();

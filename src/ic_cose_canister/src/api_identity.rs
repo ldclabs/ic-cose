@@ -39,9 +39,7 @@ fn namespace_get_delegators(
 }
 
 #[ic_cdk::update]
-fn namespace_add_delegator(
-    mut input: NamespaceDelegatorsInput,
-) -> Result<BTreeSet<Principal>, String> {
+fn namespace_add_delegator(input: NamespaceDelegatorsInput) -> Result<BTreeSet<Principal>, String> {
     store::state::allowed_api("namespace_add_delegator")?;
     input.validate()?;
 
@@ -52,7 +50,7 @@ fn namespace_add_delegator(
         }
         let name = input.name.to_ascii_lowercase();
         let delegators = ns.fixed_id_names.entry(name).or_default();
-        delegators.append(&mut input.delegators);
+        delegators.extend(input.delegators);
         Ok(delegators.clone())
     })
 }

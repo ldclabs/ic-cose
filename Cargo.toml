@@ -3,8 +3,6 @@ members = [
   "src/ic_cose_canister",
   "src/ic_cose",
   "src/ic_cose_types",
-  "src/ic_object_store",
-  "src/ic_object_store_canister",
   "src/ic_wasm_canister",
 ]
 resolver = "2"
@@ -16,7 +14,7 @@ strip = true
 opt-level = 's'
 
 [workspace.package]
-version = "0.7.2"
+version = "0.8.0"
 edition = "2021"
 repository = "https://github.com/ldclabs/ic-cose"
 keywords = ["config", "cbor", "canister", "icp", "encryption"]
@@ -25,7 +23,6 @@ license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
 async-trait = "0.1"
-bytes = "1.9"
 candid = "0.10"
 ciborium = "0.2"
 futures = "0.3"
@@ -50,18 +47,13 @@ ic-canister-sig-creation = "1.2"
 ic-agent = "0.40"
 ic_auth_types = "0.2"
 ic_auth_verifier = { version = "0.2" }
-getrandom = { version = "0.3" }
 rand = "0.9"
 coset = "0.3"
 aes-gcm = "0.10"
-object_store = { version = "0.12", default-features = false }
-chrono = { version = "0.4", default-features = false }
 thiserror = "2"
 ic-secp256k1 = { version = "0.1" }
 ic-ed25519 = { version = "0.2" }
-tokio = { version = "1", features = ["full"] }
-ed25519-consensus = "2.1"
 ic-dummy-getrandom-for-wasm = "0.1"
 
 [workspace.metadata.cargo-shear]
-ignored = ["getrandom", "ic-dummy-getrandom-for-wasm"]
+ignored = ["ic-dummy-getrandom-for-wasm"]

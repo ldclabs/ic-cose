@@ -15,7 +15,7 @@ license.workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
-ic_cose_types = { path = "../ic_cose_types", version = "0.7" }
+ic_cose_types = { path = "../ic_cose_types", version = "0.8" }
 candid = { workspace = true }
 ciborium = { workspace = true }
 const-hex = { workspace = true }
@@ -32,4 +32,3 @@ ic-certification = { workspace = true }
 ic_auth_types = { workspace = true }
 ic_auth_verifier = { workspace = true }
 ic-dummy-getrandom-for-wasm = { workspace = true }
-getrandom = { workspace = true }

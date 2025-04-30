@@ -20,20 +20,18 @@ A imaginative use case is serving as a state persistence service for enclaves ru
 
 ## Packages
 
-| Package                                                                                               | Description                                                       |
-| :---------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------- |
-| [ic_cose_canister](https://github.com/ldclabs/ic-cose/tree/main/src/ic_cose_canister)                 | A decentralized COnfiguration service with Signing and Encryption |
-| [ic_object_store_canister](https://github.com/ldclabs/ic-cose/tree/main/src/ic_object_store_canister) | A Object Store of Apache Arrow                                    |
-| [ic_wasm_canister](https://github.com/ldclabs/ic-cose/tree/main/src/ic_wasm_canister)                 | An ICP canister wasm module management service                    |
-| [ic_cose_types](https://github.com/ldclabs/ic-cose/tree/main/src/ic_cose_types)                       | Rust shared type definitions                                      |
-| [ic_cose](https://github.com/ldclabs/ic-cose/tree/main/src/ic_cose)                                   | Rust client SDK for the IC COSE canister                          |
-| [ic_object_store](https://github.com/ldclabs/ic-cose/tree/main/src/ic_object_store)                   | Rust client SDK for the IC Object Store canister                  |
+| Package                                                                               | Description                                                       |
+| :------------------------------------------------------------------------------------ | :---------------------------------------------------------------- |
+| [ic_cose_canister](https://github.com/ldclabs/ic-cose/tree/main/src/ic_cose_canister) | A decentralized COnfiguration service with Signing and Encryption |
+| [ic_wasm_canister](https://github.com/ldclabs/ic-cose/tree/main/src/ic_wasm_canister) | An ICP canister wasm module management service                    |
+| [ic_cose_types](https://github.com/ldclabs/ic-cose/tree/main/src/ic_cose_types)       | Rust shared type definitions                                      |
+| [ic_cose](https://github.com/ldclabs/ic-cose/tree/main/src/ic_cose)                   | Rust client SDK for the IC COSE canister                          |
 
 ## Who's using?
 
 - [dMsg.net](https://dmsg.net): The world's 1st decentralized end-to-end encrypted messaging application fully running on the Internet Computer blockchain. dMsg.net uses `ic_cose_canister` to store encrypted keys for user.
 - [IC-TEE](https://github.com/ldclabs/ic-tee): Make Trusted Execution Environments (TEEs) work with the Internet Computer. IC-TEE uses `ic_cose_canister` to store configs and confidential data (TLS cert/key, root keys).
-- [Anda](https://github.com/ldclabs/anda): An AI agent framework built with Rust, powered by ICP and TEEs. Anda uses `ic_cose_canister` to store agent configs, uses `ic_object_store_canister` to store AI memory states.
+- [Anda](https://github.com/ldclabs/anda): An AI agent framework built with Rust, powered by ICP and TEEs. Anda uses `ic_cose_canister` to store agent configs.
 
 If you plan to use this project and have any questions, feel free to open an issue. I will address it as soon as possible.
 

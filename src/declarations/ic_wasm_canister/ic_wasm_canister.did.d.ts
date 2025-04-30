@@ -9,6 +9,7 @@ export interface AddWasmInput {
 }
 export interface CanisterSettings {
   'freezing_threshold' : [] | [bigint],
+  'wasm_memory_threshold' : [] | [bigint],
   'controllers' : [] | [Array<Principal>],
   'reserved_cycles_limit' : [] | [bigint],
   'log_visibility' : [] | [LogVisibility],
@@ -16,7 +17,8 @@ export interface CanisterSettings {
   'memory_allocation' : [] | [bigint],
   'compute_allocation' : [] | [bigint],
 }
-export interface CanisterStatusResponse {
+export interface CanisterStatusResult {
+  'memory_metrics' : MemoryMetrics,
   'status' : CanisterStatusType,
   'memory_size' : bigint,
   'cycles' : bigint,
@@ -33,6 +35,7 @@ export type ChainArgs = { 'Upgrade' : UpgradeArgs } |
   { 'Init' : InitArgs };
 export interface DefiniteCanisterSettings {
   'freezing_threshold' : bigint,
+  'wasm_memory_threshold' : bigint,
   'controllers' : Array<Principal>,
   'reserved_cycles_limit' : bigint,
   'log_visibility' : LogVisibility,
@@ -63,6 +66,16 @@ export interface InitArgs {
 export type LogVisibility = { 'controllers' : null } |
   { 'public' : null } |
   { 'allowed_viewers' : Array<Principal> };
+export interface MemoryMetrics {
+  'wasm_binary_size' : bigint,
+  'wasm_chunk_store_size' : bigint,
+  'canister_history_size' : bigint,
+  'stable_memory_size' : bigint,
+  'snapshots_size' : bigint,
+  'wasm_memory_size' : bigint,
+  'global_memory_size' : bigint,
+  'custom_sections_size' : bigint,
+}
 export interface QueryStats {
   'response_payload_bytes_total' : bigint,
   'num_instructions_total' : bigint,
@@ -79,7 +92,7 @@ export type Result_3 = { 'Ok' : Principal } |
   { 'Err' : string };
 export type Result_4 = { 'Ok' : Array<DeploymentInfo> } |
   { 'Err' : string };
-export type Result_5 = { 'Ok' : CanisterStatusResponse } |
+export type Result_5 = { 'Ok' : CanisterStatusResult } |
   { 'Err' : string };
 export type Result_6 = { 'Ok' : Array<Principal> } |
   { 'Err' : string };
@@ -99,7 +112,7 @@ export interface StateInfo {
   'latest_version' : Array<[string, Uint8Array | number[]]>,
   'committers' : Array<Principal>,
 }
-export interface UpdateSettingsArgument {
+export interface UpdateSettingsArgs {
   'canister_id' : Principal,
   'settings' : CanisterSettings,
 }
@@ -144,10 +157,7 @@ export interface _SERVICE {
   >,
   'admin_remove_committers' : ActorMethod<[Array<Principal>], Result>,
   'admin_remove_managers' : ActorMethod<[Array<Principal>], Result>,
-  'admin_update_canister_settings' : ActorMethod<
-    [UpdateSettingsArgument],
-    Result
-  >,
+  'admin_update_canister_settings' : ActorMethod<[UpdateSettingsArgs], Result>,
   'deployment_logs' : ActorMethod<
     [string, [] | [bigint], [] | [bigint]],
     Result_4
@@ -186,7 +196,7 @@ export interface _SERVICE {
   >,
   'validate_admin_remove_managers' : ActorMethod<[Array<Principal>], Result_9>,
   'validate_admin_update_canister_settings' : ActorMethod<
-    [UpdateSettingsArgument],
+    [UpdateSettingsArgs],
     Result_9
   >,
 }

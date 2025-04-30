@@ -31,6 +31,7 @@ export const idlFactory = ({ IDL }) => {
   });
   const CanisterSettings = IDL.Record({
     'freezing_threshold' : IDL.Opt(IDL.Nat),
+    'wasm_memory_threshold' : IDL.Opt(IDL.Nat),
     'controllers' : IDL.Opt(IDL.Vec(IDL.Principal)),
     'reserved_cycles_limit' : IDL.Opt(IDL.Nat),
     'log_visibility' : IDL.Opt(LogVisibility),
@@ -44,7 +45,7 @@ export const idlFactory = ({ IDL }) => {
     'name' : IDL.Text,
     'canister' : IDL.Principal,
   });
-  const UpdateSettingsArgument = IDL.Record({
+  const UpdateSettingsArgs = IDL.Record({
     'canister_id' : IDL.Principal,
     'settings' : CanisterSettings,
   });
@@ -61,6 +62,16 @@ export const idlFactory = ({ IDL }) => {
     'Ok' : IDL.Vec(DeploymentInfo),
     'Err' : IDL.Text,
   });
+  const MemoryMetrics = IDL.Record({
+    'wasm_binary_size' : IDL.Nat,
+    'wasm_chunk_store_size' : IDL.Nat,
+    'canister_history_size' : IDL.Nat,
+    'stable_memory_size' : IDL.Nat,
+    'snapshots_size' : IDL.Nat,
+    'wasm_memory_size' : IDL.Nat,
+    'global_memory_size' : IDL.Nat,
+    'custom_sections_size' : IDL.Nat,
+  });
   const CanisterStatusType = IDL.Variant({
     'stopped' : IDL.Null,
     'stopping' : IDL.Null,
@@ -68,6 +79,7 @@ export const idlFactory = ({ IDL }) => {
   });
   const DefiniteCanisterSettings = IDL.Record({
     'freezing_threshold' : IDL.Nat,
+    'wasm_memory_threshold' : IDL.Nat,
     'controllers' : IDL.Vec(IDL.Principal),
     'reserved_cycles_limit' : IDL.Nat,
     'log_visibility' : LogVisibility,
@@ -81,7 +93,8 @@ export const idlFactory = ({ IDL }) => {
     'num_calls_total' : IDL.Nat,
     'request_payload_bytes_total' : IDL.Nat,
   });
-  const CanisterStatusResponse = IDL.Record({
+  const CanisterStatusResult = IDL.Record({
+    'memory_metrics' : MemoryMetrics,
     'status' : CanisterStatusType,
     'memory_size' : IDL.Nat,
     'cycles' : IDL.Nat,
@@ -92,7 +105,7 @@ export const idlFactory = ({ IDL }) => {
     'reserved_cycles' : IDL.Nat,
   });
   const Result_5 = IDL.Variant({
-    'Ok' : CanisterStatusResponse,
+    'Ok' : CanisterStatusResult,
     'Err' : IDL.Text,
   });
   const Result_6 = IDL.Variant({
@@ -161,7 +174,7 @@ export const idlFactory = ({ IDL }) => {
       ),
     'admin_remove_managers' : IDL.Func([IDL.Vec(IDL.Principal)], [Result], []),
     'admin_update_canister_settings' : IDL.Func(
-        [UpdateSettingsArgument],
+        [UpdateSettingsArgs],
         [Result],
         [],
       ),
@@ -227,7 +240,7 @@ export const idlFactory = ({ IDL }) => {
         [],
       ),
     'validate_admin_update_canister_settings' : IDL.Func(
-        [UpdateSettingsArgument],
+        [UpdateSettingsArgs],
         [Result_9],
         [],
       ),

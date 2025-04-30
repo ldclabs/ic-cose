@@ -6,10 +6,6 @@
     "ic": "53cyg-yyaaa-aaaap-ahpua-cai",
     "local": "53cyg-yyaaa-aaaap-ahpua-cai"
   },
-  "ic_object_store_canister": {
-    "ic": "6at64-oyaaa-aaaap-anvza-cai",
-    "local": "6at64-oyaaa-aaaap-anvza-cai"
-  },
   "ic_wasm_canister": {
     "local": "be2us-64aaa-aaaaa-qaabq-cai"
   }
