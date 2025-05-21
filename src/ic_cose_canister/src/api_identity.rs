@@ -97,7 +97,7 @@ fn namespace_sign_delegation(input: SignDelegationInput) -> Result<SignInRespons
             if delegators.contains(&caller) {
                 return Ok(ns.session_expires_in_ms);
             }
-            return Err("caller is not a delegator".to_string());
+            return Err(format!("caller {} is not a delegator", caller));
         }
         Err("name not found".to_string())
     })?;

@@ -45,14 +45,24 @@ dfx canister call ic_cose_canister schnorr_public_key '(variant { ed25519 }, nul
 
 dfx canister call ic_cose_canister schnorr_public_key '(variant { bip340secp256k1 }, null)'
 
+dfx canister call ic_cose_canister admin_create_namespace '(record {
+  managers = vec { principal \"$MYID\"; };
+  desc = opt "System namespace";
+  name = "_";
+  max_payload_size = opt 1024;
+  auditors = vec {};
+  users = vec {};
+  visibility = 0;
+})'
+
 dfx canister call ic_cose_canister admin_create_namespace "(record {
   name = \"testing\";
   visibility = 1;
   desc = null;
   max_payload_size = opt 1_000_000;
   managers = vec {principal \"$MYID\"};
-  auditors = {};
-  users = {};
+  auditors = vec {};
+  users = vec {};
 })"
 
 dfx canister call ic_cose_canister admin_list_namespace "(null, null)"
