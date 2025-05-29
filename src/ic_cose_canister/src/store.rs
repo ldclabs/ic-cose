@@ -901,29 +901,38 @@ pub mod ns {
 
     pub async fn inner_vetkd_public_key(spk: &SettingPathKey) -> Result<Vec<u8>, String> {
         let key_name = state::with(|r| r.vetkd_key_name.clone());
-        let derivation_path = vec![
-            b"COSE_Symmetric_Key".to_vec(),
-            spk.2.to_bytes().to_vec(),
-            vec![spk.1],
-            spk.0.to_bytes().to_vec(),
-        ];
-        vetkd_public_key(key_name, derivation_path).await
+
+        vetkd_public_key(
+            key_name,
+            &[
+                b"COSE_Symmetric_Key",
+                spk.2.to_bytes().as_ref(),
+                &[spk.1],
+                spk.0.to_bytes().as_ref(),
+            ],
+        )
+        .await
     }
 
     pub async fn inner_vetkd_encrypted_key(
         spk: &SettingPathKey,
         key_id: Vec<u8>,
-        encryption_public_key: Vec<u8>,
+        transport_public_key: Vec<u8>,
     ) -> Result<Vec<u8>, String> {
         let key_name = state::with(|r| r.vetkd_key_name.clone());
-        let derivation_path = vec![
-            b"COSE_Symmetric_Key".to_vec(),
-            spk.2.to_bytes().to_vec(),
-            vec![spk.1],
-            spk.0.to_bytes().to_vec(),
-        ];
 
-        vetkd_encrypted_key(key_name, key_id, derivation_path, encryption_public_key).await
+        vetkd_encrypted_key(
+            key_name,
+            &[
+                b"COSE_Symmetric_Key",
+                spk.2.to_bytes().as_ref(),
+                &[spk.1],
+                spk.0.to_bytes().as_ref(),
+            ],
+            key_id,
+            transport_public_key,
+        )
+        .await
     }
 
     pub fn get_namespace(caller: &Principal, namespace: String) -> Result<NamespaceInfo, String> {

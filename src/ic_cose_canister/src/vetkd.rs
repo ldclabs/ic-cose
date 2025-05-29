@@ -1,112 +1,102 @@
-use candid::{CandidType, Principal};
+use ic_cdk::management_canister as mgt;
 use ic_cose_types::format_error;
-use serde::{Deserialize, Serialize};
-use serde_with::serde_as;
-
-use crate::call;
+use sha3::Digest;
 
 pub async fn vetkd_public_key(
     key_name: String,
-    derivation_path: Vec<Vec<u8>>,
+    derivation_path: &[&[u8]],
 ) -> Result<Vec<u8>, String> {
-    let request = VetKDPublicKeyRequest {
+    let args = mgt::VetKDPublicKeyArgs {
         canister_id: None,
-        derivation_path,
-        key_id: VetKDKeyId {
-            curve: VetKDCurve::Bls12_381_G2,
+        context: derivation_path_to_context(derivation_path),
+        key_id: mgt::VetKDKeyId {
+            curve: mgt::VetKDCurve::Bls12_381_G2,
             name: key_name,
         },
     };
-
-    let res: VetKDPublicKeyReply = call(
-        vetkd_system_api_canister_id(),
-        "vetkd_public_key",
-        (request,),
-        0,
-    )
-    .await
-    .map_err(format_error)?;
-
+    let res = mgt::vetkd_public_key(&args).await.map_err(format_error)?;
     Ok(res.public_key)
 }
 
 pub async fn vetkd_encrypted_key(
     key_name: String,
-    derivation_id: Vec<u8>,
-    derivation_path: Vec<Vec<u8>>,
-    encryption_public_key: Vec<u8>,
+    derivation_path: &[&[u8]],
+    input: Vec<u8>,
+    transport_public_key: Vec<u8>,
 ) -> Result<Vec<u8>, String> {
-    let request = VetKDEncryptedKeyRequest {
-        derivation_id,
-        derivation_path,
-        encryption_public_key,
-        key_id: VetKDKeyId {
-            curve: VetKDCurve::Bls12_381_G2,
+    let args = mgt::VetKDDeriveKeyArgs {
+        input,
+        context: derivation_path_to_context(derivation_path),
+        transport_public_key,
+        key_id: mgt::VetKDKeyId {
+            curve: mgt::VetKDCurve::Bls12_381_G2,
             name: key_name,
         },
     };
 
-    let response: VetKDEncryptedKeyReply = call(
-        vetkd_system_api_canister_id(),
-        "vetkd_derive_encrypted_key",
-        (request,),
-        0,
-    )
-    .await
-    .map_err(format_error)?;
+    let res = mgt::vetkd_derive_key(&args).await.map_err(format_error)?;
 
-    Ok(response.encrypted_key)
+    Ok(res.encrypted_key)
 }
 
-// https://github.com/dfinity/examples/blob/master/rust/vetkd/README.md
-const VETKD_SYSTEM_API_CANISTER_ID: &str = "s55qq-oqaaa-aaaaa-aaakq-cai";
-
-fn vetkd_system_api_canister_id() -> Principal {
-    Principal::from_text(VETKD_SYSTEM_API_CANISTER_ID).expect("failed to create canister ID")
+fn derivation_path_to_context(derivation_path: &[&[u8]]) -> Vec<u8> {
+    let mut hasher = sha3::Sha3_256::new();
+    for path in derivation_path {
+        hasher.update(path);
+    }
+    let rt: [u8; 32] = hasher.finalize().into();
+    rt.into()
 }
 
-#[derive(CandidType, Deserialize, Serialize)]
-pub enum VetKDCurve {
-    #[serde(rename = "bls12_381_g2")]
-    #[allow(non_camel_case_types)]
-    Bls12_381_G2,
-}
+// // https://github.com/dfinity/examples/blob/master/rust/vetkd/README.md
+// const VETKD_SYSTEM_API_CANISTER_ID: &str = "s55qq-oqaaa-aaaaa-aaakq-cai";
 
-#[derive(CandidType, Deserialize, Serialize)]
-pub struct VetKDKeyId {
-    pub curve: VetKDCurve,
-    pub name: String,
-}
+// fn vetkd_system_api_canister_id() -> Principal {
+//     Principal::from_text(VETKD_SYSTEM_API_CANISTER_ID).expect("failed to create canister ID")
+// }
 
-#[serde_as]
-#[derive(CandidType, Deserialize, Serialize)]
-pub struct VetKDPublicKeyRequest {
-    pub canister_id: Option<Principal>,
-    #[serde_as(as = "Vec<serde_with::Bytes>")]
-    pub derivation_path: Vec<Vec<u8>>,
-    pub key_id: VetKDKeyId,
-}
+// #[derive(CandidType, Deserialize, Serialize)]
+// pub enum VetKDCurve {
+//     #[serde(rename = "bls12_381_g2")]
+//     #[allow(non_camel_case_types)]
+//     Bls12_381_G2,
+// }
 
-#[derive(CandidType, Deserialize, Serialize)]
-pub struct VetKDPublicKeyReply {
-    #[serde(with = "serde_bytes")]
-    pub public_key: Vec<u8>,
-}
+// #[derive(CandidType, Deserialize, Serialize)]
+// pub struct VetKDKeyId {
+//     pub curve: VetKDCurve,
+//     pub name: String,
+// }
 
-#[serde_as]
-#[derive(CandidType, Deserialize, Serialize)]
-pub struct VetKDEncryptedKeyRequest {
-    #[serde_as(as = "Vec<serde_with::Bytes>")]
-    pub derivation_path: Vec<Vec<u8>>,
-    #[serde(with = "serde_bytes")]
-    pub derivation_id: Vec<u8>,
-    #[serde(with = "serde_bytes")]
-    pub encryption_public_key: Vec<u8>,
-    pub key_id: VetKDKeyId,
-}
+// #[serde_as]
+// #[derive(CandidType, Deserialize, Serialize)]
+// pub struct VetKDPublicKeyRequest {
+//     pub canister_id: Option<Principal>,
+//     #[serde_as(as = "Vec<serde_with::Bytes>")]
+//     pub derivation_path: Vec<Vec<u8>>,
+//     pub key_id: VetKDKeyId,
+// }
 
-#[derive(CandidType, Deserialize, Serialize)]
-pub struct VetKDEncryptedKeyReply {
-    #[serde(with = "serde_bytes")]
-    pub encrypted_key: Vec<u8>,
-}
+// #[derive(CandidType, Deserialize, Serialize)]
+// pub struct VetKDPublicKeyReply {
+//     #[serde(with = "serde_bytes")]
+//     pub public_key: Vec<u8>,
+// }
+
+// #[serde_as]
+// #[derive(CandidType, Deserialize, Serialize)]
+// pub struct VetKDEncryptedKeyRequest {
+//     #[serde_as(as = "Vec<serde_with::Bytes>")]
+//     pub derivation_path: Vec<Vec<u8>>,
+//     #[serde(with = "serde_bytes")]
+//     pub derivation_id: Vec<u8>,
+//     #[serde(with = "serde_bytes")]
+//     pub encryption_public_key: Vec<u8>,
+//     pub key_id: VetKDKeyId,
+// }
+
+// #[derive(CandidType, Deserialize, Serialize)]
+// pub struct VetKDEncryptedKeyReply {
+//     #[serde(with = "serde_bytes")]
+//     pub encrypted_key: Vec<u8>,
+// }

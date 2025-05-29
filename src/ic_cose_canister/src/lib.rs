@@ -1,4 +1,4 @@
-use candid::{utils::ArgumentEncoder, Principal};
+use candid::Principal;
 use ic_auth_types::*;
 use ic_cose_types::{
     format_error, types::namespace::*, types::setting::*, types::state::StateInfo, types::*,
@@ -47,24 +47,6 @@ fn is_authenticated() -> Result<(), String> {
     } else {
         Ok(())
     }
-}
-
-async fn call<In, Out>(id: Principal, method: &str, args: In, cycles: u128) -> Result<Out, String>
-where
-    In: ArgumentEncoder + Send,
-    Out: candid::CandidType + for<'a> candid::Deserialize<'a>,
-{
-    let res = ic_cdk::call::Call::bounded_wait(id, method)
-        .with_args(&args)
-        .with_cycles(cycles)
-        .await
-        .map_err(|err| format!("failed to call {} on {:?}, error: {:?}", method, &id, err))?;
-    res.candid().map_err(|err| {
-        format!(
-            "failed to decode response from {} on {:?}, error: {:?}",
-            method, &id, err
-        )
-    })
 }
 
 async fn rand_bytes<const N: usize>() -> Result<[u8; N], String> {

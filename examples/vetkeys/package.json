@@ -1,0 +1,21 @@
+{
+  "name": "vetkeys",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@dfinity/agent": "^2.4.1",
+    "@dfinity/candid": "^2.4.1",
+    "@dfinity/identity": "^2.4.1",
+    "@dfinity/principal": "^2.4.1",
+    "@dfinity/utils": "^2.13.0",
+    "@dfinity/vetkeys": "^0.1.0",
+    "@ldclabs/cose-ts": "^1.3.2"
+  }
+}

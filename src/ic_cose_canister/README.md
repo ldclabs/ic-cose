@@ -23,8 +23,8 @@ RUSTFLAGS="--cfg=getrandom_backend=\"custom\"" dfx deploy ic_cose_canister
 RUSTFLAGS="--cfg=getrandom_backend=\"custom\"" dfx deploy ic_cose_canister --argument "(opt variant {Init =
   record {
     name = \"LDC Labs\";
-    ecdsa_key_name = \"dfx_test_key\";
-    schnorr_key_name = \"dfx_test_key\";
+    ecdsa_key_name = \"test_key_1\";
+    schnorr_key_name = \"test_key_1\";
     vetkd_key_name = \"test_key_1\";
     allowed_apis = vec {};
     subnet_size = 0;
@@ -34,7 +34,7 @@ RUSTFLAGS="--cfg=getrandom_backend=\"custom\"" dfx deploy ic_cose_canister --arg
 
 dfx canister call ic_cose_canister state_get_info '()'
 
-MYID=$(dfx identity get-principal)
+export MYID=$(dfx identity get-principal)
 
 # add managers
 dfx canister call ic_cose_canister admin_add_managers "(vec {principal \"$MYID\"})"
@@ -45,15 +45,15 @@ dfx canister call ic_cose_canister schnorr_public_key '(variant { ed25519 }, nul
 
 dfx canister call ic_cose_canister schnorr_public_key '(variant { bip340secp256k1 }, null)'
 
-dfx canister call ic_cose_canister admin_create_namespace '(record {
+dfx canister call ic_cose_canister admin_create_namespace "(record {
   managers = vec { principal \"$MYID\"; };
-  desc = opt "System namespace";
-  name = "_";
+  desc = opt \"System namespace\";
+  name = \"_\";
   max_payload_size = opt 1024;
   auditors = vec {};
   users = vec {};
   visibility = 0;
-})'
+})"
 
 dfx canister call ic_cose_canister admin_create_namespace "(record {
   name = \"testing\";

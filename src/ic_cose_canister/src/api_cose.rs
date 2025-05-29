@@ -146,7 +146,7 @@ async fn vetkd_public_key(path: SettingPath) -> Result<ByteBuf, String> {
 #[ic_cdk::update(guard = "is_authenticated")]
 async fn vetkd_encrypted_key(
     path: SettingPath,
-    public_key: ByteArray<48>,
+    transport_public_key: ByteArray<48>,
 ) -> Result<ByteBuf, String> {
     store::state::allowed_api("vetkd_encrypted_key")?;
     path.validate()?;
@@ -165,7 +165,7 @@ async fn vetkd_encrypted_key(
     let ek = store::ns::inner_vetkd_encrypted_key(
         &spk,
         key_id.into_vec(),
-        public_key.into_array().into(),
+        transport_public_key.into_array().into(),
     )
     .await?;
     Ok(ByteBuf::from(ek))

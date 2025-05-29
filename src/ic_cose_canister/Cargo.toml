@@ -23,6 +23,7 @@ ic-cdk = { workspace = true }
 serde = { workspace = true }
 serde_bytes = { workspace = true }
 serde_with = { workspace = true }
+sha3 = { workspace = true }
 ic-cdk-timers = { workspace = true }
 ic-stable-structures = { workspace = true }
 ic-secp256k1 = { workspace = true }
