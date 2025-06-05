@@ -250,11 +250,15 @@ pub trait CoseSDK: CanisterCaller + Sized {
     async fn vetkd_encrypted_key(
         &self,
         path: &SettingPath,
-        public_key: &ByteArray<48>,
+        transport_public_key: &ByteArray<48>,
     ) -> Result<ByteBuf, String> {
-        self.canister_update(self.canister(), "vetkd_encrypted_key", (path, public_key))
-            .await
-            .map_err(format_error)?
+        self.canister_update(
+            self.canister(),
+            "vetkd_encrypted_key",
+            (path, transport_public_key),
+        )
+        .await
+        .map_err(format_error)?
     }
 
     async fn namespace_get_fixed_identity(

@@ -2,6 +2,7 @@ use rand::RngCore;
 
 pub mod agent;
 pub mod client;
+// pub mod vetkeys;
 
 pub fn rand_bytes<const N: usize>() -> [u8; N] {
     let mut rng = rand::rng();

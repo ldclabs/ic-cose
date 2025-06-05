@@ -10,6 +10,7 @@ categories.workspace = true
 license.workspace = true
 
 [dependencies]
+ic_cose_types = { path = "../ic_cose_types", version = "0.8" }
 async-trait = { workspace = true }
 candid = { workspace = true }
 serde_bytes = { workspace = true }
@@ -17,4 +18,4 @@ rand = { workspace = true }
 ic-agent = { workspace = true }
 x25519-dalek = { workspace = true }
 ic_auth_types = { workspace = true }
-ic_cose_types = { path = "../ic_cose_types", version = "0.8" }
+# ic-vetkeys = { workspace = true }
