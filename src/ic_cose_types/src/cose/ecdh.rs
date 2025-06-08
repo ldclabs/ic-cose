@@ -22,7 +22,7 @@ pub fn ecdh_x25519(secret: [u8; 32], their_public: [u8; 32]) -> (SharedSecret, P
 #[cfg(test)]
 mod test {
     use candid::Principal;
-    use const_hex::{decode, encode};
+    use hex::{decode, encode};
 
     use super::*;
     use crate::cose::{encrypt0::cose_decrypt0, get_cose_key_secret, CborSerializable, CoseKey};

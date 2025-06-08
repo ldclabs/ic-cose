@@ -18,4 +18,9 @@ rand = { workspace = true }
 ic-agent = { workspace = true }
 x25519-dalek = { workspace = true }
 ic_auth_types = { workspace = true }
-# ic-vetkeys = { workspace = true }
+ic-vetkeys = { workspace = true }
+
+[dev-dependencies]
+hex = { workspace = true }
+ed25519-consensus = { workspace = true }
+tokio = { workspace = true, features = ["full"] }

@@ -22,7 +22,7 @@ pub fn hkdf256<const N: usize>(secret: &[u8], salt: Option<&[u8]>, info: &[u8]) 
 }
 
 /// Derives a 256-bit key for AES-GCM using HKDF-SHA-256 with COSE context
-/// 
+///
 /// https://datatracker.ietf.org/doc/html/rfc9053#name-context-information-structu
 ///
 /// # Arguments
@@ -74,13 +74,13 @@ mod test {
             .build();
         let info = ctx.to_vec().expect("failed to serialize context");
         let secret =
-            const_hex::decode("4B31712E096E5F20B4ECF9790FD8CC7C8B7E2C8AD90BDA81CB224F62C0E7B9A6")
+            hex::decode("4B31712E096E5F20B4ECF9790FD8CC7C8B7E2C8AD90BDA81CB224F62C0E7B9A6")
                 .unwrap();
         let res = hkdf256::<16>(&secret, None, &info);
         println!("{:?}", res);
         assert_eq!(
-            res,
-            const_hex::decode_to_array("56074D506729CA40C4B4FE50C6439893").unwrap()
+            res.to_vec(),
+            hex::decode("56074D506729CA40C4B4FE50C6439893").unwrap()
         );
     }
 }

@@ -64,7 +64,7 @@ pub fn get_scope(claims: &ClaimsSet) -> Result<String, String> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use const_hex::decode;
+    use hex::decode;
 
     #[test]
     fn cwt_works() {

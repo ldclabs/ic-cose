@@ -260,8 +260,8 @@ async fn admin_deploy(
         if ignore_prev_hash != prev_hash {
             Err(format!(
                 "prev_hash mismatch: {} != {}",
-                const_hex::encode(prev_hash.as_ref()),
-                const_hex::encode(ignore_prev_hash.as_ref())
+                hex::encode(prev_hash.as_ref()),
+                hex::encode(ignore_prev_hash.as_ref())
             ))?;
         }
         store::wasm::get_latest(&args.name)?
@@ -329,8 +329,8 @@ async fn validate_admin_deploy(
         if ignore_prev_hash != prev_hash {
             Err(format!(
                 "prev_hash mismatch: {} != {}",
-                const_hex::encode(prev_hash.as_ref()),
-                const_hex::encode(ignore_prev_hash.as_ref())
+                hex::encode(prev_hash.as_ref()),
+                hex::encode(ignore_prev_hash.as_ref())
             ))?;
         }
         let hash = store::state::with(|s| {
@@ -340,7 +340,7 @@ async fn validate_admin_deploy(
                 .unwrap_or_default()
         });
         let _ = store::wasm::get_wasm(&hash)
-            .ok_or_else(|| format!("wasm not found: {}", const_hex::encode(hash.as_ref())))?;
+            .ok_or_else(|| format!("wasm not found: {}", hex::encode(hash.as_ref())))?;
     } else {
         store::wasm::next_version(prev_hash)?;
     }

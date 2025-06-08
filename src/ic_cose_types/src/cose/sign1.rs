@@ -53,7 +53,11 @@ pub fn cose_sign1_from(
 
     match &cs1.protected.header.alg {
         Some(ALG_SECP256K1) if !secp256k1_pub_keys.is_empty() => {
-            k256::secp256k1_verify_ecdsa_any(secp256k1_pub_keys, &cs1.tbs_data(aad), &cs1.signature)?;
+            k256::secp256k1_verify_ecdsa_any(
+                secp256k1_pub_keys,
+                &cs1.tbs_data(aad),
+                &cs1.signature,
+            )?;
         }
         Some(ALG_ED25519) if !ed25519_pub_keys.is_empty() => {
             ed25519::ed25519_verify_any(ed25519_pub_keys, &cs1.tbs_data(aad), &cs1.signature)?;
@@ -69,7 +73,7 @@ pub fn cose_sign1_from(
 mod test {
     use super::*;
     use candid::Principal;
-    use const_hex::decode;
+    use hex::decode;
 
     #[test]
     fn cose_sign1_from_works() {

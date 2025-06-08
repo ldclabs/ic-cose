@@ -378,7 +378,7 @@ impl fmt::Display for SettingPathKey {
             self.0,
             self.1,
             self.2.to_text(),
-            const_hex::encode(&self.3),
+            hex::encode(&self.3),
             self.4
         )
     }

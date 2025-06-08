@@ -18,7 +18,7 @@ crate-type = ["cdylib"]
 ic_cose_types = { path = "../ic_cose_types", version = "0.8" }
 candid = { workspace = true }
 ciborium = { workspace = true }
-const-hex = { workspace = true }
+hex = { workspace = true }
 ic-cdk = { workspace = true }
 serde = { workspace = true }
 serde_bytes = { workspace = true }

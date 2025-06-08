@@ -23,6 +23,7 @@ use std::{collections::BTreeSet, sync::Arc};
 use x25519_dalek::{PublicKey, StaticSecret};
 
 use crate::rand_bytes;
+use crate::vetkeys::{DerivedPublicKey, EncryptedVetKey, TransportSecretKey, VetKey};
 
 #[derive(Clone)]
 pub struct Client {
@@ -250,7 +251,7 @@ pub trait CoseSDK: CanisterCaller + Sized {
     async fn vetkd_encrypted_key(
         &self,
         path: &SettingPath,
-        transport_public_key: &ByteArray<48>,
+        transport_public_key: &ByteBuf,
     ) -> Result<ByteBuf, String> {
         self.canister_update(
             self.canister(),
@@ -259,6 +260,19 @@ pub trait CoseSDK: CanisterCaller + Sized {
         )
         .await
         .map_err(format_error)?
+    }
+
+    async fn vetkey(&self, path: &SettingPath) -> Result<(VetKey, DerivedPublicKey), String> {
+        let pk = self.vetkd_public_key(path).await?;
+        let dpk = DerivedPublicKey::deserialize(&pk).map_err(|err| format!("{err:?}"))?;
+        let seed: [u8; 32] = rand_bytes();
+        let tsk = TransportSecretKey::from_seed(seed.into())?;
+        let ek = self
+            .vetkd_encrypted_key(path, &tsk.public_key().into())
+            .await?;
+        let evk = EncryptedVetKey::deserialize(&ek).map_err(|err| format!("{err:?}"))?;
+        let vk = evk.decrypt_and_verify(&tsk, &dpk, &path.key)?;
+        Ok((vk, dpk))
     }
 
     async fn namespace_get_fixed_identity(

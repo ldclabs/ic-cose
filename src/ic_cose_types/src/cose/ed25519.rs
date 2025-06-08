@@ -54,7 +54,7 @@ pub fn ed25519_verify_any(
 
 #[cfg(test)]
 mod test {
-    use const_hex::decode;
+    use hex::decode;
 
     use super::*;
 
