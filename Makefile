@@ -14,7 +14,10 @@ test:
 
 # cargo install ic-wasm
 build-wasm:
-	@cargo build --release --target wasm32-unknown-unknown --package ic_cose_canister --package ic_wasm_canister
+	@cargo build --release --target wasm32-unknown-unknown -p ic_cose_canister -p ic_wasm_canister
+
+build-wasm64:
+	@cargo +nightly build -Z build-std=std,panic_abort --target wasm64-unknown-unknown --release -p ic_cose_canister -p ic_wasm_canister
 
 # cargo install candid-extractor
 build-did:

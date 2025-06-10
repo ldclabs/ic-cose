@@ -3,6 +3,7 @@ use candid::{
     utils::{encode_args, ArgumentEncoder},
     CandidType, Decode, Principal,
 };
+use futures::try_join;
 use ic_agent::Agent;
 use ic_auth_types::{SignInResponse, SignedDelegation};
 use ic_cose_types::{
@@ -263,13 +264,15 @@ pub trait CoseSDK: CanisterCaller + Sized {
     }
 
     async fn vetkey(&self, path: &SettingPath) -> Result<(VetKey, DerivedPublicKey), String> {
-        let pk = self.vetkd_public_key(path).await?;
-        let dpk = DerivedPublicKey::deserialize(&pk).map_err(|err| format!("{err:?}"))?;
         let seed: [u8; 32] = rand_bytes();
         let tsk = TransportSecretKey::from_seed(seed.into())?;
-        let ek = self
-            .vetkd_encrypted_key(path, &tsk.public_key().into())
-            .await?;
+        let tpk = tsk.public_key().into();
+
+        let (pk, ek) = try_join!(
+            self.vetkd_public_key(path),
+            self.vetkd_encrypted_key(path, &tpk)
+        )?;
+        let dpk = DerivedPublicKey::deserialize(&pk).map_err(|err| format!("{err:?}"))?;
         let evk = EncryptedVetKey::deserialize(&ek).map_err(|err| format!("{err:?}"))?;
         let vk = evk.decrypt_and_verify(&tsk, &dpk, &path.key)?;
         Ok((vk, dpk))

@@ -14,7 +14,7 @@ strip = true
 opt-level = 's'
 
 [workspace.package]
-version = "0.8.6"
+version = "0.8.7"
 edition = "2021"
 repository = "https://github.com/ldclabs/ic-cose"
 keywords = ["config", "cbor", "canister", "icp", "encryption"]
@@ -28,7 +28,6 @@ ciborium = "0.2"
 futures = "0.3"
 serde = "1"
 serde_bytes = "0.11"
-serde_with = "3.12"
 k256 = { version = "0.13", features = ["ecdsa", "schnorr"] }
 ed25519-consensus = "2.1"
 ed25519-dalek = "2"
@@ -52,7 +51,6 @@ ic-vetkeys = "0.2"
 rand = "0.9"
 coset = "0.3"
 aes-gcm = "0.10"
-thiserror = "2"
 ic-secp256k1 = { version = "0.1" }
 ic-ed25519 = { version = "0.2" }
 ic-dummy-getrandom-for-wasm = "0.1"

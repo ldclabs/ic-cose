@@ -1,5 +1,4 @@
 use candid::{CandidType, Principal};
-use ciborium::{from_reader, Value};
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
 use std::collections::{BTreeMap, BTreeSet};
@@ -44,10 +43,6 @@ impl SettingPath {
         }
         Ok(())
     }
-}
-
-pub fn try_decode_payload(payload: &[u8]) -> Result<Value, String> {
-    from_reader(payload).map_err(|err| format!("decode CBOR payload failed: {:?}", err))
 }
 
 #[derive(CandidType, Clone, Debug, Default, Deserialize, Serialize)]

@@ -4,7 +4,7 @@
 use candid::{utils::ArgumentEncoder, CandidType, Principal};
 use ciborium::into_writer;
 use serde::Serialize;
-use std::{collections::BTreeSet, future::Future, ops::Deref};
+use std::{collections::BTreeSet, future::Future};
 
 pub mod cose;
 pub mod types;
@@ -74,36 +74,6 @@ pub fn validate_principals(principals: &BTreeSet<Principal>) -> Result<(), Strin
         return Err("anonymous user is not allowed".to_string());
     }
     Ok(())
-}
-
-/// A smart pointer that can hold either a reference or an owned value
-pub enum OwnedRef<'a, T> {
-    /// Holds a reference to a value
-    Ref(&'a T),
-    /// Holds an owned value
-    Owned(T),
-}
-
-impl<T> AsRef<T> for OwnedRef<'_, T> {
-    /// Returns a reference to the contained value
-    fn as_ref(&self) -> &T {
-        match self {
-            OwnedRef::Ref(r) => r,
-            OwnedRef::Owned(o) => o,
-        }
-    }
-}
-
-impl<T> Deref for OwnedRef<'_, T> {
-    type Target = T;
-
-    /// Dereferences to the contained value
-    fn deref(&self) -> &Self::Target {
-        match self {
-            OwnedRef::Ref(r) => r,
-            OwnedRef::Owned(o) => o,
-        }
-    }
 }
 
 /// A type alias for a boxed error that is thread-safe and sendable across threads.

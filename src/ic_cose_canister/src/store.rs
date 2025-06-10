@@ -1153,15 +1153,11 @@ pub mod ns {
                         dek.len()
                     }
                 }
-                None => {
-                    // try to validate plain payload
-                    if let Some(ref payload) = input.payload {
-                        try_decode_payload(payload)?;
-                        payload.len()
-                    } else {
-                        0
-                    }
-                }
+                None => input
+                    .payload
+                    .as_ref()
+                    .map(|payload| payload.len())
+                    .unwrap_or(0),
             };
 
             let output = SETTINGS_STORE.with_borrow_mut(|m| {
@@ -1301,9 +1297,6 @@ pub mod ns {
                             // should be valid COSE encrypt0 payload
                             try_decode_encrypt0(payload)?;
                         }
-                    } else if let Some(ref payload) = input.payload {
-                        // try to validate plain payload
-                        try_decode_payload(payload)?;
                     }
 
                     if let Some(payload) = setting.payload.as_ref() {
