@@ -130,15 +130,18 @@ async fn vetkd_public_key(path: SettingPath) -> Result<ByteBuf, String> {
     path.validate()?;
 
     let caller = ic_cdk::api::msg_caller();
-    let spk = store::SettingPathKey::from_path(path, caller);
-    if !store::ns::has_kek_permission(&caller, &spk) {
-        Err(format!(
-            "vetkd_public_key: {} has no permission for {}",
-            caller.to_text(),
-            spk
-        ))?;
-    }
+    store::ns::with(&path.ns, |ns| {
+        if !ns.can_read_namespace(&caller) {
+            return Err(format!(
+                "vetkd_public_key: {} has no permission for {}",
+                caller.to_text(),
+                path.ns
+            ))?;
+        }
+        Ok(())
+    })?;
 
+    let spk = store::SettingPathKey::from_path(path, caller);
     let pk = store::ns::inner_vetkd_public_key(&spk).await?;
     Ok(ByteBuf::from(pk))
 }

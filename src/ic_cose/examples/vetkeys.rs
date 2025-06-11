@@ -39,17 +39,17 @@ async fn main() {
         version: 1,
     };
 
-    let (vk, dkp) = cli.vetkey(&path).await.unwrap();
+    let (vk, dpk) = cli.vetkey(&path).await.unwrap();
     println!("VetKey: {:?}", hex::encode(vk.signature_bytes()));
     // VetKey: "8a4554dec6eeb1ab95574005c477ed5a8dadb0acb5d4c7c911771a16d974bcd61db63bd2a89eeb174fc96b58ca9d5eca"
-    println!("Derived Public Key: {:?}", hex::encode(dkp.serialize()));
+    println!("Derived Public Key: {:?}", hex::encode(dpk.serialize()));
     // Derived Public Key: "81b09cdf3a525448978fd72532e19b9fbc8ec7d025af4b5fa2c1f85ef007fdb8946be1ccc288c623acf1bf1fa43cac5f1098012a4f91663eaa73894487c94b4b335af8a224e9e30ca136bad8bfdc2b7fc16f0424f66e88553713852ea04b27a8"
 
     let ibe_seed: [u8; 32] = rand_bytes();
     let ibe_seed = IbeSeed::from_bytes(&ibe_seed).unwrap();
     let ibe_id = IbeIdentity::from_bytes(&path.key);
     let msg = b"Hello, LDC Labs!";
-    let ciphertext = IbeCiphertext::encrypt(&dkp, &ibe_id, msg, &ibe_seed);
+    let ciphertext = IbeCiphertext::encrypt(&dpk, &ibe_id, msg, &ibe_seed);
     let data = ciphertext.serialize();
     println!("Ciphertext: {:?}", hex::encode(&data));
 
