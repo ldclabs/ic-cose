@@ -4,6 +4,7 @@ export const idlFactory = ({ IDL }) => {
     'governance_canister' : IDL.Opt(IDL.Principal),
     'name' : IDL.Opt(IDL.Text),
     'subnet_size' : IDL.Opt(IDL.Nat64),
+    'vetkd_key_name' : IDL.Opt(IDL.Text),
   });
   const InitArgs = IDL.Record({
     'freezing_threshold' : IDL.Nat64,
@@ -423,6 +424,7 @@ export const init = ({ IDL }) => {
     'governance_canister' : IDL.Opt(IDL.Principal),
     'name' : IDL.Opt(IDL.Text),
     'subnet_size' : IDL.Opt(IDL.Nat64),
+    'vetkd_key_name' : IDL.Opt(IDL.Text),
   });
   const InitArgs = IDL.Record({
     'freezing_threshold' : IDL.Nat64,

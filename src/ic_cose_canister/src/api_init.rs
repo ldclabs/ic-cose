@@ -29,6 +29,7 @@ pub struct UpgradeArgs {
     subnet_size: Option<u64>,
     freezing_threshold: Option<u64>, // in cycles
     governance_canister: Option<Principal>,
+    vetkd_key_name: Option<String>,
 }
 
 #[ic_cdk::init]
@@ -85,6 +86,9 @@ fn post_upgrade(args: Option<InstallArgs>) {
                 }
                 if let Some(governance_canister) = args.governance_canister {
                     s.governance_canister = Some(governance_canister);
+                }
+                if let Some(vetkd_key_name) = args.vetkd_key_name {
+                    s.vetkd_key_name = vetkd_key_name;
                 }
             });
         }

@@ -165,6 +165,7 @@ type UpgradeArgs = record {
   governance_canister : opt principal;
   name : opt text;
   subnet_size : opt nat64;
+  vetkd_key_name : opt text;
 };
 service : (opt InstallArgs) -> {
   admin_add_allowed_apis : (vec text) -> (Result);

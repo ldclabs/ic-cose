@@ -204,6 +204,7 @@ export interface UpgradeArgs {
   'governance_canister' : [] | [Principal],
   'name' : [] | [string],
   'subnet_size' : [] | [bigint],
+  'vetkd_key_name' : [] | [string],
 }
 export interface _SERVICE {
   'admin_add_allowed_apis' : ActorMethod<[Array<string>], Result>,
