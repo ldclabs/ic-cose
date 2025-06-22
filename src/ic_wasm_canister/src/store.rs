@@ -257,11 +257,11 @@ pub mod wasm {
             let hash = s
                 .latest_version
                 .get(name)
-                .ok_or_else(|| format!("{} not found", name))?;
+                .ok_or_else(|| format!("NotFound: {} not found", name))?;
             WASM_STORE.with_borrow(|r| {
                 r.get(hash)
                     .map(|w| (*hash, w))
-                    .ok_or_else(|| "latest wasm not found".to_string())
+                    .ok_or_else(|| "NotFound: latest wasm not found".to_string())
             })
         })
     }
@@ -279,7 +279,7 @@ pub mod wasm {
             WASM_STORE.with_borrow(|r| {
                 let w = r
                     .get(hash)
-                    .ok_or_else(|| "next version not found".to_string())?;
+                    .ok_or_else(|| "NotFound: next version not found".to_string())?;
                 Ok((*hash, w))
             })
         })

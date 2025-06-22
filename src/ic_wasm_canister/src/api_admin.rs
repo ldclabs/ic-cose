@@ -1,4 +1,4 @@
-use candid::Principal;
+use candid::{pretty::candid::value::pp_value, CandidType, IDLArgs, IDLValue, Principal};
 use ic_cdk::management_canister as mgt;
 use ic_cose_types::{
     format_error,
@@ -55,25 +55,25 @@ fn admin_remove_committers(args: BTreeSet<Principal>) -> Result<(), String> {
 #[ic_cdk::update]
 fn validate_admin_add_managers(args: BTreeSet<Principal>) -> Result<String, String> {
     validate_principals(&args)?;
-    Ok("ok".to_string())
+    pretty_format(&args)
 }
 
 #[ic_cdk::update]
 fn validate_admin_remove_managers(args: BTreeSet<Principal>) -> Result<String, String> {
     validate_principals(&args)?;
-    Ok("ok".to_string())
+    pretty_format(&args)
 }
 
 #[ic_cdk::update]
 fn validate_admin_add_committers(args: BTreeSet<Principal>) -> Result<String, String> {
     validate_principals(&args)?;
-    Ok("ok".to_string())
+    pretty_format(&args)
 }
 
 #[ic_cdk::update]
 fn validate_admin_remove_committers(args: BTreeSet<Principal>) -> Result<String, String> {
     validate_principals(&args)?;
-    Ok("ok".to_string())
+    pretty_format(&args)
 }
 
 #[ic_cdk::update(guard = "is_controller_or_manager_or_committer")]
@@ -95,6 +95,7 @@ async fn validate_admin_add_wasm(
     args: AddWasmInput,
     force_prev_hash: Option<ByteArray<32>>,
 ) -> Result<String, String> {
+    let rt = pretty_format(&(&args.name, &args.description, &force_prev_hash))?;
     store::wasm::add_wasm(
         ic_cdk::api::msg_caller(),
         ic_cdk::api::time() / MILLISECONDS,
@@ -102,7 +103,8 @@ async fn validate_admin_add_wasm(
         force_prev_hash,
         true,
     )?;
-    Ok("ok".to_string())
+
+    Ok(rt)
 }
 
 #[ic_cdk::update(guard = "is_controller")]
@@ -206,22 +208,26 @@ async fn admin_create_on(
 #[ic_cdk::update]
 fn validate_admin_create_canister(
     wasm_name: String,
-    _settings: Option<mgt::CanisterSettings>,
-    _args: Option<ByteBuf>,
+    settings: Option<mgt::CanisterSettings>,
+    args: Option<ByteBuf>,
 ) -> Result<String, String> {
     let _ = store::wasm::get_latest(&wasm_name)?;
-    Ok("ok".to_string())
+    let args = IDLArgs::from_bytes(&args.unwrap_or_else(|| ByteBuf::from(EMPTY_CANDID_ARGS)))
+        .map_err(|err| format!("Invalid args: {err}"))?;
+    pretty_format(&(&wasm_name, &settings, &args.to_string()))
 }
 
 #[ic_cdk::update]
 fn validate_admin_create_on(
-    _subnet: Principal,
+    subnet: Principal,
     wasm_name: String,
-    _settings: Option<mgt::CanisterSettings>,
-    _args: Option<ByteBuf>,
+    settings: Option<mgt::CanisterSettings>,
+    args: Option<ByteBuf>,
 ) -> Result<String, String> {
     let _ = store::wasm::get_latest(&wasm_name)?;
-    Ok("ok".to_string())
+    let args = IDLArgs::from_bytes(&args.unwrap_or_else(|| ByteBuf::from(EMPTY_CANDID_ARGS)))
+        .map_err(|err| format!("Invalid args: {err}"))?;
+    pretty_format(&(&subnet, &wasm_name, &settings, &args.to_string()))
 }
 
 #[ic_cdk::update(guard = "is_controller")]
@@ -304,6 +310,18 @@ async fn validate_admin_deploy(
     args: DeployWasmInput,
     ignore_prev_hash: Option<ByteArray<32>>,
 ) -> Result<String, String> {
+    let args_ = IDLArgs::from_bytes(
+        &args
+            .args
+            .unwrap_or_else(|| ByteBuf::from(EMPTY_CANDID_ARGS)),
+    )
+    .map_err(|err| format!("Invalid args: {err}"))?;
+    let rt = pretty_format(&(
+        &args.name,
+        &args.canister,
+        &args_.to_string(),
+        &ignore_prev_hash,
+    ))?;
     let info = mgt::canister_info(&mgt::CanisterInfoArgs {
         canister_id: args.canister,
         num_requested_changes: None,
@@ -340,12 +358,12 @@ async fn validate_admin_deploy(
                 .unwrap_or_default()
         });
         let _ = store::wasm::get_wasm(&hash)
-            .ok_or_else(|| format!("wasm not found: {}", hex::encode(hash.as_ref())))?;
+            .ok_or_else(|| format!("NotFound: wasm not found: {}", hex::encode(hash.as_ref())))?;
     } else {
         store::wasm::next_version(prev_hash)?;
     }
 
-    Ok("ok".to_string())
+    Ok(rt)
 }
 
 #[ic_cdk::update(guard = "is_controller_or_manager")]
@@ -429,7 +447,7 @@ async fn admin_batch_topup() -> Result<u128, String> {
 async fn admin_update_canister_settings(args: mgt::UpdateSettingsArgs) -> Result<(), String> {
     store::state::with(|s| {
         if !s.deployed_list.contains_key(&args.canister_id) {
-            return Err("canister not found".to_string());
+            return Err("NotFound: canister not found".to_string());
         }
         Ok(())
     })?;
@@ -439,11 +457,13 @@ async fn admin_update_canister_settings(args: mgt::UpdateSettingsArgs) -> Result
 
 #[ic_cdk::update]
 async fn validate_admin_batch_call(
-    _canisters: BTreeSet<Principal>,
-    _method: String,
-    _args: Option<ByteBuf>,
+    canisters: BTreeSet<Principal>,
+    method: String,
+    args: Option<ByteBuf>,
 ) -> Result<String, String> {
-    Ok("ok".to_string())
+    let args = IDLArgs::from_bytes(&args.unwrap_or_else(|| ByteBuf::from(EMPTY_CANDID_ARGS)))
+        .map_err(|err| format!("Invalid args: {err}"))?;
+    pretty_format(&(&canisters, &method, &args.to_string()))
 }
 
 #[ic_cdk::update]
@@ -457,9 +477,19 @@ async fn validate_admin_update_canister_settings(
 ) -> Result<String, String> {
     store::state::with(|s| {
         if !s.deployed_list.contains_key(&args.canister_id) {
-            return Err("canister not found".to_string());
+            return Err("NotFound: canister not found".to_string());
         }
         Ok(())
     })?;
-    Ok("ok".to_string())
+    pretty_format(&args)
+}
+
+fn pretty_format<T>(data: &T) -> Result<String, String>
+where
+    T: CandidType,
+{
+    let val = IDLValue::try_from_candid_type(data).map_err(|err| format!("{err:?}"))?;
+    let doc = pp_value(7, &val);
+
+    Ok(format!("{}", doc.pretty(120)))
 }

@@ -25,7 +25,7 @@ fn get_wasm(hash: ByteArray<32>) -> Result<WasmInfo, String> {
             wasm: w.wasm,
             hash,
         })
-        .ok_or_else(|| "wasm not found".to_string())
+        .ok_or_else(|| "NotFound: wasm not found".to_string())
 }
 
 #[ic_cdk::query]
@@ -47,7 +47,7 @@ async fn get_canister_status(
     if canister != self_id {
         store::state::with(|s| {
             if !s.deployed_list.contains_key(&canister) {
-                return Err("canister not found".to_string());
+                return Err("NotFound: canister not found".to_string());
             }
             Ok(())
         })?;

@@ -684,7 +684,7 @@ pub mod ns {
         NAMESPACES_STORE.with_borrow(|r| {
             r.get(namespace)
                 .map(f)
-                .unwrap_or_else(|| Err(format!("namespace {} not found", namespace)))
+                .unwrap_or_else(|| Err(format!("NotFound: namespace {} not found", namespace)))
         })
     }
 
@@ -700,7 +700,7 @@ pub mod ns {
                 }
                 Err(err) => Err(err),
             },
-            None => Err(format!("namespace {} not found", namespace)),
+            None => Err(format!("NotFound: namespace {} not found", namespace)),
         })
     }
 
@@ -1055,7 +1055,7 @@ pub mod ns {
                 r.remove(&namespace);
                 Ok(())
             }
-            None => Err(format!("namespace {} not found", namespace)),
+            None => Err(format!("NotFound: namespace {} not found", namespace)),
         })
     }
 
@@ -1076,14 +1076,14 @@ pub mod ns {
 
     pub fn get_setting_info(caller: Principal, spk: SettingPathKey) -> Result<SettingInfo, String> {
         let setting = try_get_setting(&caller, &spk)
-            .ok_or_else(|| format!("setting {} not found or no permission", spk))?;
+            .ok_or_else(|| format!("NotFound: setting {} not found or no permission", spk))?;
 
         Ok(setting.into_info(spk.2, spk.3, false))
     }
 
     pub fn get_setting(caller: Principal, spk: SettingPathKey) -> Result<SettingInfo, String> {
         let setting = try_get_setting(&caller, &spk)
-            .ok_or_else(|| format!("setting {} not found or no permission", &spk))?;
+            .ok_or_else(|| format!("NotFound: setting {} not found or no permission", &spk))?;
 
         if spk.4 != 0 && spk.4 != setting.version {
             Err("version mismatch".to_string())?;
@@ -1097,7 +1097,7 @@ pub mod ns {
         spk: SettingPathKey,
     ) -> Result<SettingArchivedPayload, String> {
         let setting = try_get_setting(&caller, &spk)
-            .ok_or_else(|| format!("setting {} not found or no permission", &spk))?;
+            .ok_or_else(|| format!("NotFound: setting {} not found or no permission", &spk))?;
 
         if spk.4 == 0 || spk.4 >= setting.version {
             Err("version mismatch".to_string())?;
@@ -1105,7 +1105,7 @@ pub mod ns {
 
         let payload = PAYLOADS_STORE.with_borrow(|r| {
             r.get(&spk)
-                .ok_or_else(|| format!("setting {} payload not found", &spk))
+                .ok_or_else(|| format!("NotFound: setting {} payload not found", &spk))
         })?;
 
         Ok(SettingArchivedPayload {
@@ -1220,7 +1220,7 @@ pub mod ns {
                         Err(err) => Err(err),
                     }
                 }
-                None => Err(format!("setting {} not found", &spk)),
+                None => Err(format!("NotFound: setting {} not found", &spk)),
             })
         })
     }
@@ -1254,7 +1254,7 @@ pub mod ns {
 
                     Ok(())
                 }
-                None => Err(format!("setting {} not found", &spk)),
+                None => Err(format!("NotFound: setting {} not found", &spk)),
             })
         })
     }
@@ -1332,7 +1332,7 @@ pub mod ns {
                         version: setting.version,
                     })
                 }
-                None => Err(format!("setting {} not found", &spk)),
+                None => Err(format!("NotFound: setting {} not found", &spk)),
             })?;
 
             ns.payload_bytes_total = ns.payload_bytes_total.saturating_add(size as u64);

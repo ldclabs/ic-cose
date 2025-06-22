@@ -32,7 +32,7 @@ fn namespace_get_delegators(
         }
 
         ns.fixed_id_names.get(&name).map_or_else(
-            || Err("name not found".to_string()),
+            || Err("NotFound: name not found".to_string()),
             |delegators| Ok(delegators.clone()),
         )
     })
@@ -99,7 +99,7 @@ fn namespace_sign_delegation(input: SignDelegationInput) -> Result<SignInRespons
             }
             return Err(format!("caller {} is not a delegator", caller));
         }
-        Err("name not found".to_string())
+        Err("NotFound: name not found".to_string())
     })?;
     if session_expires_in_ms == 0 {
         return Err("delegation is disabled".to_string());
