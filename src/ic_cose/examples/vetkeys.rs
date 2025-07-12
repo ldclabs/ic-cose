@@ -1,5 +1,4 @@
 use candid::Principal;
-use ed25519_consensus::SigningKey;
 use ic_agent::{identity::BasicIdentity, Identity};
 use ic_cose::agent::build_agent;
 use ic_cose::client::{Client, CoseSDK};
@@ -17,8 +16,7 @@ async fn main() {
     let sk =
         hex::decode("5b3770cbfd16d3ac610cc3cda0bc292a448f2c78d6634de6ee280df0a65e4c04").unwrap();
     let sk: [u8; 32] = sk.try_into().unwrap();
-    let sk = SigningKey::try_from(sk).unwrap();
-    let id = BasicIdentity::from_signing_key(sk);
+    let id = BasicIdentity::from_raw_key(&sk);
     println!("Principal: {}", id.sender().unwrap());
     // "pxfqr-x3orr-z5yip-7yzdd-hyxgd-dktgh-3awsk-ohzma-lfjzi-753j7-tae"
 

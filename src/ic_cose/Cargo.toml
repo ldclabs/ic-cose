@@ -23,5 +23,4 @@ ic-vetkeys = { workspace = true }
 
 [dev-dependencies]
 hex = { workspace = true }
-ed25519-consensus = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
