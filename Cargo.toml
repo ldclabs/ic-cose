@@ -14,7 +14,7 @@ strip = true
 opt-level = 's'
 
 [workspace.package]
-version = "0.8.11"
+version = "0.8.12"
 edition = "2021"
 repository = "https://github.com/ldclabs/ic-cose"
 keywords = ["config", "cbor", "canister", "icp", "encryption"]
@@ -46,7 +46,7 @@ ic-canister-sig-creation = "1.3"
 ic-agent = "0.41"
 ic_auth_types = "0.5"
 ic_auth_verifier = { version = "0.5" }
-ic-vetkeys = "0.2"
+ic-vetkeys = "0.3"
 rand = "0.9"
 coset = "0.3"
 aes-gcm = "0.10"
