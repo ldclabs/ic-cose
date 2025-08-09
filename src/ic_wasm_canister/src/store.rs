@@ -36,6 +36,12 @@ pub struct State {
 impl Storable for State {
     const BOUND: Bound = Bound::Unbounded;
 
+    fn into_bytes(self) -> Vec<u8> {
+        let mut buf = vec![];
+        into_writer(&self, &mut buf).expect("failed to encode State data");
+        buf
+    }
+
     fn to_bytes(&self) -> Cow<[u8]> {
         let mut buf = vec![];
         into_writer(self, &mut buf).expect("failed to encode State data");
@@ -63,6 +69,12 @@ pub struct Wasm {
 
 impl Storable for Wasm {
     const BOUND: Bound = Bound::Unbounded;
+
+    fn into_bytes(self) -> Vec<u8> {
+        let mut buf = vec![];
+        into_writer(&self, &mut buf).expect("failed to encode Wasm data");
+        buf
+    }
 
     fn to_bytes(&self) -> Cow<[u8]> {
         let mut buf = vec![];
@@ -96,6 +108,12 @@ pub struct DeployLog {
 impl Storable for DeployLog {
     const BOUND: Bound = Bound::Unbounded;
 
+    fn into_bytes(self) -> Vec<u8> {
+        let mut buf = vec![];
+        into_writer(&self, &mut buf).expect("failed to encode DeployLog data");
+        buf
+    }
+
     fn to_bytes(&self) -> Cow<[u8]> {
         let mut buf = vec![];
         into_writer(self, &mut buf).expect("failed to encode DeployLog data");
@@ -122,7 +140,7 @@ thread_local! {
         StableCell::init(
             MEMORY_MANAGER.with_borrow(|m| m.get(STATE_MEMORY_ID)),
             State::default()
-        ).expect("failed to init STATE store")
+        )
     );
 
     static WASM_STORE: RefCell<StableBTreeMap<[u8; 32], Wasm, Memory>> = RefCell::new(
@@ -135,7 +153,7 @@ thread_local! {
         StableLog::init(
             MEMORY_MANAGER.with_borrow(|m| m.get(INSTALL_LOG_INDEX_MEMORY_ID)),
             MEMORY_MANAGER.with_borrow(|m| m.get(INSTALL_LOG_DATA_MEMORY_ID)),
-        ).expect("failed to init INSTALL_LOGS store")
+        )
     );
 }
 
@@ -187,7 +205,7 @@ pub mod state {
     pub fn save() {
         STATE.with_borrow(|h| {
             STATE_STORE.with_borrow_mut(|r| {
-                r.set(h.clone()).expect("failed to set STATE data");
+                r.set(h.clone());
             });
         });
     }

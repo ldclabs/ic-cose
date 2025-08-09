@@ -270,6 +270,12 @@ impl Namespace {
 impl Storable for Namespace {
     const BOUND: Bound = Bound::Unbounded;
 
+    fn into_bytes(self) -> Vec<u8> {
+        let mut buf = vec![];
+        into_writer(&self, &mut buf).expect("failed to encode Namespace data");
+        buf
+    }
+
     fn to_bytes(&self) -> Cow<[u8]> {
         let mut buf = vec![];
         into_writer(self, &mut buf).expect("failed to encode Namespace data");
@@ -324,6 +330,12 @@ impl Setting {
 impl Storable for Setting {
     const BOUND: Bound = Bound::Unbounded;
 
+    fn into_bytes(self) -> Vec<u8> {
+        let mut buf = vec![];
+        into_writer(&self, &mut buf).expect("failed to encode Setting data");
+        buf
+    }
+
     fn to_bytes(&self) -> Cow<[u8]> {
         let mut buf = vec![];
         into_writer(self, &mut buf).expect("failed to encode Setting data");
@@ -357,6 +369,12 @@ impl SettingPathKey {
 
 impl Storable for SettingPathKey {
     const BOUND: Bound = Bound::Unbounded;
+
+    fn into_bytes(self) -> Vec<u8> {
+        let mut buf = vec![];
+        into_writer(&self, &mut buf).expect("failed to encode SettingPathKey data");
+        buf
+    }
 
     fn to_bytes(&self) -> Cow<[u8]> {
         let mut buf = vec![];
@@ -399,6 +417,12 @@ pub struct SettingArchived {
 impl Storable for SettingArchived {
     const BOUND: Bound = Bound::Unbounded;
 
+    fn into_bytes(self) -> Vec<u8> {
+        let mut buf = vec![];
+        into_writer(&self, &mut buf).expect("failed to encode SettingArchived data");
+        buf
+    }
+
     fn to_bytes(&self) -> Cow<[u8]> {
         let mut buf = vec![];
         into_writer(self, &mut buf).expect("failed to encode SettingArchived data");
@@ -428,14 +452,14 @@ thread_local! {
         StableCell::init(
             MEMORY_MANAGER.with_borrow(|m| m.get(STATE_MEMORY_ID)),
             Vec::new()
-        ).expect("failed to init STATE_STORE store")
+        )
     );
 
     static NSLEGACY_STORE: RefCell<StableCell<Vec<u8>, Memory>> = RefCell::new(
         StableCell::init(
             MEMORY_MANAGER.with_borrow(|m| m.get(NSLEGACY_MEMORY_ID)),
             Vec::new()
-        ).expect("failed to init NS_STORE store")
+        )
     );
 
     static PAYLOADS_STORE: RefCell<StableBTreeMap<SettingPathKey, SettingArchived, Memory>> = RefCell::new(
@@ -579,7 +603,7 @@ pub mod state {
             STATE_STORE.with_borrow_mut(|r| {
                 let mut buf = vec![];
                 into_writer(h, &mut buf).expect("failed to encode STATE_STORE data");
-                r.set(buf).expect("failed to set STATE_STORE data");
+                r.set(buf);
             });
         });
     }
@@ -949,16 +973,16 @@ pub mod ns {
             let mut res = Vec::with_capacity(take);
             match prev {
                 Some(p) => {
-                    for (k, v) in r.range(ops::RangeTo { end: p }).rev() {
-                        res.push(v.into_info(k.clone()));
+                    for e in r.range(ops::RangeTo { end: p }).rev() {
+                        res.push(e.value().into_info(e.key().clone()));
                         if res.len() >= take {
                             break;
                         }
                     }
                 }
                 None => {
-                    for (k, v) in r.iter().rev() {
-                        res.push(v.into_info(k.clone()));
+                    for e in r.iter().rev() {
+                        res.push(e.value().into_info(e.key().clone()));
                         if res.len() >= take {
                             break;
                         }

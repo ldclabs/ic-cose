@@ -176,6 +176,8 @@ service : (opt InstallArgs) -> {
   admin_remove_allowed_apis : (vec text) -> (Result);
   admin_remove_auditors : (vec principal) -> (Result);
   admin_remove_managers : (vec principal) -> (Result);
+  // ecdh_encrypted_cose_key returns a permanent partial KEK encrypted with ECDH.
+  // It should be used with a local partial key to derive a full KEK.
   ecdh_cose_encrypted_key : (SettingPath, ECDHInput) -> (Result_3);
   ecdsa_public_key : (opt PublicKeyInput) -> (Result_4) query;
   ecdsa_sign : (SignInput) -> (Result_5);
