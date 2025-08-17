@@ -42,7 +42,7 @@ impl Storable for State {
         buf
     }
 
-    fn to_bytes(&self) -> Cow<[u8]> {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
         let mut buf = vec![];
         into_writer(self, &mut buf).expect("failed to encode State data");
         Cow::Owned(buf)
@@ -76,7 +76,7 @@ impl Storable for Wasm {
         buf
     }
 
-    fn to_bytes(&self) -> Cow<[u8]> {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
         let mut buf = vec![];
         into_writer(self, &mut buf).expect("failed to encode Wasm data");
         Cow::Owned(buf)
@@ -114,7 +114,7 @@ impl Storable for DeployLog {
         buf
     }
 
-    fn to_bytes(&self) -> Cow<[u8]> {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
         let mut buf = vec![];
         into_writer(self, &mut buf).expect("failed to encode DeployLog data");
         Cow::Owned(buf)

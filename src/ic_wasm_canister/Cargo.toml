@@ -15,7 +15,7 @@ license.workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
-ic_cose_types = { path = "../ic_cose_types", version = "0.8" }
+ic_cose_types = { path = "../ic_cose_types", version = "0.9" }
 candid = { workspace = true, features = ["value", "printer"] }
 futures = { workspace = true }
 ciborium = { workspace = true }

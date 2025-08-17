@@ -276,7 +276,7 @@ impl Storable for Namespace {
         buf
     }
 
-    fn to_bytes(&self) -> Cow<[u8]> {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
         let mut buf = vec![];
         into_writer(self, &mut buf).expect("failed to encode Namespace data");
         Cow::Owned(buf)
@@ -336,7 +336,7 @@ impl Storable for Setting {
         buf
     }
 
-    fn to_bytes(&self) -> Cow<[u8]> {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
         let mut buf = vec![];
         into_writer(self, &mut buf).expect("failed to encode Setting data");
         Cow::Owned(buf)
@@ -376,7 +376,7 @@ impl Storable for SettingPathKey {
         buf
     }
 
-    fn to_bytes(&self) -> Cow<[u8]> {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
         let mut buf = vec![];
         into_writer(self, &mut buf).expect("failed to encode SettingPathKey data");
         Cow::Owned(buf)
@@ -423,7 +423,7 @@ impl Storable for SettingArchived {
         buf
     }
 
-    fn to_bytes(&self) -> Cow<[u8]> {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
         let mut buf = vec![];
         into_writer(self, &mut buf).expect("failed to encode SettingArchived data");
         Cow::Owned(buf)
