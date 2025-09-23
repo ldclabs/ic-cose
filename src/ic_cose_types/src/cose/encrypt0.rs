@@ -76,9 +76,11 @@ pub fn cose_decrypt0(
             e0.unprotected.iv.len()
         )
     })?;
-    e0.decrypt(aad, |cipher_data, enc| {
-        aes256_gcm_decrypt(secret, nonce, enc, cipher_data)
-    })
+    e0.decrypt_ciphertext(
+        aad,
+        || "missing ciphertext".to_string(),
+        |cipher_data, enc| aes256_gcm_decrypt(secret, nonce, enc, cipher_data),
+    )
 }
 
 /// Decrypts a COSE_Encrypt0 structure using AES-256-GCM.
@@ -97,7 +99,9 @@ pub fn decrypt(item: &CoseEncrypt0, secret: &[u8; 32], aad: &[u8]) -> Result<Vec
             item.unprotected.iv.len()
         )
     })?;
-    item.decrypt(aad, |cipher_data, enc| {
-        aes256_gcm_decrypt(secret, nonce, enc, cipher_data)
-    })
+    item.decrypt_ciphertext(
+        aad,
+        || "missing ciphertext".to_string(),
+        |cipher_data, enc| aes256_gcm_decrypt(secret, nonce, enc, cipher_data),
+    )
 }

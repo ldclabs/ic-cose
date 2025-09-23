@@ -218,6 +218,10 @@ export interface _SERVICE {
   'admin_remove_allowed_apis' : ActorMethod<[Array<string>], Result>,
   'admin_remove_auditors' : ActorMethod<[Array<Principal>], Result>,
   'admin_remove_managers' : ActorMethod<[Array<Principal>], Result>,
+  /**
+   * ecdh_encrypted_cose_key returns a permanent partial KEK encrypted with ECDH.
+   * It should be used with a local partial key to derive a full KEK.
+   */
   'ecdh_cose_encrypted_key' : ActorMethod<[SettingPath, ECDHInput], Result_3>,
   'ecdsa_public_key' : ActorMethod<[[] | [PublicKeyInput]], Result_4>,
   'ecdsa_sign' : ActorMethod<[SignInput], Result_5>,
