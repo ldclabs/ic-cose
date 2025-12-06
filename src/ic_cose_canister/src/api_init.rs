@@ -58,9 +58,7 @@ fn init(args: Option<InstallArgs>) {
         }
     }
 
-    ic_cdk_timers::set_timer(Duration::from_secs(0), || {
-        ic_cdk::futures::spawn(store::state::init_public_key())
-    });
+    ic_cdk_timers::set_timer(Duration::from_secs(0), store::state::init_public_key());
 }
 
 #[ic_cdk::pre_upgrade]
