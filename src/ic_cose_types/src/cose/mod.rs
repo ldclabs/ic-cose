@@ -51,6 +51,8 @@ pub fn sha3_256_n<const N: usize>(array: [&[u8]; N]) -> [u8; 32] {
 }
 
 pub fn mac3_256(key: &[u8], data: &[u8]) -> [u8; 32] {
+    use hmac::KeyInit;
+
     let mut mac =
         Hmac::<sha3::Sha3_256>::new_from_slice(key).expect("HMAC can take key of any size");
     mac.update(data);
