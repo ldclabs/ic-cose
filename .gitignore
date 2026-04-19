@@ -17,5 +17,6 @@ debug
 .dfx
 .env
 .cargo
+.claude
 
 node_modules/

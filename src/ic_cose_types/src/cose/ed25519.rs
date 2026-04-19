@@ -1,6 +1,12 @@
 use super::format_error;
 
-pub use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
+pub use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+
+/// Signs a message using the provided Ed25519 private key.
+pub fn ed25519_sign(private_key: &[u8; 32], message: &[u8]) -> Signature {
+    let private_key = SigningKey::from_bytes(private_key);
+    private_key.sign(message)
+}
 
 /// Verifies an Ed25519 signature using the provided public key.
 ///
