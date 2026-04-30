@@ -48,9 +48,9 @@ pub fn cose_encrypt0(
     let e0 = CoseEncrypt0Builder::new()
         .protected(protected)
         .unprotected(unprotected.build())
-        .create_ciphertext(payload, aad, |plain_data, enc| {
-            aes256_gcm_encrypt(secret, nonce, enc, plain_data).unwrap()
-        })
+        .try_create_ciphertext(payload, aad, |plain_data, enc| {
+            aes256_gcm_encrypt(secret, nonce, enc, plain_data)
+        })?
         .build();
     e0.to_tagged_vec().map_err(format_error)
 }
@@ -104,4 +104,40 @@ pub fn decrypt(item: &CoseEncrypt0, secret: &[u8; 32], aad: &[u8]) -> Result<Vec
         || "missing ciphertext".to_string(),
         |cipher_data, enc| aes256_gcm_decrypt(secret, nonce, enc, cipher_data),
     )
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn cose_encrypt0_roundtrips() {
+        let secret = [1u8; 32];
+        let nonce = [2u8; 12];
+        let aad = b"aad";
+        let payload = b"payload";
+
+        let encrypted =
+            cose_encrypt0(payload, &secret, aad, &nonce, Some(b"kid".to_vec())).unwrap();
+        assert_eq!(cose_decrypt0(&encrypted, &secret, aad).unwrap(), payload);
+        assert!(cose_decrypt0(&encrypted, &secret, b"wrong aad").is_err());
+    }
+
+    #[test]
+    fn cose_decrypt0_rejects_invalid_tag_length() {
+        let secret = [1u8; 32];
+        let item = CoseEncrypt0Builder::new()
+            .protected(
+                HeaderBuilder::new()
+                    .algorithm(iana::Algorithm::A256GCM)
+                    .build(),
+            )
+            .unprotected(HeaderBuilder::new().iv(vec![2u8; 12]).build())
+            .ciphertext(vec![1, 2, 3])
+            .build();
+        let payload = item.to_tagged_vec().unwrap();
+
+        let err = cose_decrypt0(&payload, &secret, &[]).unwrap_err();
+        assert_eq!(err, "invalid tag length, expected 16, got 3");
+    }
 }

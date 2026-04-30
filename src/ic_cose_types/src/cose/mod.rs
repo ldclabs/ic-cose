@@ -86,7 +86,7 @@ pub fn get_cose_key_secret(key: CoseKey) -> Result<Vec<u8>, String> {
             Label::Int(iana::Ec2KeyParameter::D as i64)
         }
         _ => {
-            return Err("unsupport key type".to_string());
+            return Err("unsupported key type".to_string());
         }
     };
 
@@ -109,7 +109,7 @@ pub fn get_cose_key_public(key: CoseKey) -> Result<Vec<u8>, String> {
             Label::Int(iana::Ec2KeyParameter::X as i64)
         }
         _ => {
-            return Err("unsupport key type".to_string());
+            return Err("unsupported key type".to_string());
         }
     };
 
@@ -208,7 +208,7 @@ mod test {
             .build();
         assert_eq!(
             get_cose_key_secret(unsupported).unwrap_err(),
-            "unsupport key type"
+            "unsupported key type"
         );
 
         let missing = CoseKeyBuilder::new_okp_key().build();
@@ -251,7 +251,7 @@ mod test {
         let unsupported = CoseKeyBuilder::new_symmetric_key(vec![1, 2, 3]).build();
         assert_eq!(
             get_cose_key_public(unsupported).unwrap_err(),
-            "unsupport key type"
+            "unsupported key type"
         );
 
         let missing = CoseKeyBuilder::new_okp_key().build();

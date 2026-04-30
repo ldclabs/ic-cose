@@ -1,6 +1,8 @@
-use aes_gcm::{aead::KeyInit, AeadInPlace, Aes256Gcm, Key, Nonce, Tag};
+use aes_gcm::{aead::KeyInit, AeadCore, AeadInPlace, Aes256Gcm, Key, Nonce, Tag};
 
 use super::format_error;
+
+type Aes256GcmNonce = Nonce<<Aes256Gcm as AeadCore>::NonceSize>;
 
 /// Encrypts data using AES-256-GCM algorithm.
 ///
@@ -19,8 +21,7 @@ pub fn aes256_gcm_encrypt(
     aad: &[u8],
     plain_data: &[u8],
 ) -> Result<Vec<u8>, String> {
-    let key = Key::<Aes256Gcm>::from_slice(key);
-    let cipher = Aes256Gcm::new(key);
+    let cipher = Aes256Gcm::new(<&Key<Aes256Gcm>>::from(key));
     let mut buf: Vec<u8> = Vec::with_capacity(plain_data.len() + 16);
     buf.extend_from_slice(plain_data);
     let tag = aes256_gcm_encrypt_in(&cipher, nonce, aad, &mut buf)?;
@@ -44,8 +45,7 @@ pub fn aes256_gcm_decrypt(
     aad: &[u8],
     cipher_data: &[u8],
 ) -> Result<Vec<u8>, String> {
-    let key = Key::<Aes256Gcm>::from_slice(key);
-    let cipher = Aes256Gcm::new(key);
+    let cipher = Aes256Gcm::new(<&Key<Aes256Gcm>>::from(key));
     let tag_pos = cipher_data.len().saturating_sub(16);
     let (msg, tag) = cipher_data.split_at(tag_pos);
     let mut buf: Vec<u8> = Vec::with_capacity(msg.len());
@@ -71,7 +71,7 @@ pub fn aes256_gcm_encrypt_in(
     data: &mut [u8],
 ) -> Result<[u8; 16], String> {
     let tag = cipher
-        .encrypt_in_place_detached(Nonce::from_slice(nonce), aad, data)
+        .encrypt_in_place_detached(<&Aes256GcmNonce>::from(nonce), aad, data)
         .map_err(format_error)?;
     Ok(tag.into())
 }
@@ -94,8 +94,11 @@ pub fn aes256_gcm_decrypt_in(
     data: &mut [u8],
     tag: &[u8],
 ) -> Result<(), String> {
+    let tag: &[u8; 16] = tag
+        .try_into()
+        .map_err(|_| format!("invalid tag length, expected 16, got {}", tag.len()))?;
     cipher
-        .decrypt_in_place_detached(Nonce::from_slice(nonce), aad, data, Tag::from_slice(tag))
+        .decrypt_in_place_detached(<&Aes256GcmNonce>::from(nonce), aad, data, <&Tag>::from(tag))
         .map_err(format_error)
 }
 
@@ -113,5 +116,13 @@ mod test {
 
         let data = aes256_gcm_decrypt(&key, &nonce, &[], &cipher_data).unwrap();
         assert_eq!(&data, &plain_data);
+    }
+
+    #[test]
+    fn aes256_gcm_decrypt_rejects_invalid_tag_length() {
+        let key = [1u8; 32];
+        let nonce = [2u8; 12];
+        let err = aes256_gcm_decrypt(&key, &nonce, &[], &[1, 2, 3]).unwrap_err();
+        assert_eq!(err, "invalid tag length, expected 16, got 3");
     }
 }

@@ -25,9 +25,15 @@ pub const MILLISECONDS: u64 = 1_000_000u64;
 /// # Panics
 /// Panics if CBOR serialization fails
 pub fn to_cbor_bytes(obj: &impl Serialize) -> Vec<u8> {
+    try_to_cbor_bytes(obj).expect("failed to encode in CBOR format")
+}
+
+/// Converts a serializable object to CBOR-encoded bytes.
+pub fn try_to_cbor_bytes(obj: &impl Serialize) -> Result<Vec<u8>, String> {
     let mut buf: Vec<u8> = Vec::new();
-    into_writer(obj, &mut buf).expect("failed to encode in CBOR format");
-    buf
+    into_writer(obj, &mut buf)
+        .map_err(|err| format!("failed to encode in CBOR format: {err:?}"))?;
+    Ok(buf)
 }
 
 /// Validates a string against naming conventions
@@ -70,10 +76,70 @@ pub fn validate_principals(principals: &BTreeSet<Principal>) -> Result<(), Strin
     if principals.is_empty() {
         return Err("principals cannot be empty".to_string());
     }
+    validate_principals_not_anonymous(principals)
+}
+
+/// Validates that a principal set does not contain anonymous principal.
+pub fn validate_principals_not_anonymous(principals: &BTreeSet<Principal>) -> Result<(), String> {
     if principals.contains(&ANONYMOUS) {
         return Err("anonymous user is not allowed".to_string());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn validate_str_accepts_expected_names() {
+        assert!(validate_str("_").is_ok());
+        assert!(validate_str("abc_123").is_ok());
+        assert!(validate_str(&"a".repeat(64)).is_ok());
+    }
+
+    #[test]
+    fn validate_str_rejects_invalid_names() {
+        assert_eq!(validate_str("").unwrap_err(), "empty string");
+        assert_eq!(
+            validate_str(&"a".repeat(65)).unwrap_err(),
+            "string length exceeds the limit 64"
+        );
+        assert_eq!(validate_str("ABC").unwrap_err(), "invalid character: A");
+        assert_eq!(validate_str("abc-123").unwrap_err(), "invalid character: -");
+    }
+
+    #[test]
+    fn validate_principals_requires_non_empty_set() {
+        let principals = BTreeSet::new();
+        assert_eq!(
+            validate_principals(&principals).unwrap_err(),
+            "principals cannot be empty"
+        );
+    }
+
+    #[test]
+    fn validate_principals_rejects_anonymous() {
+        let mut principals = BTreeSet::new();
+        principals.insert(Principal::anonymous());
+        assert_eq!(
+            validate_principals(&principals).unwrap_err(),
+            "anonymous user is not allowed"
+        );
+        assert_eq!(
+            validate_principals_not_anonymous(&principals).unwrap_err(),
+            "anonymous user is not allowed"
+        );
+    }
+
+    #[test]
+    fn validate_principals_accepts_authenticated_principal() {
+        let mut principals = BTreeSet::new();
+        principals.insert(Principal::management_canister());
+        assert!(validate_principals(&principals).is_ok());
+        assert!(validate_principals_not_anonymous(&principals).is_ok());
+        assert!(validate_principals_not_anonymous(&BTreeSet::new()).is_ok());
+    }
 }
 
 /// A type alias for a boxed error that is thread-safe and sendable across threads.
