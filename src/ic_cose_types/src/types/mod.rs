@@ -41,13 +41,13 @@ pub struct SignIdentityInput {
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ECDHInput {
-    pub nonce: ByteArray<12>,      // should be random for each request
+    pub nonce: ByteArray<12>, // must be unique for each request with the derived AES-GCM key
     pub public_key: ByteArray<32>, // client side ECDH public key
 }
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ECDHOutput<T> {
-    pub payload: T,                // should be random for each request
+    pub payload: T,                // encrypted response payload
     pub public_key: ByteArray<32>, // server side ECDH public key
 }
 

@@ -15,11 +15,11 @@ pub struct SettingInfo {
     pub desc: String,
     pub created_at: u64, // unix timestamp in milliseconds
     pub updated_at: u64, // unix timestamp in milliseconds
-    pub status: i8, // -1: archived; 0: readable and writable; 1: readonlypub auditors: BTreeSet<Principal>,
+    pub status: i8,      // -1: archived; 0: readable and writable; 1: readonly
     pub version: u32,
     pub readers: BTreeSet<Principal>, // readers can read the setting
     pub tags: BTreeMap<String, String>, // tags for query
-    pub dek: Option<ByteBuf>, // Data Encryption Key that encrypted by BYOK or vetKey in COSE_Encrypt0
+    pub dek: Option<ByteBuf>, // Data Encryption Key encrypted by BYOK or vetKey in COSE_Encrypt0
     pub payload: Option<ByteBuf>, // encrypted or plain payload
 }
 
@@ -141,4 +141,107 @@ pub struct SettingArchivedPayload {
     pub deprecated: bool, // true if the payload should not be used for some reason
     pub payload: Option<ByteBuf>,
     pub dek: Option<ByteBuf>, // exist if the payload is encrypted
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn setting_path_validate_checks_namespace_and_key() {
+        let path = SettingPath {
+            ns: "namespace_1".to_string(),
+            key: ByteBuf::from(vec![1]),
+            ..Default::default()
+        };
+        assert!(path.validate().is_ok());
+
+        let mut invalid = path.clone();
+        invalid.ns = "Namespace".to_string();
+        assert_eq!(invalid.validate().unwrap_err(), "invalid character: N");
+
+        let mut invalid = path.clone();
+        invalid.key = ByteBuf::new();
+        assert_eq!(invalid.validate().unwrap_err(), "key should not be empty");
+
+        let mut invalid = path;
+        invalid.key = ByteBuf::from(vec![1; 65]);
+        assert_eq!(
+            invalid.validate().unwrap_err(),
+            "key length exceeds the limit 64"
+        );
+    }
+
+    #[test]
+    fn create_setting_validate_checks_status_tags_and_dek() {
+        assert!(CreateSettingInput::default().validate().is_ok());
+
+        let input = CreateSettingInput {
+            status: Some(-1),
+            ..Default::default()
+        };
+        assert_eq!(input.validate().unwrap_err(), "status should be 0 or 1");
+
+        let input = CreateSettingInput {
+            tags: Some(BTreeMap::from([(
+                "Invalid".to_string(),
+                "value".to_string(),
+            )])),
+            ..Default::default()
+        };
+        assert_eq!(input.validate().unwrap_err(), "invalid character: I");
+
+        let input = CreateSettingInput {
+            dek: Some(ByteBuf::from(vec![0; MAX_DEK_SIZE as usize + 1])),
+            ..Default::default()
+        };
+        assert_eq!(input.validate().unwrap_err(), "DEK size exceeds the limit");
+    }
+
+    #[test]
+    fn update_setting_info_validate_checks_status_and_tags() {
+        assert!(UpdateSettingInfoInput::default().validate().is_ok());
+
+        let input = UpdateSettingInfoInput {
+            status: Some(2),
+            ..Default::default()
+        };
+        assert_eq!(input.validate().unwrap_err(), "status should be -1, 0 or 1");
+
+        let input = UpdateSettingInfoInput {
+            tags: Some(BTreeMap::from([(
+                "invalid-tag".to_string(),
+                "value".to_string(),
+            )])),
+            ..Default::default()
+        };
+        assert_eq!(input.validate().unwrap_err(), "invalid character: -");
+    }
+
+    #[test]
+    fn update_setting_payload_validate_checks_payload_status_and_dek() {
+        assert_eq!(
+            UpdateSettingPayloadInput::default().validate().unwrap_err(),
+            "payload or dek should be provided"
+        );
+
+        let input = UpdateSettingPayloadInput {
+            payload: Some(ByteBuf::new()),
+            ..Default::default()
+        };
+        assert!(input.validate().is_ok());
+
+        let input = UpdateSettingPayloadInput {
+            payload: Some(ByteBuf::new()),
+            status: Some(2),
+            ..Default::default()
+        };
+        assert_eq!(input.validate().unwrap_err(), "status should be -1, 0 or 1");
+
+        let input = UpdateSettingPayloadInput {
+            dek: Some(ByteBuf::from(vec![0; MAX_DEK_SIZE as usize + 1])),
+            ..Default::default()
+        };
+        assert_eq!(input.validate().unwrap_err(), "DEK size exceeds the limit");
+    }
 }

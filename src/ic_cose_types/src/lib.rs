@@ -87,6 +87,45 @@ pub fn validate_principals_not_anonymous(principals: &BTreeSet<Principal>) -> Re
     Ok(())
 }
 
+/// A type alias for a boxed error that is thread-safe and sendable across threads.
+/// This is commonly used as a return type for functions that can return various error types.
+pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+/// A trait for interacting with canisters
+pub trait CanisterCaller: Sized {
+    /// Performs a query call to a canister (read-only, no state changes)
+    ///
+    /// # Arguments
+    /// * `canister` - Target canister principal
+    /// * `method` - Method name to call
+    /// * `args` - Input arguments encoded in Candid format
+    fn canister_query<
+        In: ArgumentEncoder + Send,
+        Out: CandidType + for<'a> candid::Deserialize<'a>,
+    >(
+        &self,
+        canister: &Principal,
+        method: &str,
+        args: In,
+    ) -> impl Future<Output = Result<Out, BoxError>> + Send;
+
+    /// Performs an update call to a canister (may modify state)
+    ///
+    /// # Arguments
+    /// * `canister` - Target canister principal
+    /// * `method` - Method name to call
+    /// * `args` - Input arguments encoded in Candid format
+    fn canister_update<
+        In: ArgumentEncoder + Send,
+        Out: CandidType + for<'a> candid::Deserialize<'a>,
+    >(
+        &self,
+        canister: &Principal,
+        method: &str,
+        args: In,
+    ) -> impl Future<Output = Result<Out, BoxError>> + Send;
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -140,43 +179,4 @@ mod test {
         assert!(validate_principals_not_anonymous(&principals).is_ok());
         assert!(validate_principals_not_anonymous(&BTreeSet::new()).is_ok());
     }
-}
-
-/// A type alias for a boxed error that is thread-safe and sendable across threads.
-/// This is commonly used as a return type for functions that can return various error types.
-pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
-
-/// A trait for interacting with canisters
-pub trait CanisterCaller: Sized {
-    /// Performs a query call to a canister (read-only, no state changes)
-    ///
-    /// # Arguments
-    /// * `canister` - Target canister principal
-    /// * `method` - Method name to call
-    /// * `args` - Input arguments encoded in Candid format
-    fn canister_query<
-        In: ArgumentEncoder + Send,
-        Out: CandidType + for<'a> candid::Deserialize<'a>,
-    >(
-        &self,
-        canister: &Principal,
-        method: &str,
-        args: In,
-    ) -> impl Future<Output = Result<Out, BoxError>> + Send;
-
-    /// Performs an update call to a canister (may modify state)
-    ///
-    /// # Arguments
-    /// * `canister` - Target canister principal
-    /// * `method` - Method name to call
-    /// * `args` - Input arguments encoded in Candid format
-    fn canister_update<
-        In: ArgumentEncoder + Send,
-        Out: CandidType + for<'a> candid::Deserialize<'a>,
-    >(
-        &self,
-        canister: &Principal,
-        method: &str,
-        args: In,
-    ) -> impl Future<Output = Result<Out, BoxError>> + Send;
 }

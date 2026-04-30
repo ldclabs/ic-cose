@@ -2,7 +2,7 @@ use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{validate_principals, validate_str};
+use crate::{validate_principals, validate_principals_not_anonymous, validate_str};
 
 pub const MAX_PAYLOAD_SIZE: u64 = 2_000_000; // 2MB
 
@@ -40,6 +40,8 @@ impl CreateNamespaceInput {
     pub fn validate(&self) -> Result<(), String> {
         validate_str(&self.name)?;
         validate_principals(&self.managers)?;
+        validate_principals_not_anonymous(&self.auditors)?;
+        validate_principals_not_anonymous(&self.users)?;
         if let Some(max_payload_size) = self.max_payload_size {
             if max_payload_size == 0 {
                 Err("max_payload_size should be greater than 0".to_string())?;
@@ -71,6 +73,7 @@ pub struct UpdateNamespaceInput {
 
 impl UpdateNamespaceInput {
     pub fn validate(&self) -> Result<(), String> {
+        validate_str(&self.name)?;
         if let Some(max_payload_size) = self.max_payload_size {
             if max_payload_size == 0 {
                 Err("max_payload_size should be greater than 0".to_string())?;
@@ -107,8 +110,121 @@ pub struct NamespaceDelegatorsInput {
 
 impl NamespaceDelegatorsInput {
     pub fn validate(&self) -> Result<(), String> {
+        validate_str(&self.ns)?;
         validate_str(&self.name)?;
         validate_principals(&self.delegators)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn principal_set() -> BTreeSet<Principal> {
+        BTreeSet::from([Principal::management_canister()])
+    }
+
+    fn create_namespace_input() -> CreateNamespaceInput {
+        CreateNamespaceInput {
+            name: "namespace_1".to_string(),
+            visibility: 0,
+            managers: principal_set(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn create_namespace_validate_accepts_valid_input() {
+        let input = create_namespace_input();
+        assert!(input.validate().is_ok());
+    }
+
+    #[test]
+    fn create_namespace_validate_rejects_invalid_input() {
+        let mut input = create_namespace_input();
+        input.managers.clear();
+        assert_eq!(input.validate().unwrap_err(), "principals cannot be empty");
+
+        let mut input = create_namespace_input();
+        input.auditors.insert(Principal::anonymous());
+        assert_eq!(
+            input.validate().unwrap_err(),
+            "anonymous user is not allowed"
+        );
+
+        let mut input = create_namespace_input();
+        input.users.insert(Principal::anonymous());
+        assert_eq!(
+            input.validate().unwrap_err(),
+            "anonymous user is not allowed"
+        );
+
+        let mut input = create_namespace_input();
+        input.visibility = 2;
+        assert_eq!(input.validate().unwrap_err(), "visibility should be 0 or 1");
+
+        let mut input = create_namespace_input();
+        input.max_payload_size = Some(0);
+        assert_eq!(
+            input.validate().unwrap_err(),
+            "max_payload_size should be greater than 0"
+        );
+
+        let mut input = create_namespace_input();
+        input.max_payload_size = Some(MAX_PAYLOAD_SIZE + 1);
+        assert_eq!(
+            input.validate().unwrap_err(),
+            format!(
+                "max_payload_size should be less than or equal to {}",
+                MAX_PAYLOAD_SIZE
+            )
+        );
+    }
+
+    #[test]
+    fn update_namespace_validate_checks_name_and_ranges() {
+        assert_eq!(
+            UpdateNamespaceInput::default().validate().unwrap_err(),
+            "empty string"
+        );
+
+        let mut input = UpdateNamespaceInput {
+            name: "namespace_1".to_string(),
+            ..Default::default()
+        };
+        assert!(input.validate().is_ok());
+
+        input.status = Some(2);
+        assert_eq!(input.validate().unwrap_err(), "status should be -1, 0 or 1");
+
+        input.status = None;
+        input.visibility = Some(3);
+        assert_eq!(input.validate().unwrap_err(), "visibility should be 0 or 1");
+    }
+
+    #[test]
+    fn namespace_delegators_validate_checks_all_fields() {
+        let input = NamespaceDelegatorsInput {
+            ns: "namespace_1".to_string(),
+            name: "fixed_name".to_string(),
+            delegators: principal_set(),
+        };
+        assert!(input.validate().is_ok());
+
+        let mut invalid = input.clone();
+        invalid.ns = String::new();
+        assert_eq!(invalid.validate().unwrap_err(), "empty string");
+
+        let mut invalid = input.clone();
+        invalid.name = "Invalid".to_string();
+        assert_eq!(invalid.validate().unwrap_err(), "invalid character: I");
+
+        let mut invalid = input;
+        invalid.delegators.clear();
+        assert_eq!(
+            invalid.validate().unwrap_err(),
+            "principals cannot be empty"
+        );
     }
 }
