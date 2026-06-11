@@ -120,6 +120,7 @@ impl NamespaceDelegatorsInput {
 #[cfg(test)]
 mod test {
     use super::*;
+    use candid::encode_one;
 
     fn principal_set() -> BTreeSet<Principal> {
         BTreeSet::from([Principal::management_canister()])
@@ -137,6 +138,9 @@ mod test {
     #[test]
     fn create_namespace_validate_accepts_valid_input() {
         let input = create_namespace_input();
+        assert!(!format!("{:?}", input.clone()).is_empty());
+        assert!(!encode_one(input.clone()).unwrap().is_empty());
+        assert!(!crate::to_cbor_bytes(&input).is_empty());
         assert!(input.validate().is_ok());
     }
 
@@ -193,6 +197,9 @@ mod test {
             name: "namespace_1".to_string(),
             ..Default::default()
         };
+        assert!(!format!("{:?}", input.clone()).is_empty());
+        assert!(!encode_one(input.clone()).unwrap().is_empty());
+        assert!(!crate::to_cbor_bytes(&input).is_empty());
         assert!(input.validate().is_ok());
 
         input.status = Some(2);
@@ -201,6 +208,22 @@ mod test {
         input.status = None;
         input.visibility = Some(3);
         assert_eq!(input.validate().unwrap_err(), "visibility should be 0 or 1");
+
+        input.visibility = None;
+        input.max_payload_size = Some(0);
+        assert_eq!(
+            input.validate().unwrap_err(),
+            "max_payload_size should be greater than 0"
+        );
+
+        input.max_payload_size = Some(MAX_PAYLOAD_SIZE + 1);
+        assert_eq!(
+            input.validate().unwrap_err(),
+            format!(
+                "max_payload_size should be less than or equal to {}",
+                MAX_PAYLOAD_SIZE
+            )
+        );
     }
 
     #[test]
@@ -210,6 +233,9 @@ mod test {
             name: "fixed_name".to_string(),
             delegators: principal_set(),
         };
+        assert!(!format!("{:?}", input.clone()).is_empty());
+        assert!(!encode_one(input.clone()).unwrap().is_empty());
+        assert!(!crate::to_cbor_bytes(&input).is_empty());
         assert!(input.validate().is_ok());
 
         let mut invalid = input.clone();
@@ -226,5 +252,29 @@ mod test {
             invalid.validate().unwrap_err(),
             "principals cannot be empty"
         );
+    }
+
+    #[test]
+    fn namespace_info_derived_traits_work() {
+        let info = NamespaceInfo {
+            name: "namespace_1".to_string(),
+            desc: "desc".to_string(),
+            created_at: 1,
+            updated_at: 2,
+            max_payload_size: 1024,
+            payload_bytes_total: 10,
+            status: 0,
+            visibility: 1,
+            managers: principal_set(),
+            auditors: principal_set(),
+            users: principal_set(),
+            gas_balance: 100,
+            fixed_id_names: BTreeMap::from([("fixed".to_string(), principal_set())]),
+            session_expires_in_ms: 1000,
+        };
+        assert_eq!(info.clone(), info);
+        assert!(!format!("{info:?}").is_empty());
+        assert!(!encode_one(info.clone()).unwrap().is_empty());
+        assert!(!crate::to_cbor_bytes(&info).is_empty());
     }
 }

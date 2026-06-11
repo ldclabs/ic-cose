@@ -138,6 +138,14 @@ mod test {
     }
 
     #[test]
+    fn cbor_helpers_encode_serializable_values() {
+        let value = vec![("key".to_string(), 1u64)];
+        let fallible = try_to_cbor_bytes(&value).unwrap();
+        assert!(!fallible.is_empty());
+        assert_eq!(to_cbor_bytes(&value), fallible);
+    }
+
+    #[test]
     fn validate_str_rejects_invalid_names() {
         assert_eq!(validate_str("").unwrap_err(), "empty string");
         assert_eq!(

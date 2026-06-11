@@ -89,4 +89,25 @@ mod test {
         let signature = decode("96ea613d0a26f3812bdee85b262c898393b063b56379d6e9d75e0ab28be820cd4f42fdfb60f8a6fc081393b9407be9387d7f68fe6dec4699dc69b7ace6990303").unwrap();
         assert!(ed25519_verify(&pk, &message, &signature).is_ok());
     }
+
+    #[test]
+    fn ed25519_sign_and_verify_error_paths_work() {
+        let private_key = [7u8; 32];
+        let message = b"message";
+        let signature = ed25519_sign(&private_key, message);
+        let public_key = SigningKey::from_bytes(&private_key).verifying_key();
+
+        assert!(ed25519_verify(public_key.as_bytes(), message, &signature.to_bytes()).is_ok());
+        assert_eq!(
+            ed25519_verify(public_key.as_bytes(), b"wrong", &signature.to_bytes()).unwrap_err(),
+            "ed25519 signature verification failed"
+        );
+        assert!(ed25519_verify(public_key.as_bytes(), message, &[1, 2, 3]).is_err());
+        assert_eq!(
+            ed25519_verify_any(&[], message, &signature.to_bytes()).unwrap_err(),
+            "ed25519 signature verification failed"
+        );
+        assert!(ed25519_verify_any(&[public_key], b"wrong", &signature.to_bytes()).is_err());
+        assert!(ed25519_verify_any(&[public_key], message, &[1]).is_err());
+    }
 }

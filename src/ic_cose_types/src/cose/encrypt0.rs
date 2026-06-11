@@ -140,4 +140,50 @@ mod test {
         let err = cose_decrypt0(&payload, &secret, &[]).unwrap_err();
         assert_eq!(err, "invalid tag length, expected 16, got 3");
     }
+
+    #[test]
+    fn encrypt0_decode_and_decrypt_error_paths_work() {
+        let secret = [1u8; 32];
+        assert!(try_decode_encrypt0(b"not cbor").is_err());
+        assert!(cose_decrypt0(b"not cbor", &secret, &[]).is_err());
+
+        let encrypted = cose_encrypt0(b"payload", &secret, b"aad", &[2u8; 12], None).unwrap();
+        let decoded = try_decode_encrypt0(&encrypted).unwrap();
+        assert_eq!(decrypt(&decoded, &secret, b"aad").unwrap(), b"payload");
+
+        let invalid_nonce = CoseEncrypt0Builder::new()
+            .protected(
+                HeaderBuilder::new()
+                    .algorithm(iana::Algorithm::A256GCM)
+                    .build(),
+            )
+            .unprotected(HeaderBuilder::new().iv(vec![1, 2, 3]).build())
+            .ciphertext(vec![1; 16])
+            .build();
+        assert_eq!(
+            decrypt(&invalid_nonce, &secret, &[]).unwrap_err(),
+            "invalid nonce length, expected 12, got 3"
+        );
+        assert_eq!(
+            cose_decrypt0(&invalid_nonce.to_tagged_vec().unwrap(), &secret, &[]).unwrap_err(),
+            "invalid nonce length, expected 12, got 3"
+        );
+
+        let missing_ciphertext = CoseEncrypt0Builder::new()
+            .protected(
+                HeaderBuilder::new()
+                    .algorithm(iana::Algorithm::A256GCM)
+                    .build(),
+            )
+            .unprotected(HeaderBuilder::new().iv(vec![1u8; 12]).build())
+            .build();
+        assert_eq!(
+            decrypt(&missing_ciphertext, &secret, &[]).unwrap_err(),
+            "missing ciphertext"
+        );
+        assert_eq!(
+            cose_decrypt0(&missing_ciphertext.to_tagged_vec().unwrap(), &secret, &[]).unwrap_err(),
+            "missing ciphertext"
+        );
+    }
 }

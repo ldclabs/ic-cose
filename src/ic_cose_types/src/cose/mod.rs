@@ -1,5 +1,5 @@
 use coset::{CoseKeyBuilder, Label, RegisteredLabel};
-use hmac::{Hmac, Mac};
+use hmac::{Mac, SimpleHmac};
 use sha3::Digest;
 
 pub mod aes;
@@ -54,7 +54,7 @@ pub fn mac3_256(key: &[u8], data: &[u8]) -> [u8; 32] {
     use hmac::KeyInit;
 
     let mut mac =
-        Hmac::<sha3::Sha3_256>::new_from_slice(key).expect("HMAC can take key of any size");
+        SimpleHmac::<sha3::Sha3_256>::new_from_slice(key).expect("HMAC can take key of any size");
     mac.update(data);
     mac.finalize().into_bytes().into()
 }

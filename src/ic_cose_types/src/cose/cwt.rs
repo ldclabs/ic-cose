@@ -64,6 +64,7 @@ pub fn get_scope(claims: &ClaimsSet) -> Result<String, String> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use ciborium::Value;
     use hex::decode;
 
     #[test]
@@ -80,5 +81,52 @@ mod test {
         );
         assert_eq!(claims.audience, Some("tester".to_string()));
         assert_eq!(get_scope(&claims).unwrap(), "Namespace.*:_");
+    }
+
+    #[test]
+    fn cwt_rejects_invalid_time_windows_and_scope() {
+        let expired = ClaimsSet {
+            expiration_time: Some(Timestamp::WholeSeconds(1_000)),
+            ..Default::default()
+        }
+        .to_vec()
+        .unwrap();
+        assert_eq!(cwt_from(&expired, 2_000).unwrap_err(), "token expired");
+
+        let not_yet_valid = ClaimsSet {
+            not_before: Some(Timestamp::FractionalSeconds(2_000.0)),
+            ..Default::default()
+        }
+        .to_vec()
+        .unwrap();
+        assert_eq!(
+            cwt_from(&not_yet_valid, 1_000).unwrap_err(),
+            "token not yet valid"
+        );
+
+        let valid_fractional_exp = ClaimsSet {
+            expiration_time: Some(Timestamp::FractionalSeconds(2_000.0)),
+            not_before: Some(Timestamp::WholeSeconds(1_000)),
+            ..Default::default()
+        }
+        .to_vec()
+        .unwrap();
+        assert!(cwt_from(&valid_fractional_exp, 1_500).is_ok());
+
+        let no_time_claims = ClaimsSet::default().to_vec().unwrap();
+        assert!(cwt_from(&no_time_claims, 1_500).is_ok());
+
+        let scoped = ClaimsSet {
+            rest: vec![(SCOPE_NAME.clone(), Value::Integer(1.into()))],
+            ..Default::default()
+        };
+        assert_eq!(
+            get_scope(&ClaimsSet::default()).unwrap_err(),
+            "missing scope"
+        );
+        assert_eq!(get_scope(&scoped).unwrap_err(), "invalid scope text");
+        assert!(cwt_from(b"not cbor", 1_000)
+            .unwrap_err()
+            .starts_with("invalid claims:"));
     }
 }

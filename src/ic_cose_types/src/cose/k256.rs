@@ -72,12 +72,24 @@ pub fn secp256k1_verify_bip340(
     message: &[u8],
     signature: &[u8],
 ) -> Result<(), String> {
-    let key = schnorr::VerifyingKey::from_bytes(if public_key.len() == 33 {
+    let key_bytes = if public_key.len() == 33 {
         &public_key[1..]
     } else {
         public_key
-    })
-    .map_err(format_error)?;
+    };
+    if key_bytes.len() != 32 {
+        return Err(format!(
+            "public_key must be 32 bytes or 33 bytes with prefix, got {}",
+            public_key.len()
+        ));
+    }
+    if signature.len() != 64 {
+        return Err(format!(
+            "signature must be 64 bytes, got {}",
+            signature.len()
+        ));
+    }
+    let key = schnorr::VerifyingKey::from_bytes(key_bytes).map_err(format_error)?;
     let sig = schnorr::Signature::try_from(signature).map_err(format_error)?;
     match key.verify_raw(message, &sig).is_ok() {
         true => Ok(()),
@@ -99,6 +111,12 @@ pub fn secp256k1_verify_bip340_any(
     message: &[u8],
     signature: &[u8],
 ) -> Result<(), String> {
+    if signature.len() != 64 {
+        return Err(format!(
+            "signature must be 64 bytes, got {}",
+            signature.len()
+        ));
+    }
     let sig = schnorr::Signature::try_from(signature).map_err(format_error)?;
     match public_keys
         .iter()
@@ -112,6 +130,7 @@ pub fn secp256k1_verify_bip340_any(
 #[cfg(test)]
 mod test {
     use hex::decode;
+    use k256::ecdsa::signature::hazmat::PrehashSigner;
 
     use super::*;
 
@@ -162,5 +181,61 @@ mod test {
         let signature = decode("a45e4cb08af0dd0eecc1afe26d6d65fc86de0fac1a5e81fb9e85f776afafb3165278ca25ddc3f53114bae8e42938cedbc3bdcbd423ce5cb8104a8c0c46b4c17b").unwrap();
         assert!(secp256k1_verify_bip340(&pk, &message, &signature).is_ok());
         assert!(secp256k1_verify_ecdsa(&pk, &message, &signature).is_err());
+    }
+
+    #[test]
+    fn secp256k1_ecdsa_error_paths_work() {
+        let signing_key = ecdsa::SigningKey::from_bytes((&[7u8; 32]).into()).unwrap();
+        let verifying_key = *signing_key.verifying_key();
+        let message = [9u8; 32];
+        let signature: ecdsa::Signature = signing_key.sign_prehash(&message).unwrap();
+        let signature = signature.to_bytes();
+        let public_key = verifying_key.to_encoded_point(true);
+
+        assert!(secp256k1_verify_ecdsa(public_key.as_bytes(), &message, &signature).is_ok());
+        assert!(secp256k1_verify_ecdsa_any(&[verifying_key], &message, &signature).is_ok());
+        assert_eq!(
+            secp256k1_verify_ecdsa(public_key.as_bytes(), &[1, 2], &signature).unwrap_err(),
+            "message_hash must be 32 bytes"
+        );
+        assert!(secp256k1_verify_ecdsa(&[1, 2, 3], &message, &signature).is_err());
+        assert!(secp256k1_verify_ecdsa(public_key.as_bytes(), &message, &[1]).is_err());
+        assert_eq!(
+            secp256k1_verify_ecdsa(public_key.as_bytes(), &[8u8; 32], &signature).unwrap_err(),
+            "secp256k1 signature verification failed"
+        );
+        assert_eq!(
+            secp256k1_verify_ecdsa_any(&[verifying_key], &[1, 2], &signature).unwrap_err(),
+            "message_hash must be 32 bytes"
+        );
+        assert!(secp256k1_verify_ecdsa_any(&[verifying_key], &message, &[1]).is_err());
+        assert_eq!(
+            secp256k1_verify_ecdsa_any(&[], &message, &signature).unwrap_err(),
+            "secp256k1 signature verification failed"
+        );
+    }
+
+    #[test]
+    fn secp256k1_bip340_any_paths_work() {
+        let pk =
+            decode("0387f4b6c52971d340eade21f7d73a65111f5345ade1b13cac845a93bb87255129").unwrap();
+        let message =
+            decode("6233976850d2fc6ab653306b332dde4389a4e87b79d521a331683cf90102c478").unwrap();
+        let signature = decode("a45e4cb08af0dd0eecc1afe26d6d65fc86de0fac1a5e81fb9e85f776afafb3165278ca25ddc3f53114bae8e42938cedbc3bdcbd423ce5cb8104a8c0c46b4c17b").unwrap();
+        let verifying_key = schnorr::VerifyingKey::from_bytes(&pk[1..]).unwrap();
+
+        assert!(secp256k1_verify_bip340(&pk[1..], &message, &signature).is_ok());
+        assert!(secp256k1_verify_bip340_any(&[verifying_key], &message, &signature).is_ok());
+        assert!(secp256k1_verify_bip340(&[1, 2, 3], &message, &signature).is_err());
+        assert!(secp256k1_verify_bip340(&pk, &message, &[1, 2]).is_err());
+        assert_eq!(
+            secp256k1_verify_bip340(&pk, b"wrong", &signature).unwrap_err(),
+            "schnorr secp256k1 signature verification failed"
+        );
+        assert!(secp256k1_verify_bip340_any(&[verifying_key], &message, &[1]).is_err());
+        assert_eq!(
+            secp256k1_verify_bip340_any(&[], &message, &signature).unwrap_err(),
+            "schnorr secp256k1 signature verification failed"
+        );
     }
 }

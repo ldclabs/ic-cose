@@ -23,3 +23,25 @@ pub async fn build_agent(host: &str, identity: Arc<dyn Identity>) -> Result<Agen
 
     Ok(agent)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ic_agent::identity::AnonymousIdentity;
+
+    #[tokio::test]
+    async fn build_agent_accepts_https_without_fetching_root_key() {
+        let agent = build_agent("https://ic0.app", Arc::new(AnonymousIdentity))
+            .await
+            .unwrap();
+        assert!(format!("{agent:?}").contains("Agent"));
+    }
+
+    #[tokio::test]
+    async fn build_agent_reports_http_root_key_fetch_errors() {
+        let err = build_agent("http://127.0.0.1:9", Arc::new(AnonymousIdentity))
+            .await
+            .unwrap_err();
+        assert!(!err.is_empty());
+    }
+}

@@ -146,6 +146,7 @@ pub struct SettingArchivedPayload {
 #[cfg(test)]
 mod test {
     use super::*;
+    use candid::encode_one;
 
     #[test]
     fn setting_path_validate_checks_namespace_and_key() {
@@ -155,6 +156,9 @@ mod test {
             ..Default::default()
         };
         assert!(path.validate().is_ok());
+        assert!(!format!("{:?}", path.clone()).is_empty());
+        assert!(!encode_one(path.clone()).unwrap().is_empty());
+        assert!(!crate::to_cbor_bytes(&path).is_empty());
 
         let mut invalid = path.clone();
         invalid.ns = "Namespace".to_string();
@@ -177,9 +181,13 @@ mod test {
         assert!(CreateSettingInput::default().validate().is_ok());
 
         let input = CreateSettingInput {
+            payload: Some(ByteBuf::from(vec![1])),
             status: Some(-1),
             ..Default::default()
         };
+        assert!(!format!("{:?}", input.clone()).is_empty());
+        assert!(!encode_one(input.clone()).unwrap().is_empty());
+        assert!(!crate::to_cbor_bytes(&input).is_empty());
         assert_eq!(input.validate().unwrap_err(), "status should be 0 or 1");
 
         let input = CreateSettingInput {
@@ -206,6 +214,9 @@ mod test {
             status: Some(2),
             ..Default::default()
         };
+        assert!(!format!("{:?}", input.clone()).is_empty());
+        assert!(!encode_one(input.clone()).unwrap().is_empty());
+        assert!(!crate::to_cbor_bytes(&input).is_empty());
         assert_eq!(input.validate().unwrap_err(), "status should be -1, 0 or 1");
 
         let input = UpdateSettingInfoInput {
@@ -229,6 +240,9 @@ mod test {
             payload: Some(ByteBuf::new()),
             ..Default::default()
         };
+        assert!(!format!("{:?}", input.clone()).is_empty());
+        assert!(!encode_one(input.clone()).unwrap().is_empty());
+        assert!(!crate::to_cbor_bytes(&input).is_empty());
         assert!(input.validate().is_ok());
 
         let input = UpdateSettingPayloadInput {
@@ -243,5 +257,50 @@ mod test {
             ..Default::default()
         };
         assert_eq!(input.validate().unwrap_err(), "DEK size exceeds the limit");
+    }
+
+    #[test]
+    fn setting_data_types_are_constructible() {
+        let info = SettingInfo {
+            key: ByteBuf::from(vec![1]),
+            subject: Principal::management_canister(),
+            desc: "desc".to_string(),
+            created_at: 1,
+            updated_at: 2,
+            status: 0,
+            version: 3,
+            readers: BTreeSet::from([Principal::management_canister()]),
+            tags: BTreeMap::from([("tag".to_string(), "value".to_string())]),
+            dek: Some(ByteBuf::from(vec![4])),
+            payload: Some(ByteBuf::from(vec![5])),
+        };
+        assert_eq!(info.version, 3);
+        assert_eq!(info.clone(), info);
+        assert!(!format!("{info:?}").is_empty());
+        assert!(!encode_one(info.clone()).unwrap().is_empty());
+        assert!(!crate::to_cbor_bytes(&info).is_empty());
+
+        let output = CreateSettingOutput {
+            created_at: 1,
+            updated_at: 2,
+            version: 3,
+        };
+        assert!(!format!("{:?}", output.clone()).is_empty());
+        assert!(!encode_one(output.clone()).unwrap().is_empty());
+        assert!(!crate::to_cbor_bytes(&output).is_empty());
+        let update_output: UpdateSettingOutput = output;
+        assert_eq!(update_output.updated_at, 2);
+
+        let archived = SettingArchivedPayload {
+            version: 3,
+            archived_at: 4,
+            deprecated: true,
+            payload: Some(ByteBuf::from(vec![6])),
+            dek: None,
+        };
+        assert!(archived.deprecated);
+        assert!(!format!("{:?}", archived.clone()).is_empty());
+        assert!(!encode_one(archived.clone()).unwrap().is_empty());
+        assert!(!crate::to_cbor_bytes(&archived).is_empty());
     }
 }

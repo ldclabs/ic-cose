@@ -13,7 +13,11 @@ pub fn rand_bytes<const N: usize>() -> [u8; N] {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
 
     #[test]
-    fn it_works() {}
+    fn rand_bytes_returns_requested_length() {
+        let bytes: [u8; 32] = rand_bytes();
+        assert_eq!(bytes.len(), 32);
+    }
 }

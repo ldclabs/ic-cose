@@ -76,6 +76,31 @@ mod test {
     use hex::decode;
 
     #[test]
+    fn cose_sign1_builds_and_rejects_invalid_or_unsupported_inputs() {
+        let sign1 = cose_sign1(b"payload".to_vec(), EdDSA, Some(b"kid".to_vec())).unwrap();
+        assert_eq!(sign1.payload, Some(b"payload".to_vec()));
+        assert_eq!(sign1.protected.header.key_id, b"kid".to_vec());
+
+        assert!(cose_sign1_from(b"not cbor", &[], &[], &[])
+            .unwrap_err()
+            .starts_with("invalid COSE sign1 token:"));
+
+        let mut unsupported = cose_sign1(b"payload".to_vec(), EdDSA, None).unwrap();
+        unsupported.signature = vec![0; 64];
+        let encoded = unsupported.to_vec().unwrap();
+        assert!(cose_sign1_from(&encoded, &[], &[], &[])
+            .unwrap_err()
+            .starts_with("unsupported algorithm:"));
+
+        let signing_key = k256::ecdsa::SigningKey::from_bytes((&[7u8; 32]).into()).unwrap();
+        let verifying_key = *signing_key.verifying_key();
+        let mut ecdsa = cose_sign1(b"payload".to_vec(), ES256K, None).unwrap();
+        ecdsa.signature = vec![0; 64];
+        let encoded = ecdsa.to_vec().unwrap();
+        assert!(cose_sign1_from(&encoded, &[], &[verifying_key], &[]).is_err());
+    }
+
+    #[test]
     fn cose_sign1_from_works() {
         // root public key
         let pk =
