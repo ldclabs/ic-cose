@@ -59,7 +59,7 @@ pub fn mac3_256(key: &[u8], data: &[u8]) -> [u8; 32] {
     mac.finalize().into_bytes().into()
 }
 
-pub fn skip_prefix<'a>(tag: &'a [u8], data: &'a [u8]) -> &'a [u8] {
+pub fn skip_prefix<'a>(tag: &[u8], data: &'a [u8]) -> &'a [u8] {
     if data.starts_with(tag) {
         &data[tag.len()..]
     } else {

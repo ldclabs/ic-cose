@@ -14,6 +14,17 @@ pub use setting::SettingPath;
 pub type MapValue =
     BTreeMap<String, icrc_ledger_types::icrc::generic_metadata_value::MetadataValue>;
 
+/// Maximum byte length of a namespace or setting description.
+pub const MAX_DESC_SIZE: usize = 1024;
+
+/// Validates a description string against [`MAX_DESC_SIZE`].
+pub fn validate_desc(desc: &str) -> Result<(), String> {
+    if desc.len() > MAX_DESC_SIZE {
+        return Err(format!("desc length exceeds the limit {}", MAX_DESC_SIZE));
+    }
+    Ok(())
+}
+
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct PublicKeyInput {
     pub ns: String,

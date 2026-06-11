@@ -8,7 +8,8 @@ use ic_agent::Agent;
 use ic_auth_types::{SignInResponse, SignedDelegation};
 use ic_cose_types::{
     cose::{
-        ecdh::ecdh_x25519, encrypt0::cose_decrypt0, get_cose_key_secret, CborSerializable, CoseKey,
+        ecdh::try_ecdh_x25519, encrypt0::cose_decrypt0, get_cose_key_secret, CborSerializable,
+        CoseKey,
     },
     format_error,
     types::namespace::*,
@@ -231,7 +232,7 @@ pub trait CoseSDK: CanisterCaller + Sized {
             )
             .await?;
 
-        let (shared_secret, _) = ecdh_x25519(secret.to_bytes(), *res.public_key);
+        let (shared_secret, _) = try_ecdh_x25519(secret.to_bytes(), *res.public_key)?;
         let add = subject.as_slice();
         let kek = cose_decrypt0(&res.payload, &shared_secret.to_bytes(), add)?;
         let key =
@@ -582,11 +583,13 @@ mod tests {
         args: Vec<u8>,
     }
 
+    type MockResponses = Arc<Mutex<VecDeque<Result<Vec<u8>, String>>>>;
+
     #[derive(Clone)]
     struct MockCose {
         canister: Principal,
         calls: Arc<Mutex<Vec<CallRecord>>>,
-        responses: Arc<Mutex<VecDeque<Result<Vec<u8>, String>>>>,
+        responses: MockResponses,
         ecdh_mode: Arc<Mutex<EcdhMode>>,
     }
 
@@ -662,12 +665,8 @@ mod tests {
 
             match self.responses.lock().unwrap().pop_front() {
                 Some(Ok(bytes)) => Ok(bytes),
-                Some(Err(err)) => Err(io::Error::new(io::ErrorKind::Other, err).into()),
-                None => Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("missing mock response for {method}"),
-                )
-                .into()),
+                Some(Err(err)) => Err(io::Error::other(err).into()),
+                None => Err(io::Error::other(format!("missing mock response for {method}")).into()),
             }
         }
     }

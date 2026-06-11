@@ -50,7 +50,7 @@ fn is_authenticated() -> Result<(), String> {
 }
 
 async fn rand_bytes<const N: usize>() -> Result<[u8; N], String> {
-    let mut data = ic_cdk::management_canister::raw_rand()
+    let mut data = ic_cdk_management_canister::raw_rand()
         .await
         .map_err(format_error)?;
     data.truncate(N);

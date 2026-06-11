@@ -69,18 +69,8 @@ pub fn cose_decrypt0(
     secret: &[u8; 32],
     aad: &[u8],
 ) -> Result<Vec<u8>, String> {
-    let e0 = CoseEncrypt0::from_slice(skip_prefix(&ENCRYPT0_TAG, payload)).map_err(format_error)?;
-    let nonce = e0.unprotected.iv.first_chunk::<12>().ok_or_else(|| {
-        format!(
-            "invalid nonce length, expected 12, got {}",
-            e0.unprotected.iv.len()
-        )
-    })?;
-    e0.decrypt_ciphertext(
-        aad,
-        || "missing ciphertext".to_string(),
-        |cipher_data, enc| aes256_gcm_decrypt(secret, nonce, enc, cipher_data),
-    )
+    let e0 = try_decode_encrypt0(payload)?;
+    decrypt(&e0, secret, aad)
 }
 
 /// Decrypts a COSE_Encrypt0 structure using AES-256-GCM.

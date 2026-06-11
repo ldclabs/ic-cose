@@ -1,6 +1,6 @@
 use ic_cose_types::{
     cose::{
-        cose_aes256_key, ecdh::ecdh_x25519, encrypt0::cose_encrypt0, format_error, mac3_256,
+        cose_aes256_key, ecdh::try_ecdh_x25519, encrypt0::cose_encrypt0, format_error, mac3_256,
         CborSerializable,
     },
     types::{
@@ -116,7 +116,7 @@ async fn ecdh_cose_encrypted_key(
 
     let secret_key: [u8; 32] = rand_bytes().await?;
     let secret_key = mac3_256(&secret_key, ecdh.nonce.as_ref());
-    let (shared_secret, public_key) = ecdh_x25519(secret_key, *ecdh.public_key);
+    let (shared_secret, public_key) = try_ecdh_x25519(secret_key, *ecdh.public_key)?;
     let key = cose_encrypt0(&kek, shared_secret.as_bytes(), aad, &ecdh.nonce, None)?;
     Ok(ECDHOutput {
         payload: key.into(),

@@ -10,6 +10,11 @@ pub use x25519_dalek::{PublicKey, SharedSecret, StaticSecret};
 /// A tuple containing:
 /// * Shared secret for symmetric encryption
 /// * Public key corresponding to the input secret
+///
+/// # Security
+/// This function does not reject low-order public keys, so the resulting
+/// shared secret may be the all-zero value known to third parties.
+/// Prefer [`try_ecdh_x25519`] when `their_public` comes from an untrusted peer.
 pub fn ecdh_x25519(secret: [u8; 32], their_public: [u8; 32]) -> (SharedSecret, PublicKey) {
     let secret = StaticSecret::from(secret);
     let public = PublicKey::from(&secret);
@@ -19,6 +24,32 @@ pub fn ecdh_x25519(secret: [u8; 32], their_public: [u8; 32]) -> (SharedSecret, P
     )
 }
 
+/// Performs X25519 ECDH key exchange, rejecting non-contributory exchanges.
+///
+/// Unlike [`ecdh_x25519`], this fails if `their_public` is a low-order point,
+/// which would yield an all-zero shared secret predictable by third parties.
+///
+/// # Arguments
+/// * `secret` - 32-byte private key
+/// * `their_public` - 32-byte public key of the other party
+///
+/// # Returns
+/// A tuple containing:
+/// * Shared secret for symmetric encryption
+/// * Public key corresponding to the input secret
+pub fn try_ecdh_x25519(
+    secret: [u8; 32],
+    their_public: [u8; 32],
+) -> Result<(SharedSecret, PublicKey), String> {
+    let secret = StaticSecret::from(secret);
+    let public = PublicKey::from(&secret);
+    let shared_secret = secret.diffie_hellman(&PublicKey::from(their_public));
+    if !shared_secret.was_contributory() {
+        return Err("non-contributory X25519 key exchange: low-order public key".to_string());
+    }
+    Ok((shared_secret, public))
+}
+
 #[cfg(test)]
 mod test {
     use candid::Principal;
@@ -26,6 +57,25 @@ mod test {
 
     use super::*;
     use crate::cose::{encrypt0::cose_decrypt0, get_cose_key_secret, CborSerializable, CoseKey};
+
+    #[test]
+    fn try_ecdh_x25519_rejects_low_order_public_keys() {
+        let secret = [7u8; 32];
+        let their_secret = StaticSecret::from([8u8; 32]);
+        let their_public = PublicKey::from(&their_secret);
+
+        let (shared_secret, public) = try_ecdh_x25519(secret, their_public.to_bytes()).unwrap();
+        let (expected, expected_public) = ecdh_x25519(secret, their_public.to_bytes());
+        assert_eq!(shared_secret.as_bytes(), expected.as_bytes());
+        assert_eq!(public, expected_public);
+
+        // the identity point is a low-order point: the exchange is non-contributory
+        let low_order = [0u8; 32];
+        assert_eq!(
+            try_ecdh_x25519(secret, low_order).err(),
+            Some("non-contributory X25519 key exchange: low-order public key".to_string())
+        );
+    }
 
     #[test]
     fn ecdh_works() {

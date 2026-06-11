@@ -2,9 +2,30 @@ use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+use super::validate_desc;
 use crate::{validate_principals, validate_principals_not_anonymous, validate_str};
 
 pub const MAX_PAYLOAD_SIZE: u64 = 2_000_000; // 2MB
+
+fn validate_max_payload_size(max_payload_size: u64) -> Result<(), String> {
+    if max_payload_size == 0 {
+        Err("max_payload_size should be greater than 0".to_string())?;
+    }
+    if max_payload_size > MAX_PAYLOAD_SIZE {
+        Err(format!(
+            "max_payload_size should be less than or equal to {}",
+            MAX_PAYLOAD_SIZE
+        ))?;
+    }
+    Ok(())
+}
+
+fn validate_visibility(visibility: u8) -> Result<(), String> {
+    if visibility != 0 && visibility != 1 {
+        Err("visibility should be 0 or 1".to_string())?;
+    }
+    Ok(())
+}
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct NamespaceInfo {
@@ -42,21 +63,13 @@ impl CreateNamespaceInput {
         validate_principals(&self.managers)?;
         validate_principals_not_anonymous(&self.auditors)?;
         validate_principals_not_anonymous(&self.users)?;
+        if let Some(ref desc) = self.desc {
+            validate_desc(desc)?;
+        }
         if let Some(max_payload_size) = self.max_payload_size {
-            if max_payload_size == 0 {
-                Err("max_payload_size should be greater than 0".to_string())?;
-            }
-            if max_payload_size > MAX_PAYLOAD_SIZE {
-                Err(format!(
-                    "max_payload_size should be less than or equal to {}",
-                    MAX_PAYLOAD_SIZE
-                ))?;
-            }
+            validate_max_payload_size(max_payload_size)?;
         }
-
-        if self.visibility != 0 && self.visibility != 1 {
-            Err("visibility should be 0 or 1".to_string())?;
-        }
+        validate_visibility(self.visibility)?;
         Ok(())
     }
 }
@@ -74,16 +87,11 @@ pub struct UpdateNamespaceInput {
 impl UpdateNamespaceInput {
     pub fn validate(&self) -> Result<(), String> {
         validate_str(&self.name)?;
+        if let Some(ref desc) = self.desc {
+            validate_desc(desc)?;
+        }
         if let Some(max_payload_size) = self.max_payload_size {
-            if max_payload_size == 0 {
-                Err("max_payload_size should be greater than 0".to_string())?;
-            }
-            if max_payload_size > MAX_PAYLOAD_SIZE {
-                Err(format!(
-                    "max_payload_size should be less than or equal to {}",
-                    MAX_PAYLOAD_SIZE
-                ))?;
-            }
+            validate_max_payload_size(max_payload_size)?;
         }
 
         if let Some(status) = self.status {
@@ -93,9 +101,7 @@ impl UpdateNamespaceInput {
         }
 
         if let Some(visibility) = self.visibility {
-            if visibility != 0 && visibility != 1 {
-                Err("visibility should be 0 or 1".to_string())?;
-            }
+            validate_visibility(visibility)?;
         }
         Ok(())
     }

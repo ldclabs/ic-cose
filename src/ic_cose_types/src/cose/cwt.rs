@@ -22,25 +22,28 @@ pub static SCOPE_NAME: ClaimName = ClaimName::Assigned(iana::CwtClaimName::Scope
 pub fn cwt_from(data: &[u8], now_sec: i64) -> Result<ClaimsSet, String> {
     let claims = ClaimsSet::from_slice(data).map_err(|err| format!("invalid claims: {}", err))?;
     if let Some(ref exp) = claims.expiration_time {
-        let exp = match exp {
-            Timestamp::WholeSeconds(v) => *v,
-            Timestamp::FractionalSeconds(v) => (*v).to_i64().unwrap_or_default(),
-        };
-        if exp < now_sec - CLOCK_SKEW {
+        if timestamp_secs(exp)? < now_sec - CLOCK_SKEW {
             return Err("token expired".to_string());
         }
     }
     if let Some(ref nbf) = claims.not_before {
-        let nbf = match nbf {
-            Timestamp::WholeSeconds(v) => *v,
-            Timestamp::FractionalSeconds(v) => (*v).to_i64().unwrap_or_default(),
-        };
-        if nbf > now_sec + CLOCK_SKEW {
+        if timestamp_secs(nbf)? > now_sec + CLOCK_SKEW {
             return Err("token not yet valid".to_string());
         }
     }
 
     Ok(claims)
+}
+
+/// Converts a CWT timestamp to whole seconds, rejecting values (NaN, infinity,
+/// out of i64 range) that cannot be compared against the current time.
+fn timestamp_secs(ts: &Timestamp) -> Result<i64, String> {
+    match ts {
+        Timestamp::WholeSeconds(v) => Ok(*v),
+        Timestamp::FractionalSeconds(v) => v
+            .to_i64()
+            .ok_or_else(|| "invalid timestamp value".to_string()),
+    }
 }
 
 /// Extracts scope claim from CWT claims set.
@@ -115,6 +118,28 @@ mod test {
 
         let no_time_claims = ClaimsSet::default().to_vec().unwrap();
         assert!(cwt_from(&no_time_claims, 1_500).is_ok());
+
+        let nan_nbf = ClaimsSet {
+            not_before: Some(Timestamp::FractionalSeconds(f64::NAN)),
+            ..Default::default()
+        }
+        .to_vec()
+        .unwrap();
+        assert_eq!(
+            cwt_from(&nan_nbf, 1_000).unwrap_err(),
+            "invalid timestamp value"
+        );
+
+        let inf_exp = ClaimsSet {
+            expiration_time: Some(Timestamp::FractionalSeconds(f64::INFINITY)),
+            ..Default::default()
+        }
+        .to_vec()
+        .unwrap();
+        assert_eq!(
+            cwt_from(&inf_exp, 1_000).unwrap_err(),
+            "invalid timestamp value"
+        );
 
         let scoped = ClaimsSet {
             rest: vec![(SCOPE_NAME.clone(), Value::Integer(1.into()))],

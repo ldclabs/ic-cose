@@ -3,10 +3,31 @@ use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
 use std::collections::{BTreeMap, BTreeSet};
 
+use super::validate_desc;
 use crate::validate_str;
 
 pub const CHUNK_SIZE: u32 = 256 * 1024;
 pub const MAX_DEK_SIZE: u64 = 3 * 1024;
+/// Maximum number of tags per setting.
+pub const MAX_TAGS: usize = 32;
+/// Maximum byte length of a tag value.
+pub const MAX_TAG_VALUE_SIZE: usize = 256;
+
+fn validate_tags(tags: &BTreeMap<String, String>) -> Result<(), String> {
+    if tags.len() > MAX_TAGS {
+        Err(format!("tags count exceeds the limit {}", MAX_TAGS))?;
+    }
+    for (k, v) in tags.iter() {
+        validate_str(k)?;
+        if v.len() > MAX_TAG_VALUE_SIZE {
+            Err(format!(
+                "tag value length exceeds the limit {}",
+                MAX_TAG_VALUE_SIZE
+            ))?;
+        }
+    }
+    Ok(())
+}
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SettingInfo {
@@ -61,10 +82,11 @@ impl CreateSettingInput {
                 Err("status should be 0 or 1".to_string())?;
             }
         }
+        if let Some(ref desc) = self.desc {
+            validate_desc(desc)?;
+        }
         if let Some(ref tags) = self.tags {
-            for (k, _) in tags.iter() {
-                validate_str(k)?;
-            }
+            validate_tags(tags)?;
         }
         if let Some(ref dek) = self.dek {
             if dek.len() > MAX_DEK_SIZE as usize {
@@ -96,10 +118,11 @@ impl UpdateSettingInfoInput {
                 Err("status should be -1, 0 or 1".to_string())?;
             }
         }
+        if let Some(ref desc) = self.desc {
+            validate_desc(desc)?;
+        }
         if let Some(ref tags) = self.tags {
-            for (k, _) in tags.iter() {
-                validate_str(k)?;
-            }
+            validate_tags(tags)?;
         }
         Ok(())
     }
@@ -204,6 +227,41 @@ mod test {
             ..Default::default()
         };
         assert_eq!(input.validate().unwrap_err(), "DEK size exceeds the limit");
+
+        let input = CreateSettingInput {
+            desc: Some("d".repeat(crate::types::MAX_DESC_SIZE + 1)),
+            ..Default::default()
+        };
+        assert_eq!(
+            input.validate().unwrap_err(),
+            format!(
+                "desc length exceeds the limit {}",
+                crate::types::MAX_DESC_SIZE
+            )
+        );
+
+        let input = CreateSettingInput {
+            tags: Some(BTreeMap::from_iter(
+                (0..=MAX_TAGS).map(|i| (format!("tag_{i}"), "value".to_string())),
+            )),
+            ..Default::default()
+        };
+        assert_eq!(
+            input.validate().unwrap_err(),
+            format!("tags count exceeds the limit {}", MAX_TAGS)
+        );
+
+        let input = CreateSettingInput {
+            tags: Some(BTreeMap::from([(
+                "tag".to_string(),
+                "v".repeat(MAX_TAG_VALUE_SIZE + 1),
+            )])),
+            ..Default::default()
+        };
+        assert_eq!(
+            input.validate().unwrap_err(),
+            format!("tag value length exceeds the limit {}", MAX_TAG_VALUE_SIZE)
+        );
     }
 
     #[test]
@@ -227,6 +285,30 @@ mod test {
             ..Default::default()
         };
         assert_eq!(input.validate().unwrap_err(), "invalid character: -");
+
+        let input = UpdateSettingInfoInput {
+            desc: Some("d".repeat(crate::types::MAX_DESC_SIZE + 1)),
+            ..Default::default()
+        };
+        assert_eq!(
+            input.validate().unwrap_err(),
+            format!(
+                "desc length exceeds the limit {}",
+                crate::types::MAX_DESC_SIZE
+            )
+        );
+
+        let input = UpdateSettingInfoInput {
+            tags: Some(BTreeMap::from([(
+                "tag".to_string(),
+                "v".repeat(MAX_TAG_VALUE_SIZE + 1),
+            )])),
+            ..Default::default()
+        };
+        assert_eq!(
+            input.validate().unwrap_err(),
+            format!("tag value length exceeds the limit {}", MAX_TAG_VALUE_SIZE)
+        );
     }
 
     #[test]

@@ -1,5 +1,5 @@
 use candid::{pretty::candid::value::pp_value, CandidType, IDLArgs, IDLValue, Principal};
-use ic_cdk::management_canister as mgt;
+use ic_cdk_management_canister as mgt;
 use ic_cose_types::{
     format_error,
     types::wasm::{AddWasmInput, DeployWasmInput},
