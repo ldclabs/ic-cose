@@ -938,7 +938,7 @@ mod tests {
         let agent = agent_with_response(
             StatusCode::OK,
             "application/cbor",
-            serde_cbor::to_vec(&reply).unwrap(),
+            cbor2::to_vec(&reply).unwrap(),
         );
         let client = Client::new(agent, Principal::management_canister());
 
@@ -981,7 +981,7 @@ mod tests {
         let agent = agent_with_response(
             StatusCode::OK,
             "application/cbor",
-            serde_cbor::to_vec(&rejected).unwrap(),
+            cbor2::to_vec(&rejected).unwrap(),
         );
         let client = Client::new(agent, Principal::management_canister());
         assert!(client

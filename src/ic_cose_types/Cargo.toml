@@ -14,7 +14,7 @@ candid = { workspace = true }
 serde = { workspace = true }
 serde_bytes = { workspace = true }
 num-traits = { workspace = true }
-ciborium = { workspace = true }
+cbor2 = { workspace = true }
 icrc-ledger-types = { workspace = true }
 ic-cdk-management-canister = { workspace = true }
 k256 = { workspace = true }

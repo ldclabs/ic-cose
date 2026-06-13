@@ -2,7 +2,6 @@
 #![allow(clippy::needless_doctest_main)]
 
 use candid::{utils::ArgumentEncoder, CandidType, Principal};
-use ciborium::into_writer;
 use serde::Serialize;
 use std::{collections::BTreeSet, future::Future};
 
@@ -30,10 +29,7 @@ pub fn to_cbor_bytes(obj: &impl Serialize) -> Vec<u8> {
 
 /// Converts a serializable object to CBOR-encoded bytes.
 pub fn try_to_cbor_bytes(obj: &impl Serialize) -> Result<Vec<u8>, String> {
-    let mut buf: Vec<u8> = Vec::new();
-    into_writer(obj, &mut buf)
-        .map_err(|err| format!("failed to encode in CBOR format: {err:?}"))?;
-    Ok(buf)
+    cbor2::to_vec(obj).map_err(|err| format!("failed to encode in CBOR format: {err:?}"))
 }
 
 /// Validates a string against naming conventions

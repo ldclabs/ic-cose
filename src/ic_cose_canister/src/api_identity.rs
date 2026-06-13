@@ -1,5 +1,5 @@
 use candid::Principal;
-use ciborium::into_writer;
+use cbor2::to_writer;
 use ic_auth_types::{Delegation, SignInResponse, SignedDelegation};
 use ic_auth_verifier::{user_public_key_from_der, verify_basic_sig};
 use ic_canister_sig_creation::{delegation_signature_msg, CanisterSigPublicKey};
@@ -15,7 +15,7 @@ use crate::store;
 #[ic_cdk::query]
 fn namespace_get_fixed_identity(namespace: String, name: String) -> Result<Principal, String> {
     let mut seed = vec![];
-    into_writer(&(&namespace, &name), &mut seed).expect("failed to encode seed");
+    to_writer(&(&namespace, &name), &mut seed).expect("failed to encode seed");
     let user_key = CanisterSigPublicKey::new(ic_cdk::api::canister_self(), seed);
     Ok(Principal::self_authenticating(user_key.to_der().as_slice()))
 }
@@ -85,12 +85,12 @@ fn namespace_sign_delegation(input: SignDelegationInput) -> Result<SignInRespons
 
     let (alg, pk) = user_public_key_from_der(input.pubkey.as_slice())?;
     let mut msg = vec![];
-    into_writer(&(&input.ns, &name, &caller), &mut msg).expect("failed to encode Delegations data");
+    to_writer(&(&input.ns, &name, &caller), &mut msg).expect("failed to encode Delegations data");
     verify_basic_sig(alg, &pk, &msg, input.sig.as_slice())
         .map_err(|err| format!("challenge verification failed: {:?}", err))?;
 
     let mut seed = vec![];
-    into_writer(&(&input.ns, &name), &mut seed).expect("failed to encode seed");
+    to_writer(&(&input.ns, &name), &mut seed).expect("failed to encode seed");
     let user_key = CanisterSigPublicKey::new(ic_cdk::api::canister_self(), seed);
     let session_expires_in_ms = store::ns::with(&input.ns, |ns| {
         if let Some(delegators) = ns.fixed_id_names.get(&name) {

@@ -1,5 +1,5 @@
 use candid::Principal;
-use ciborium::{from_reader, into_writer};
+use cbor2::{from_reader, to_writer, Value};
 use ic_canister_sig_creation::{
     signature_map::{CanisterSigInputs, SignatureMap, LABEL_SIG},
     DELEGATION_SIG_DOMAIN,
@@ -21,7 +21,7 @@ use ic_stable_structures::{
     storable::Bound,
     DefaultMemoryImpl, StableBTreeMap, StableCell, Storable,
 };
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_bytes::{ByteArray, ByteBuf};
 use std::{
     borrow::Cow,
@@ -41,6 +41,18 @@ use crate::{
 const SESSION_EXPIRES_IN_MS: u64 = 1000 * 3600 * 24; // 1 day
 
 type Memory = VirtualMemory<DefaultMemoryImpl>;
+
+fn from_cbor_bytes<T>(bytes: &[u8], context: &str) -> T
+where
+    T: DeserializeOwned,
+{
+    // Decode through Value so candid::Principal sees CBOR byte strings via visit_bytes.
+    let value: Value =
+        from_reader(bytes).unwrap_or_else(|err| panic!("failed to decode {context}: {err:?}"));
+    value
+        .deserialized()
+        .unwrap_or_else(|err| panic!("failed to deserialize {context}: {err:?}"))
+}
 
 #[derive(Clone, Default, Deserialize, Serialize)]
 pub struct State {
@@ -272,18 +284,18 @@ impl Storable for Namespace {
 
     fn into_bytes(self) -> Vec<u8> {
         let mut buf = vec![];
-        into_writer(&self, &mut buf).expect("failed to encode Namespace data");
+        to_writer(&self, &mut buf).expect("failed to encode Namespace data");
         buf
     }
 
     fn to_bytes(&self) -> Cow<'_, [u8]> {
         let mut buf = vec![];
-        into_writer(self, &mut buf).expect("failed to encode Namespace data");
+        to_writer(self, &mut buf).expect("failed to encode Namespace data");
         Cow::Owned(buf)
     }
 
     fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
-        from_reader(&bytes[..]).expect("failed to decode Namespace data")
+        from_cbor_bytes(&bytes, "Namespace data")
     }
 }
 
@@ -332,18 +344,18 @@ impl Storable for Setting {
 
     fn into_bytes(self) -> Vec<u8> {
         let mut buf = vec![];
-        into_writer(&self, &mut buf).expect("failed to encode Setting data");
+        to_writer(&self, &mut buf).expect("failed to encode Setting data");
         buf
     }
 
     fn to_bytes(&self) -> Cow<'_, [u8]> {
         let mut buf = vec![];
-        into_writer(self, &mut buf).expect("failed to encode Setting data");
+        to_writer(self, &mut buf).expect("failed to encode Setting data");
         Cow::Owned(buf)
     }
 
     fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
-        from_reader(&bytes[..]).expect("failed to decode Setting data")
+        from_cbor_bytes(&bytes, "Setting data")
     }
 }
 
@@ -372,18 +384,18 @@ impl Storable for SettingPathKey {
 
     fn into_bytes(self) -> Vec<u8> {
         let mut buf = vec![];
-        into_writer(&self, &mut buf).expect("failed to encode SettingPathKey data");
+        to_writer(&self, &mut buf).expect("failed to encode SettingPathKey data");
         buf
     }
 
     fn to_bytes(&self) -> Cow<'_, [u8]> {
         let mut buf = vec![];
-        into_writer(self, &mut buf).expect("failed to encode SettingPathKey data");
+        to_writer(self, &mut buf).expect("failed to encode SettingPathKey data");
         Cow::Owned(buf)
     }
 
     fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
-        from_reader(&bytes[..]).expect("failed to decode SettingPathKey data")
+        from_cbor_bytes(&bytes, "SettingPathKey data")
     }
 }
 
@@ -419,18 +431,18 @@ impl Storable for SettingArchived {
 
     fn into_bytes(self) -> Vec<u8> {
         let mut buf = vec![];
-        into_writer(&self, &mut buf).expect("failed to encode SettingArchived data");
+        to_writer(&self, &mut buf).expect("failed to encode SettingArchived data");
         buf
     }
 
     fn to_bytes(&self) -> Cow<'_, [u8]> {
         let mut buf = vec![];
-        into_writer(self, &mut buf).expect("failed to encode SettingArchived data");
+        to_writer(self, &mut buf).expect("failed to encode SettingArchived data");
         Cow::Owned(buf)
     }
 
     fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
-        from_reader(&bytes[..]).expect("failed to decode SettingArchived data")
+        from_cbor_bytes(&bytes, "SettingArchived data")
     }
 }
 
@@ -577,8 +589,7 @@ pub mod state {
     pub fn load() {
         STATE_STORE.with_borrow(|r| {
             STATE.with_borrow_mut(|h| {
-                let v: State =
-                    from_reader(&r.get()[..]).expect("failed to decode STATE_STORE data");
+                let v: State = from_cbor_bytes(r.get(), "STATE_STORE data");
                 *h = v;
             });
         });
@@ -592,8 +603,7 @@ pub mod state {
             if data.is_empty() {
                 return;
             }
-            let m: BTreeMap<String, NamespaceLegacy> =
-                from_reader(&data[..]).expect("failed to decode NS_STORE data");
+            let m: BTreeMap<String, NamespaceLegacy> = from_cbor_bytes(data, "NS_STORE data");
             ns::migrate(m);
         });
     }
@@ -602,7 +612,7 @@ pub mod state {
         STATE.with_borrow(|h| {
             STATE_STORE.with_borrow_mut(|r| {
                 let mut buf = vec![];
-                into_writer(h, &mut buf).expect("failed to encode STATE_STORE data");
+                to_writer(h, &mut buf).expect("failed to encode STATE_STORE data");
                 r.set(buf);
             });
         });

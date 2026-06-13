@@ -67,7 +67,7 @@ pub fn get_scope(claims: &ClaimsSet) -> Result<String, String> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use ciborium::Value;
+    use coset::cbor::value::Value;
     use hex::decode;
 
     #[test]

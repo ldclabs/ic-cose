@@ -1,5 +1,5 @@
 use candid::Principal;
-use ciborium::{from_reader, into_writer};
+use cbor2::{from_reader, to_writer, Value};
 use ic_cose_types::{
     cose::sha256,
     format_error,
@@ -10,7 +10,7 @@ use ic_stable_structures::{
     storable::Bound,
     DefaultMemoryImpl, StableBTreeMap, StableCell, StableLog, Storable,
 };
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_bytes::{ByteArray, ByteBuf};
 use std::{
     borrow::Cow,
@@ -19,6 +19,18 @@ use std::{
 };
 
 type Memory = VirtualMemory<DefaultMemoryImpl>;
+
+fn from_cbor_bytes<T>(bytes: &[u8], context: &str) -> T
+where
+    T: DeserializeOwned,
+{
+    // Decode through Value so candid::Principal sees CBOR byte strings via visit_bytes.
+    let value: Value =
+        from_reader(bytes).unwrap_or_else(|err| panic!("failed to decode {context}: {err:?}"));
+    value
+        .deserialized()
+        .unwrap_or_else(|err| panic!("failed to deserialize {context}: {err:?}"))
+}
 
 #[derive(Clone, Default, Deserialize, Serialize)]
 pub struct State {
@@ -38,18 +50,18 @@ impl Storable for State {
 
     fn into_bytes(self) -> Vec<u8> {
         let mut buf = vec![];
-        into_writer(&self, &mut buf).expect("failed to encode State data");
+        to_writer(&self, &mut buf).expect("failed to encode State data");
         buf
     }
 
     fn to_bytes(&self) -> Cow<'_, [u8]> {
         let mut buf = vec![];
-        into_writer(self, &mut buf).expect("failed to encode State data");
+        to_writer(self, &mut buf).expect("failed to encode State data");
         Cow::Owned(buf)
     }
 
     fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
-        from_reader(&bytes[..]).expect("failed to decode State data")
+        from_cbor_bytes(&bytes, "State data")
     }
 }
 
@@ -72,18 +84,18 @@ impl Storable for Wasm {
 
     fn into_bytes(self) -> Vec<u8> {
         let mut buf = vec![];
-        into_writer(&self, &mut buf).expect("failed to encode Wasm data");
+        to_writer(&self, &mut buf).expect("failed to encode Wasm data");
         buf
     }
 
     fn to_bytes(&self) -> Cow<'_, [u8]> {
         let mut buf = vec![];
-        into_writer(self, &mut buf).expect("failed to encode Wasm data");
+        to_writer(self, &mut buf).expect("failed to encode Wasm data");
         Cow::Owned(buf)
     }
 
     fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
-        from_reader(&bytes[..]).expect("failed to decode Wasm data")
+        from_cbor_bytes(&bytes, "Wasm data")
     }
 }
 
@@ -110,18 +122,18 @@ impl Storable for DeployLog {
 
     fn into_bytes(self) -> Vec<u8> {
         let mut buf = vec![];
-        into_writer(&self, &mut buf).expect("failed to encode DeployLog data");
+        to_writer(&self, &mut buf).expect("failed to encode DeployLog data");
         buf
     }
 
     fn to_bytes(&self) -> Cow<'_, [u8]> {
         let mut buf = vec![];
-        into_writer(self, &mut buf).expect("failed to encode DeployLog data");
+        to_writer(self, &mut buf).expect("failed to encode DeployLog data");
         Cow::Owned(buf)
     }
 
     fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
-        from_reader(&bytes[..]).expect("failed to decode DeployLog data")
+        from_cbor_bytes(&bytes, "DeployLog data")
     }
 }
 

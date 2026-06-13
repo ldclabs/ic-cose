@@ -125,8 +125,7 @@ pub fn get_cose_key_public(key: CoseKey) -> Result<Vec<u8>, String> {
 
 #[cfg(test)]
 mod test {
-    use ciborium::Value;
-    use coset::{Algorithm, CoseKeyBuilder};
+    use coset::{cbor::value::Value, Algorithm, CoseKeyBuilder};
 
     use super::*;
 

@@ -17,7 +17,7 @@ crate-type = ["cdylib"]
 [dependencies]
 ic_cose_types = { path = "../ic_cose_types", version = "0.9" }
 candid = { workspace = true, features = ["value", "printer"] }
-ciborium = { workspace = true }
+cbor2 = { workspace = true }
 hex = { workspace = true }
 ic-cdk = { workspace = true }
 ic-cdk-management-canister = { workspace = true }
