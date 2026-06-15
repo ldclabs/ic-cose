@@ -7,10 +7,7 @@ use futures::try_join;
 use ic_agent::Agent;
 use ic_auth_types::{SignInResponse, SignedDelegation};
 use ic_cose_types::{
-    cose::{
-        ecdh::try_ecdh_x25519, encrypt0::cose_decrypt0, get_cose_key_secret, CborSerializable,
-        CoseKey,
-    },
+    cose::{ecdh::try_ecdh_x25519, encrypt0::cose_decrypt0, get_cose_key_secret, CoseKey},
     format_error,
     types::namespace::*,
     types::setting::*,
@@ -554,14 +551,11 @@ mod tests {
     use super::*;
     use bytes::Bytes;
     use candid::{decode_args, encode_args, encode_one};
-    use coset::CoseKeyBuilder;
     use http::{Response, StatusCode};
     use ic_agent::{agent::HttpService, AgentError};
     use ic_auth_types::{ByteBufB64, Delegation};
     use ic_cdk_management_canister::{VetKDCurve, VetKDKeyId};
-    use ic_cose_types::cose::{
-        cose_aes256_key, ecdh::ecdh_x25519, encrypt0::cose_encrypt0, CborSerializable,
-    };
+    use ic_cose_types::cose::{cose_aes256_key, ecdh::ecdh_x25519, encrypt0::cose_encrypt0, iana};
     use ic_transport_types::{QueryResponse, ReplyResponse};
     use std::{
         collections::{BTreeMap, VecDeque},
@@ -643,10 +637,12 @@ mod tests {
                         .to_vec()
                         .unwrap(),
                     EcdhMode::InvalidCoseKey => vec![1, 2, 3],
-                    EcdhMode::ShortSecret => CoseKeyBuilder::new_symmetric_key(vec![9u8; 31])
-                        .build()
-                        .to_vec()
-                        .unwrap(),
+                    EcdhMode::ShortSecret => {
+                        let mut key = CoseKey::new();
+                        key.set_kty(iana::KeyTypeSymmetric);
+                        key.insert(iana::SymmetricKeyParameterK, vec![9u8; 31]);
+                        key.to_vec().unwrap()
+                    }
                 };
                 let payload = cose_encrypt0(
                     &cose_key,

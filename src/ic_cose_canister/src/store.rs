@@ -8,11 +8,10 @@ use ic_cdk::api::certified_data_set;
 use ic_certification::labeled_hash;
 use ic_cose_types::{
     cose::{
-        cwt::{ClaimsSet, Timestamp, SCOPE_NAME},
+        cwt::{scope_claim, ClaimsSet},
         encrypt0::try_decode_encrypt0,
         format_error, mac3_256, sha256,
         sign1::{cose_sign1, ES256K},
-        CborSerializable,
     },
     types::{namespace::*, setting::*, state::StateInfo, PublicKeyOutput, SchnorrAlgorithm},
 };
@@ -620,7 +619,7 @@ pub mod state {
 }
 
 pub mod ns {
-    use ic_cose_types::cose::iana::Algorithm::EdDSA;
+    use ic_cose_types::cose::sign1::EdDSA;
 
     use super::*;
 
@@ -891,11 +890,11 @@ pub mod ns {
             issuer: Some(ic_cdk::api::canister_self().to_text()),
             subject: Some(caller.to_text()),
             audience: Some(audience),
-            expiration_time: Some(Timestamp::WholeSeconds(now_sec + CWT_EXPIRATION_SECONDS)),
-            not_before: Some(Timestamp::WholeSeconds(now_sec)),
-            issued_at: Some(Timestamp::WholeSeconds(now_sec)),
+            expiration: Some((now_sec + CWT_EXPIRATION_SECONDS) as u64),
+            not_before: Some(now_sec as u64),
+            issued_at: Some(now_sec as u64),
             cwt_id: Some(cwt_id.into()),
-            rest: vec![(SCOPE_NAME.clone(), permission.into())],
+            extra: scope_claim(permission),
         };
         let payload = claims.to_vec().map_err(format_error)?;
         let alg = match algorithm {
@@ -903,12 +902,14 @@ pub mod ns {
             SchnorrAlgorithm::Bip340secp256k1 => ES256K,
         };
         let mut sign1 = cose_sign1(payload, alg, None)?;
-        let mut tbs_data = sign1.tbs_data(caller.as_slice());
+        let mut tbs_data = sign1
+            .prepare_signature(None, None, Some(caller.as_slice()))
+            .map_err(format_error)?;
         if algorithm == SchnorrAlgorithm::Bip340secp256k1 {
             tbs_data = sha256(&tbs_data).into();
         }
         let sig = sign_with_schnorr(key_name, algorithm, vec![], tbs_data).await?;
-        sign1.signature = sig;
+        sign1.set_signature(sig).map_err(format_error)?;
         let token = sign1.to_vec().map_err(format_error)?;
         Ok(ByteBuf::from(token))
     }

@@ -1,4 +1,3 @@
-use coset::{CoseKeyBuilder, Label, RegisteredLabel};
 use hmac::{Mac, SimpleHmac};
 use sha3::Digest;
 
@@ -11,7 +10,37 @@ pub mod k256;
 pub mod kdf;
 pub mod sign1;
 
-pub use coset::{iana, CborSerializable, CoseKey};
+pub use cose2::{iana, Key as CoseKey, Label, Value};
+
+/// Compatibility trait for the COSE types this crate exposes.
+///
+/// `cose2` provides inherent `from_slice`/`to_vec` methods on its message and
+/// key types. Keeping this trait avoids forcing downstream code to import a
+/// serialization trait while using `cose2` as the backing implementation.
+pub trait CborSerializable: Sized {
+    fn from_slice(data: &[u8]) -> Result<Self, cose2::Error>;
+    fn to_vec(&self) -> Result<Vec<u8>, cose2::Error>;
+}
+
+macro_rules! impl_cbor_serializable {
+    ($ty:ty) => {
+        impl CborSerializable for $ty {
+            fn from_slice(data: &[u8]) -> Result<Self, cose2::Error> {
+                <$ty>::from_slice(data)
+            }
+
+            fn to_vec(&self) -> Result<Vec<u8>, cose2::Error> {
+                <$ty>::to_vec(self)
+            }
+        }
+    };
+}
+
+impl_cbor_serializable!(cose2::Key);
+impl_cbor_serializable!(cose2::Sign1Message);
+impl_cbor_serializable!(cose2::Encrypt0Message);
+impl_cbor_serializable!(cose2::KdfContext);
+impl_cbor_serializable!(cose2::cwt::Claims);
 
 pub const CBOR_TAG: [u8; 3] = [0xd9, 0xd9, 0xf7];
 pub const ENCRYPT0_TAG: [u8; 1] = [0xd0];
@@ -68,66 +97,79 @@ pub fn skip_prefix<'a>(tag: &[u8], data: &'a [u8]) -> &'a [u8] {
 }
 
 pub fn cose_aes256_key(secret: [u8; 32], key_id: Vec<u8>) -> CoseKey {
-    CoseKeyBuilder::new_symmetric_key(secret.into())
-        .algorithm(iana::Algorithm::A256GCM)
-        .key_id(key_id)
-        .build()
+    let mut key = CoseKey::new();
+    key.set_kty(iana::KeyTypeSymmetric)
+        .set_alg(iana::AlgorithmA256GCM)
+        .set_kid(key_id);
+    key.insert(iana::SymmetricKeyParameterK, secret.to_vec());
+    key
 }
 
 pub fn get_cose_key_secret(key: CoseKey) -> Result<Vec<u8>, String> {
-    let key_label = match key.kty {
-        RegisteredLabel::Assigned(iana::KeyType::Symmetric) => {
-            Label::Int(iana::SymmetricKeyParameter::K as i64)
-        }
-        RegisteredLabel::Assigned(iana::KeyType::OKP) => {
-            Label::Int(iana::OkpKeyParameter::D as i64)
-        }
-        RegisteredLabel::Assigned(iana::KeyType::EC2) => {
-            Label::Int(iana::Ec2KeyParameter::D as i64)
-        }
+    let key_label = match key.kty().map_err(format_error)? {
+        Some(Label::Int(iana::KeyTypeSymmetric)) => iana::SymmetricKeyParameterK,
+        Some(Label::Int(iana::KeyTypeOKP)) => iana::OKPKeyParameterD,
+        Some(Label::Int(iana::KeyTypeEC2)) => iana::EC2KeyParameterD,
         _ => {
             return Err("unsupported key type".to_string());
         }
     };
 
-    for (label, value) in key.params {
-        if label == key_label {
-            return value
-                .into_bytes()
-                .map_err(|_| "invalid secret key".to_string());
-        }
+    match key
+        .get_bytes(key_label)
+        .map_err(|_| "invalid secret key".to_string())?
+    {
+        Some(value) => Ok(value.to_vec()),
+        None => Err("missing secret key".to_string()),
     }
-    Err("missing secret key".to_string())
 }
 
 pub fn get_cose_key_public(key: CoseKey) -> Result<Vec<u8>, String> {
-    let key_label = match key.kty {
-        RegisteredLabel::Assigned(iana::KeyType::OKP) => {
-            Label::Int(iana::OkpKeyParameter::X as i64)
-        }
-        RegisteredLabel::Assigned(iana::KeyType::EC2) => {
-            Label::Int(iana::Ec2KeyParameter::X as i64)
-        }
+    let key_label = match key.kty().map_err(format_error)? {
+        Some(Label::Int(iana::KeyTypeOKP)) => iana::OKPKeyParameterX,
+        Some(Label::Int(iana::KeyTypeEC2)) => iana::EC2KeyParameterX,
         _ => {
             return Err("unsupported key type".to_string());
         }
     };
 
-    for (label, value) in key.params {
-        if label == key_label {
-            return value
-                .into_bytes()
-                .map_err(|_| "invalid public key".to_string());
-        }
+    match key
+        .get_bytes(key_label)
+        .map_err(|_| "invalid public key".to_string())?
+    {
+        Some(value) => Ok(value.to_vec()),
+        None => Err("missing public key".to_string()),
     }
-    Err("missing public key".to_string())
 }
 
 #[cfg(test)]
 mod test {
-    use coset::{cbor::value::Value, Algorithm, CoseKeyBuilder};
-
     use super::*;
+
+    fn symmetric_key(secret: Vec<u8>) -> CoseKey {
+        let mut key = CoseKey::new();
+        key.set_kty(iana::KeyTypeSymmetric);
+        key.insert(iana::SymmetricKeyParameterK, secret);
+        key
+    }
+
+    fn okp_key() -> CoseKey {
+        let mut key = CoseKey::new();
+        key.set_kty(iana::KeyTypeOKP);
+        key
+    }
+
+    fn ec2_key(x: Vec<u8>, y: Vec<u8>, d: Option<Vec<u8>>) -> CoseKey {
+        let mut key = CoseKey::new();
+        key.set_kty(iana::KeyTypeEC2);
+        key.insert(iana::EC2KeyParameterCrv, iana::EllipticCurveP_256);
+        key.insert(iana::EC2KeyParameterX, x);
+        key.insert(iana::EC2KeyParameterY, y);
+        if let Some(d) = d {
+            key.insert(iana::EC2KeyParameterD, d);
+        }
+        key
+    }
 
     #[test]
     fn hash_functions_work() {
@@ -172,55 +214,42 @@ mod test {
         let key_id = b"kid-1".to_vec();
         let key = cose_aes256_key(secret, key_id.clone());
 
-        assert_eq!(key.kty, RegisteredLabel::Assigned(iana::KeyType::Symmetric));
-        assert_eq!(key.key_id, key_id);
-        assert_eq!(key.alg, Some(Algorithm::Assigned(iana::Algorithm::A256GCM)));
+        assert_eq!(key.kty().unwrap(), Some(Label::Int(iana::KeyTypeSymmetric)));
+        assert_eq!(key.kid().unwrap(), Some(key_id.as_slice()));
+        assert_eq!(key.alg().unwrap(), Some(Label::Int(iana::AlgorithmA256GCM)));
     }
 
     #[test]
     fn get_cose_key_secret_works() {
         let secret = vec![1u8; 32];
-        let key = CoseKeyBuilder::new_symmetric_key(secret.clone()).build();
+        let key = symmetric_key(secret.clone());
         assert_eq!(get_cose_key_secret(key).unwrap(), secret);
 
-        let mut okp = CoseKeyBuilder::new_okp_key().build();
-        okp.params.push((
-            Label::Int(iana::OkpKeyParameter::D as i64),
-            Value::Bytes(vec![9, 8, 7]),
-        ));
+        let mut okp = okp_key();
+        okp.insert(iana::OKPKeyParameterD, Value::Bytes(vec![9, 8, 7]));
         assert_eq!(get_cose_key_secret(okp).unwrap(), vec![9, 8, 7]);
 
-        let ec2 = CoseKeyBuilder::new_ec2_priv_key(
-            iana::EllipticCurve::P_256,
-            vec![2u8; 32],
-            vec![3u8; 32],
-            vec![4u8; 32],
-        )
-        .build();
+        let ec2 = ec2_key(vec![2u8; 32], vec![3u8; 32], Some(vec![4u8; 32]));
         assert_eq!(get_cose_key_secret(ec2).unwrap(), vec![4u8; 32]);
     }
 
     #[test]
     fn get_cose_key_secret_errors() {
-        let unsupported = CoseKeyBuilder::new_okp_key()
-            .key_type(iana::KeyType::AKP)
-            .build();
+        let mut unsupported = CoseKey::new();
+        unsupported.set_kty(iana::KeyTypeRSA);
         assert_eq!(
             get_cose_key_secret(unsupported).unwrap_err(),
             "unsupported key type"
         );
 
-        let missing = CoseKeyBuilder::new_okp_key().build();
+        let missing = okp_key();
         assert_eq!(
             get_cose_key_secret(missing).unwrap_err(),
             "missing secret key"
         );
 
-        let mut invalid = CoseKeyBuilder::new_okp_key().build();
-        invalid.params.push((
-            Label::Int(iana::OkpKeyParameter::D as i64),
-            Value::Bool(true),
-        ));
+        let mut invalid = okp_key();
+        invalid.insert(iana::OKPKeyParameterD, Value::Bool(true));
         assert_eq!(
             get_cose_key_secret(invalid).unwrap_err(),
             "invalid secret key"
@@ -229,41 +258,30 @@ mod test {
 
     #[test]
     fn get_cose_key_public_works() {
-        let mut okp = CoseKeyBuilder::new_okp_key().build();
-        okp.params.push((
-            Label::Int(iana::OkpKeyParameter::X as i64),
-            Value::Bytes(vec![1, 2, 3]),
-        ));
+        let mut okp = okp_key();
+        okp.insert(iana::OKPKeyParameterX, Value::Bytes(vec![1, 2, 3]));
         assert_eq!(get_cose_key_public(okp).unwrap(), vec![1, 2, 3]);
 
-        let ec2 = CoseKeyBuilder::new_ec2_pub_key(
-            iana::EllipticCurve::P_256,
-            vec![2u8; 32],
-            vec![3u8; 32],
-        )
-        .build();
+        let ec2 = ec2_key(vec![2u8; 32], vec![3u8; 32], None);
         assert_eq!(get_cose_key_public(ec2).unwrap(), vec![2u8; 32]);
     }
 
     #[test]
     fn get_cose_key_public_errors() {
-        let unsupported = CoseKeyBuilder::new_symmetric_key(vec![1, 2, 3]).build();
+        let unsupported = symmetric_key(vec![1, 2, 3]);
         assert_eq!(
             get_cose_key_public(unsupported).unwrap_err(),
             "unsupported key type"
         );
 
-        let missing = CoseKeyBuilder::new_okp_key().build();
+        let missing = okp_key();
         assert_eq!(
             get_cose_key_public(missing).unwrap_err(),
             "missing public key"
         );
 
-        let mut invalid = CoseKeyBuilder::new_okp_key().build();
-        invalid.params.push((
-            Label::Int(iana::OkpKeyParameter::X as i64),
-            Value::Bool(false),
-        ));
+        let mut invalid = okp_key();
+        invalid.insert(iana::OKPKeyParameterX, Value::Bool(false));
         assert_eq!(
             get_cose_key_public(invalid).unwrap_err(),
             "invalid public key"

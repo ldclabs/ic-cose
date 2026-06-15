@@ -1,7 +1,6 @@
 use ic_cose_types::{
     cose::{
         cose_aes256_key, ecdh::try_ecdh_x25519, encrypt0::cose_encrypt0, format_error, mac3_256,
-        CborSerializable,
     },
     types::{
         ECDHInput, ECDHOutput, PublicKeyInput, PublicKeyOutput, SchnorrAlgorithm, SettingPath,

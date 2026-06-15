@@ -1,4 +1,4 @@
-use coset::{iana, CborSerializable, CoseKdfContextBuilder, HeaderBuilder, SuppPubInfoBuilder};
+use cose2::{iana, Header, KdfContext, SuppPubInfo};
 use hkdf::Hkdf;
 use sha2::Sha256;
 
@@ -51,19 +51,17 @@ pub fn hkdf256<const N: usize>(secret: &[u8], salt: Option<&[u8]>, info: &[u8]) 
 /// # Returns
 /// 32-byte derived key suitable for AES-256-GCM
 pub fn try_derive_a256gcm_key(secret: &[u8], salt: Option<&[u8]>) -> Result<[u8; 32], String> {
-    let ctx = CoseKdfContextBuilder::new()
-        .algorithm(iana::Algorithm::A256GCM)
-        .supp_pub_info(
-            SuppPubInfoBuilder::new()
-                .key_data_length(256)
-                .protected(
-                    HeaderBuilder::new()
-                        .algorithm(iana::Algorithm::Direct_HKDF_SHA_256)
-                        .build(),
-                )
-                .build(),
-        )
-        .build();
+    let mut protected = Header::new();
+    protected.set_alg(iana::AlgorithmDirect_HKDF_SHA_256);
+    let ctx = KdfContext {
+        algorithm_id: iana::AlgorithmA256GCM,
+        supp_pub_info: SuppPubInfo {
+            key_data_length: 256,
+            protected,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
     let info = ctx.to_vec().map_err(format_error)?;
     try_hkdf256(secret, salt, &info)
 }
@@ -92,19 +90,17 @@ mod test {
     #[test]
     fn hkdf256_work() {
         // https://github.com/cose-wg/Examples/blob/master/ecdh-direct-examples/p256-hkdf-256-01.json
-        let ctx = CoseKdfContextBuilder::new()
-            .algorithm(iana::Algorithm::A128GCM)
-            .supp_pub_info(
-                SuppPubInfoBuilder::new()
-                    .key_data_length(128)
-                    .protected(
-                        HeaderBuilder::new()
-                            .algorithm(iana::Algorithm::ECDH_ES_HKDF_256)
-                            .build(),
-                    )
-                    .build(),
-            )
-            .build();
+        let mut protected = Header::new();
+        protected.set_alg(iana::AlgorithmECDH_ES_HKDF_256);
+        let ctx = KdfContext {
+            algorithm_id: iana::AlgorithmA128GCM,
+            supp_pub_info: SuppPubInfo {
+                key_data_length: 128,
+                protected,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         let info = ctx.to_vec().expect("failed to serialize context");
         let secret =
             hex::decode("4B31712E096E5F20B4ECF9790FD8CC7C8B7E2C8AD90BDA81CB224F62C0E7B9A6")

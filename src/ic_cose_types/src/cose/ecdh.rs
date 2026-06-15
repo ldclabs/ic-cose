@@ -56,7 +56,7 @@ mod test {
     use hex::{decode, encode};
 
     use super::*;
-    use crate::cose::{encrypt0::cose_decrypt0, get_cose_key_secret, CborSerializable, CoseKey};
+    use crate::cose::{encrypt0::cose_decrypt0, get_cose_key_secret, CoseKey};
 
     #[test]
     fn try_ecdh_x25519_rejects_low_order_public_keys() {

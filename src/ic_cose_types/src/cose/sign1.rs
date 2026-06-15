@@ -1,10 +1,10 @@
-use coset::{iana, Algorithm, CborSerializable, CoseSign1, CoseSign1Builder, HeaderBuilder};
+use cose2::{iana, Label, Sign1Message as CoseSign1};
 
-use super::{ed25519, k256};
+use super::{ed25519, k256, sha256};
 
-pub use iana::Algorithm::{EdDSA, ES256K};
-const ALG_ED25519: Algorithm = Algorithm::Assigned(EdDSA);
-const ALG_SECP256K1: Algorithm = Algorithm::Assigned(ES256K);
+#[allow(non_upper_case_globals)]
+pub const EdDSA: i64 = iana::AlgorithmEdDSA;
+pub const ES256K: i64 = iana::AlgorithmES256K;
 
 /// Creates a COSE_Sign1 structure with the given payload and algorithm.
 ///
@@ -17,18 +17,15 @@ const ALG_SECP256K1: Algorithm = Algorithm::Assigned(ES256K);
 /// A CoseSign1 structure ready for signing
 pub fn cose_sign1(
     payload: Vec<u8>,
-    alg: iana::Algorithm,
+    alg: i64,
     key_id: Option<Vec<u8>>,
 ) -> Result<CoseSign1, String> {
-    let mut protected = HeaderBuilder::new().algorithm(alg);
+    let mut msg = CoseSign1::new(Some(payload));
+    msg.protected.set_alg(alg);
     if let Some(key_id) = key_id {
-        protected = protected.key_id(key_id);
+        msg.protected.set_kid(key_id);
     }
-
-    Ok(CoseSign1Builder::new()
-        .protected(protected.build())
-        .payload(payload)
-        .build())
+    Ok(msg)
 }
 
 /// Verifies and parses a COSE_Sign1 structure from bytes.
@@ -50,17 +47,24 @@ pub fn cose_sign1_from(
 ) -> Result<CoseSign1, String> {
     let cs1 = CoseSign1::from_slice(sign1_bytes)
         .map_err(|err| format!("invalid COSE sign1 token: {}", err))?;
+    let payload = cs1
+        .payload
+        .as_deref()
+        .ok_or_else(|| "missing COSE sign1 payload".to_string())?;
+    let tbs_data = CoseSign1::to_be_signed(cs1.protected_raw(), aad, payload)
+        .map_err(|err| format!("invalid COSE sign1 token: {}", err))?;
 
-    match &cs1.protected.header.alg {
-        Some(ALG_SECP256K1) if !secp256k1_pub_keys.is_empty() => {
-            k256::secp256k1_verify_ecdsa_any(
-                secp256k1_pub_keys,
-                &cs1.tbs_data(aad),
-                &cs1.signature,
-            )?;
+    match cs1
+        .protected
+        .alg()
+        .map_err(|err| format!("invalid COSE sign1 token: {}", err))?
+    {
+        Some(Label::Int(ES256K)) if !secp256k1_pub_keys.is_empty() => {
+            let tbs_hash = sha256(&tbs_data);
+            k256::secp256k1_verify_ecdsa_any(secp256k1_pub_keys, &tbs_hash, cs1.signature())?;
         }
-        Some(ALG_ED25519) if !ed25519_pub_keys.is_empty() => {
-            ed25519::ed25519_verify_any(ed25519_pub_keys, &cs1.tbs_data(aad), &cs1.signature)?;
+        Some(Label::Int(alg)) if alg == EdDSA && !ed25519_pub_keys.is_empty() => {
+            ed25519::ed25519_verify_any(ed25519_pub_keys, &tbs_data, cs1.signature())?;
         }
         alg => {
             Err(format!("unsupported algorithm: {:?}", alg))?;
@@ -79,14 +83,14 @@ mod test {
     fn cose_sign1_builds_and_rejects_invalid_or_unsupported_inputs() {
         let sign1 = cose_sign1(b"payload".to_vec(), EdDSA, Some(b"kid".to_vec())).unwrap();
         assert_eq!(sign1.payload, Some(b"payload".to_vec()));
-        assert_eq!(sign1.protected.header.key_id, b"kid".to_vec());
+        assert_eq!(sign1.protected.kid().unwrap(), Some(&b"kid"[..]));
 
         assert!(cose_sign1_from(b"not cbor", &[], &[], &[])
             .unwrap_err()
             .starts_with("invalid COSE sign1 token:"));
 
         let mut unsupported = cose_sign1(b"payload".to_vec(), EdDSA, None).unwrap();
-        unsupported.signature = vec![0; 64];
+        unsupported.set_signature(vec![0; 64]).unwrap();
         let encoded = unsupported.to_vec().unwrap();
         assert!(cose_sign1_from(&encoded, &[], &[], &[])
             .unwrap_err()
@@ -95,7 +99,7 @@ mod test {
         let signing_key = k256::ecdsa::SigningKey::from_bytes((&[7u8; 32]).into()).unwrap();
         let verifying_key = *signing_key.verifying_key();
         let mut ecdsa = cose_sign1(b"payload".to_vec(), ES256K, None).unwrap();
-        ecdsa.signature = vec![0; 64];
+        ecdsa.set_signature(vec![0; 64]).unwrap();
         let encoded = ecdsa.to_vec().unwrap();
         assert!(cose_sign1_from(&encoded, &[], &[verifying_key], &[]).is_err());
     }

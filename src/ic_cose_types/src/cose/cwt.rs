@@ -1,10 +1,9 @@
-use coset::{iana, CborSerializable};
-use num_traits::ToPrimitive;
+use cose2::{cwt::Claims, iana, CoseMap, Label};
 
-pub use coset::cwt::*;
+pub type ClaimsSet = Claims;
 
 const CLOCK_SKEW: i64 = 5 * 60; // 5 minutes
-pub static SCOPE_NAME: ClaimName = ClaimName::Assigned(iana::CwtClaimName::Scope);
+pub const SCOPE_NAME: Label = Label::Int(iana::CWTClaimScope);
 
 /// Parses and validates a CWT (CBOR Web Token) from raw bytes.
 ///
@@ -21,13 +20,13 @@ pub static SCOPE_NAME: ClaimName = ClaimName::Assigned(iana::CwtClaimName::Scope
 /// * Checks not-before time (nbf) with 5-minute clock skew
 pub fn cwt_from(data: &[u8], now_sec: i64) -> Result<ClaimsSet, String> {
     let claims = ClaimsSet::from_slice(data).map_err(|err| format!("invalid claims: {}", err))?;
-    if let Some(ref exp) = claims.expiration_time {
-        if timestamp_secs(exp)? < now_sec - CLOCK_SKEW {
+    if let Some(exp) = claims.expiration {
+        if timestamp_secs(exp) < now_sec - CLOCK_SKEW {
             return Err("token expired".to_string());
         }
     }
-    if let Some(ref nbf) = claims.not_before {
-        if timestamp_secs(nbf)? > now_sec + CLOCK_SKEW {
+    if let Some(nbf) = claims.not_before {
+        if timestamp_secs(nbf) > now_sec + CLOCK_SKEW {
             return Err("token not yet valid".to_string());
         }
     }
@@ -35,15 +34,8 @@ pub fn cwt_from(data: &[u8], now_sec: i64) -> Result<ClaimsSet, String> {
     Ok(claims)
 }
 
-/// Converts a CWT timestamp to whole seconds, rejecting values (NaN, infinity,
-/// out of i64 range) that cannot be compared against the current time.
-fn timestamp_secs(ts: &Timestamp) -> Result<i64, String> {
-    match ts {
-        Timestamp::WholeSeconds(v) => Ok(*v),
-        Timestamp::FractionalSeconds(v) => v
-            .to_i64()
-            .ok_or_else(|| "invalid timestamp value".to_string()),
-    }
+fn timestamp_secs(ts: u64) -> i64 {
+    i64::try_from(ts).unwrap_or(i64::MAX)
 }
 
 /// Extracts scope claim from CWT claims set.
@@ -56,18 +48,21 @@ fn timestamp_secs(ts: &Timestamp) -> Result<i64, String> {
 /// * `Err(String)` if scope is missing or invalid
 pub fn get_scope(claims: &ClaimsSet) -> Result<String, String> {
     let scope = claims
-        .rest
-        .iter()
-        .find(|(key, _)| key == &SCOPE_NAME)
+        .extra
+        .get_text(SCOPE_NAME.clone())
+        .map_err(|_| "invalid scope text".to_string())?
         .ok_or("missing scope")?;
-    let scope = scope.1.as_text().ok_or("invalid scope text")?;
     Ok(scope.to_string())
+}
+
+pub fn scope_claim(scope: String) -> CoseMap {
+    CoseMap::from_iter([(SCOPE_NAME.clone(), scope.into())])
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use coset::cbor::value::Value;
+    use cose2::Value;
     use hex::decode;
 
     #[test]
@@ -89,7 +84,7 @@ mod test {
     #[test]
     fn cwt_rejects_invalid_time_windows_and_scope() {
         let expired = ClaimsSet {
-            expiration_time: Some(Timestamp::WholeSeconds(1_000)),
+            expiration: Some(1_000),
             ..Default::default()
         }
         .to_vec()
@@ -97,7 +92,7 @@ mod test {
         assert_eq!(cwt_from(&expired, 2_000).unwrap_err(), "token expired");
 
         let not_yet_valid = ClaimsSet {
-            not_before: Some(Timestamp::FractionalSeconds(2_000.0)),
+            not_before: Some(2_000),
             ..Default::default()
         }
         .to_vec()
@@ -107,42 +102,20 @@ mod test {
             "token not yet valid"
         );
 
-        let valid_fractional_exp = ClaimsSet {
-            expiration_time: Some(Timestamp::FractionalSeconds(2_000.0)),
-            not_before: Some(Timestamp::WholeSeconds(1_000)),
+        let valid_exp = ClaimsSet {
+            expiration: Some(2_000),
+            not_before: Some(1_000),
             ..Default::default()
         }
         .to_vec()
         .unwrap();
-        assert!(cwt_from(&valid_fractional_exp, 1_500).is_ok());
+        assert!(cwt_from(&valid_exp, 1_500).is_ok());
 
         let no_time_claims = ClaimsSet::default().to_vec().unwrap();
         assert!(cwt_from(&no_time_claims, 1_500).is_ok());
 
-        let nan_nbf = ClaimsSet {
-            not_before: Some(Timestamp::FractionalSeconds(f64::NAN)),
-            ..Default::default()
-        }
-        .to_vec()
-        .unwrap();
-        assert_eq!(
-            cwt_from(&nan_nbf, 1_000).unwrap_err(),
-            "invalid timestamp value"
-        );
-
-        let inf_exp = ClaimsSet {
-            expiration_time: Some(Timestamp::FractionalSeconds(f64::INFINITY)),
-            ..Default::default()
-        }
-        .to_vec()
-        .unwrap();
-        assert_eq!(
-            cwt_from(&inf_exp, 1_000).unwrap_err(),
-            "invalid timestamp value"
-        );
-
         let scoped = ClaimsSet {
-            rest: vec![(SCOPE_NAME.clone(), Value::Integer(1.into()))],
+            extra: CoseMap::from_iter([(SCOPE_NAME.clone(), Value::from(1))]),
             ..Default::default()
         };
         assert_eq!(

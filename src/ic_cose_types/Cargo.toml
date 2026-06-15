@@ -3,7 +3,7 @@ name = "ic_cose_types"
 description = "A Rust types library used for integrating with IC-COSE."
 publish = true
 repository = "https://github.com/ldclabs/ic-cose/tree/main/src/ic_cose_types"
-version = "0.10.0"
+version = "0.10.1"
 edition.workspace = true
 keywords.workspace = true
 categories.workspace = true
@@ -24,7 +24,7 @@ hmac = { workspace = true }
 hkdf = { workspace = true }
 sha2 = { workspace = true }
 sha3 = { workspace = true }
-coset = { workspace = true }
+cose2 = { workspace = true }
 aes-gcm = { workspace = true }
 
 [dev-dependencies]

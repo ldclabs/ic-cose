@@ -28,5 +28,4 @@ ic-transport-types = "0.47"
 cbor2 = { workspace = true }
 bytes = "1"
 http = "1"
-coset = { workspace = true }
 ic-cdk-management-canister = { workspace = true }
