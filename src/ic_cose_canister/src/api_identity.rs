@@ -129,6 +129,7 @@ fn get_delegation(
             pubkey: pubkey.into(),
             expiration,
             targets: None,
+            permissions: None,
         },
         signature: signature.into(),
     })

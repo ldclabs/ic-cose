@@ -872,6 +872,7 @@ mod tests {
                 pubkey: ByteBufB64::from(vec![1]),
                 expiration: 123,
                 targets: Some(vec![Principal::management_canister()]),
+                permissions: None,
             },
             signature: ByteBufB64::from(vec![2]),
         }
