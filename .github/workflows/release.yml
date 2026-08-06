@@ -34,7 +34,19 @@ jobs:
           WASM="out/$CAN.wasm"
           ic-wasm $WASM -o $WASM metadata candid:service -f "out/$CAN.did" -v public
           ic-wasm $WASM -o $WASM shrink
-          "$WASM_OPT" -O3 --inline-functions-with-loops "$WASM" -o "$WASM.optimized"
+          "$WASM_OPT" \
+            -O3 \
+            --enable-mutable-globals \
+            --enable-nontrapping-float-to-int \
+            --enable-simd \
+            --enable-bulk-memory \
+            --enable-sign-ext \
+            --enable-reference-types \
+            --enable-memory64 \
+            --enable-multivalue \
+            --enable-tail-call \
+            --inline-functions-with-loops \
+            "$WASM" -o "$WASM.optimized"
           mv "$WASM.optimized" "$WASM"
           gzip $WASM
           SHA256="$(sha256sum < "out/$CAN.wasm.gz" | sed 's/ .*$//g')"
