@@ -1,4 +1,4 @@
-use cose2::{iana, Header, KdfContext, SuppPubInfo};
+use cose2::{iana, Header, KdfContext, PartyInfo, SuppPubInfo};
 use hkdf::Hkdf;
 use sha2::Sha256;
 
@@ -54,13 +54,15 @@ pub fn try_derive_a256gcm_key(secret: &[u8], salt: Option<&[u8]>) -> Result<[u8;
     let mut protected = Header::new();
     protected.set_alg(iana::AlgorithmDirect_HKDF_SHA_256);
     let ctx = KdfContext {
-        algorithm_id: iana::AlgorithmA256GCM,
+        algorithm_id: iana::AlgorithmA256GCM.into(),
+        party_u_info: PartyInfo::default(),
+        party_v_info: PartyInfo::default(),
         supp_pub_info: SuppPubInfo {
             key_data_length: 256,
             protected,
             ..Default::default()
         },
-        ..Default::default()
+        supp_priv_info: None,
     };
     let info = ctx.to_vec().map_err(format_error)?;
     try_hkdf256(secret, salt, &info)
@@ -93,13 +95,15 @@ mod test {
         let mut protected = Header::new();
         protected.set_alg(iana::AlgorithmECDH_ES_HKDF_256);
         let ctx = KdfContext {
-            algorithm_id: iana::AlgorithmA128GCM,
+            algorithm_id: iana::AlgorithmA128GCM.into(),
+            party_u_info: PartyInfo::default(),
+            party_v_info: PartyInfo::default(),
             supp_pub_info: SuppPubInfo {
                 key_data_length: 128,
                 protected,
                 ..Default::default()
             },
-            ..Default::default()
+            supp_priv_info: None,
         };
         let info = ctx.to_vec().expect("failed to serialize context");
         let secret =

@@ -1,4 +1,7 @@
-use aes_gcm::{aead::KeyInit, AeadCore, AeadInPlace, Aes256Gcm, Key, Nonce, Tag};
+use aes_gcm::{
+    aead::{AeadInOut, KeyInit},
+    AeadCore, Aes256Gcm, Key, Nonce, Tag,
+};
 
 use super::format_error;
 
@@ -71,7 +74,7 @@ pub fn aes256_gcm_encrypt_in(
     data: &mut [u8],
 ) -> Result<[u8; 16], String> {
     let tag = cipher
-        .encrypt_in_place_detached(<&Aes256GcmNonce>::from(nonce), aad, data)
+        .encrypt_inout_detached(<&Aes256GcmNonce>::from(nonce), aad, data.into())
         .map_err(format_error)?;
     Ok(tag.into())
 }
@@ -98,7 +101,12 @@ pub fn aes256_gcm_decrypt_in(
         .try_into()
         .map_err(|_| format!("invalid tag length, expected 16, got {}", tag.len()))?;
     cipher
-        .decrypt_in_place_detached(<&Aes256GcmNonce>::from(nonce), aad, data, <&Tag>::from(tag))
+        .decrypt_inout_detached(
+            <&Aes256GcmNonce>::from(nonce),
+            aad,
+            data.into(),
+            <&Tag>::from(tag),
+        )
         .map_err(format_error)
 }
 

@@ -89,7 +89,8 @@ pub fn secp256k1_verify_bip340(
             signature.len()
         ));
     }
-    let key = schnorr::VerifyingKey::from_bytes(key_bytes).map_err(format_error)?;
+    let key_bytes = k256::FieldBytes::try_from(key_bytes).map_err(format_error)?;
+    let key = schnorr::VerifyingKey::from_bytes(&key_bytes).map_err(format_error)?;
     let sig = schnorr::Signature::try_from(signature).map_err(format_error)?;
     match key.verify_raw(message, &sig).is_ok() {
         true => Ok(()),
@@ -190,7 +191,7 @@ mod test {
         let message = [9u8; 32];
         let signature: ecdsa::Signature = signing_key.sign_prehash(&message).unwrap();
         let signature = signature.to_bytes();
-        let public_key = verifying_key.to_encoded_point(true);
+        let public_key = verifying_key.to_sec1_point(true);
 
         assert!(secp256k1_verify_ecdsa(public_key.as_bytes(), &message, &signature).is_ok());
         assert!(secp256k1_verify_ecdsa_any(&[verifying_key], &message, &signature).is_ok());
@@ -222,7 +223,8 @@ mod test {
         let message =
             decode("6233976850d2fc6ab653306b332dde4389a4e87b79d521a331683cf90102c478").unwrap();
         let signature = decode("a45e4cb08af0dd0eecc1afe26d6d65fc86de0fac1a5e81fb9e85f776afafb3165278ca25ddc3f53114bae8e42938cedbc3bdcbd423ce5cb8104a8c0c46b4c17b").unwrap();
-        let verifying_key = schnorr::VerifyingKey::from_bytes(&pk[1..]).unwrap();
+        let key_bytes = k256::FieldBytes::try_from(&pk[1..]).unwrap();
+        let verifying_key = schnorr::VerifyingKey::from_bytes(&key_bytes).unwrap();
 
         assert!(secp256k1_verify_bip340(&pk[1..], &message, &signature).is_ok());
         assert!(secp256k1_verify_bip340_any(&[verifying_key], &message, &signature).is_ok());
