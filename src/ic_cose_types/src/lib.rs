@@ -32,6 +32,34 @@ pub fn try_to_cbor_bytes(obj: &impl Serialize) -> Result<Vec<u8>, String> {
     cbor2::to_vec(obj).map_err(|err| format!("failed to encode in CBOR format: {err:?}"))
 }
 
+/// Converts a serializable object to deterministic CBOR-encoded bytes.
+///
+/// Unlike [`try_to_cbor_bytes`], this applies RFC 8949 §4.2.1 deterministic
+/// encoding (shortest-form integers and sorted map keys) rather than the field
+/// declaration order of the Rust type, so an independent implementation in
+/// another language can reproduce the exact same bytes.
+pub fn try_to_canonical_cbor_bytes(obj: &impl Serialize) -> Result<Vec<u8>, String> {
+    let mut buf = Vec::new();
+    cbor2::to_canonical_writer(obj, &mut buf)
+        .map_err(|err| format!("failed to encode in canonical CBOR format: {err:?}"))?;
+    Ok(buf)
+}
+
+/// Computes a domain-separated hash of a serializable value.
+///
+/// The digest is `SHA-256(canonical_cbor([domain, value]))`, where the two-element
+/// array is encoded with RFC 8949 §4.2.1 deterministic encoding. Encoding the
+/// domain as the first array element rather than as a raw prefix keeps the
+/// pre-image unambiguous, and the deterministic encoding lets callers written in
+/// other languages reproduce the digest byte for byte.
+///
+/// Changing the set of hashed fields, or the way they are normalized, requires a
+/// new `domain` rather than a silent change of meaning.
+pub fn canonical_hash(domain: &str, value: &impl Serialize) -> Result<[u8; 32], String> {
+    let buf = try_to_canonical_cbor_bytes(&(domain, value))?;
+    Ok(cose::sha256(&buf))
+}
+
 /// Validates a string against naming conventions
 ///
 /// # Rules
@@ -150,6 +178,40 @@ mod test {
         );
         assert_eq!(validate_str("ABC").unwrap_err(), "invalid character: A");
         assert_eq!(validate_str("abc-123").unwrap_err(), "invalid character: -");
+    }
+
+    #[test]
+    fn canonical_hash_is_deterministic_and_domain_separated() {
+        #[derive(serde::Serialize)]
+        struct V {
+            b: u64,
+            a: String,
+        }
+        let v = V {
+            b: 1,
+            a: "x".to_string(),
+        };
+        let h = canonical_hash("d1", &v).unwrap();
+        assert_eq!(h, canonical_hash("d1", &v).unwrap());
+        // a different domain must not collide with the same value
+        assert_ne!(h, canonical_hash("d2", &v).unwrap());
+        // a different value must not collide within the same domain
+        assert_ne!(
+            h,
+            canonical_hash(
+                "d1",
+                &V {
+                    b: 2,
+                    a: "x".to_string()
+                }
+            )
+            .unwrap()
+        );
+
+        // canonical encoding sorts map keys rather than following declaration order
+        let canonical = try_to_canonical_cbor_bytes(&v).unwrap();
+        assert_ne!(canonical, try_to_cbor_bytes(&v).unwrap());
+        assert_eq!(canonical, try_to_canonical_cbor_bytes(&v).unwrap());
     }
 
     #[test]

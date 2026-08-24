@@ -2,7 +2,7 @@ use candid::{Nat, Principal};
 use ic_cdk_management_canister as mgt;
 use ic_cose_types::{
     format_error,
-    types::wasm::{DeploymentInfo, StateInfo, WasmInfo},
+    types::wasm::{DeploymentInfo, PoolCanisterInfo, ProvisionTemplateInfo, StateInfo, WasmInfo},
 };
 use num_traits::ToPrimitive;
 use serde_bytes::ByteArray;
@@ -24,6 +24,7 @@ fn get_wasm(hash: ByteArray<32>) -> Result<WasmInfo, String> {
             description: w.description,
             wasm: w.wasm,
             hash,
+            encoding: w.encoding,
         })
         .ok_or_else(|| "NotFound: wasm not found".to_string())
 }
@@ -74,4 +75,25 @@ fn deployment_logs(
 
 fn nat_to_u64(nat: &Nat) -> u64 {
     nat.0.to_u64().unwrap_or(0)
+}
+
+/// The approved template a provisioner must name by id and hash.
+#[ic_cdk::query]
+fn get_provision_template(id: String) -> Result<ProvisionTemplateInfo, String> {
+    store::provision::get_template(&id)
+        .ok_or_else(|| format!("NotFound: provision template {} not found", id))
+}
+
+#[ic_cdk::query]
+fn list_provision_templates() -> Result<Vec<ProvisionTemplateInfo>, String> {
+    Ok(store::provision::list_templates())
+}
+
+/// Recorded pool inventory of a template.
+///
+/// Governance watches this against the reservation churn: a pool that keeps
+/// draining is the signal to rate-limit callers, not to raise the pool size.
+#[ic_cdk::query(guard = "is_controller_or_manager")]
+fn list_provision_pool(template_id: String) -> Result<Vec<PoolCanisterInfo>, String> {
+    Ok(store::provision::list_pool(&template_id))
 }

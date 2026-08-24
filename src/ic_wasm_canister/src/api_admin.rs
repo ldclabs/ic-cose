@@ -1,15 +1,18 @@
-use candid::{pretty::candid::value::pp_value, CandidType, IDLArgs, IDLValue, Principal};
+use candid::{pretty::candid::value::pp_value, CandidType, IDLArgs, IDLValue, Nat, Principal};
 use ic_cdk_management_canister as mgt;
 use ic_cose_types::{
     format_error,
-    types::wasm::{AddWasmInput, DeployWasmInput},
+    types::wasm::{
+        AddWasmInput, CommitWasmChunksInput, DeployWasmInput, ProvisionSettings, ProvisionTemplate,
+        ProvisionTemplateInfo,
+    },
 };
 use serde_bytes::{ByteArray, ByteBuf};
 use std::collections::BTreeSet;
 
 use crate::{
-    create_canister_on, is_controller, is_controller_or_manager,
-    is_controller_or_manager_or_committer, store, validate_principals, MILLISECONDS,
+    create_canister_on, create_pool_canister, is_controller, is_controller_or_manager,
+    is_controller_or_manager_or_committer, store, validate_principals, CreateOutcome, MILLISECONDS,
 };
 
 // encoded candid arguments: ()
@@ -513,4 +516,188 @@ where
     let doc = pp_value(7, &val);
 
     Ok(format!("{}", doc.pretty(120)))
+}
+
+// ----- provisioning: governance-approved templates, roles and pool -----
+
+/// Grants the least-privilege provisioning role.
+///
+/// A provisioner may only reserve, install and release canisters from approved
+/// templates; it cannot manage roles, publish modules or deploy an arbitrary
+/// wasm, so this can be granted to another canister without handing over the
+/// repository.
+#[ic_cdk::update(guard = "is_controller")]
+fn admin_add_provisioners(args: BTreeSet<Principal>) -> Result<(), String> {
+    validate_principals(&args)?;
+    store::state::with_mut(|r| {
+        r.provisioners.extend(args);
+        Ok(())
+    })
+}
+
+#[ic_cdk::update(guard = "is_controller")]
+fn admin_remove_provisioners(args: BTreeSet<Principal>) -> Result<(), String> {
+    validate_principals(&args)?;
+    store::state::with_mut(|r| {
+        r.provisioners.retain(|p| !args.contains(p));
+        Ok(())
+    })
+}
+
+#[ic_cdk::update]
+fn validate_admin_add_provisioners(args: BTreeSet<Principal>) -> Result<String, String> {
+    validate_principals(&args)?;
+    pretty_format(&args)
+}
+
+#[ic_cdk::update]
+fn validate_admin_remove_provisioners(args: BTreeSet<Principal>) -> Result<String, String> {
+    validate_principals(&args)?;
+    pretty_format(&args)
+}
+
+/// Approves an immutable provisioning template.
+///
+/// This is the governance act that fixes which module, settings, controllers,
+/// subnet and cycles a provisioned canister gets: a provisioner can afterwards
+/// only name the template by id and hash.
+#[ic_cdk::update(guard = "is_controller")]
+fn admin_add_provision_template(args: ProvisionTemplate) -> Result<ProvisionTemplateInfo, String> {
+    let now_ms = ic_cdk::api::time() / MILLISECONDS;
+    store::provision::add_template(ic_cdk::api::msg_caller(), now_ms, args)
+}
+
+#[ic_cdk::update(guard = "is_controller")]
+fn admin_remove_provision_template(id: String) -> Result<(), String> {
+    store::provision::remove_template(&id)
+}
+
+#[ic_cdk::update]
+fn validate_admin_add_provision_template(args: ProvisionTemplate) -> Result<String, String> {
+    args.validate()?;
+    pretty_format(&args)
+}
+
+#[ic_cdk::update]
+fn validate_admin_remove_provision_template(id: String) -> Result<String, String> {
+    store::provision::get_template(&id)
+        .ok_or_else(|| format!("NotFound: provision template {} not found", id))?;
+    pretty_format(&id)
+}
+
+/// Creates one more canister for a template's pool.
+///
+/// Deliberately separate from any paid flow: creation is the one step whose
+/// response loss cannot be recovered, so it may only ever waste an unpaid pool
+/// canister. An unknown outcome circuit-breaks further refills.
+#[ic_cdk::update(guard = "is_controller_or_manager")]
+async fn admin_refill_pool(template_id: String) -> Result<Principal, String> {
+    let template = store::provision::begin_pool_create(&template_id)?;
+    let settings = to_canister_settings(&template.settings);
+
+    match create_pool_canister(template.subnet, settings, template.initial_cycles).await {
+        CreateOutcome::Created(canister) => {
+            let now_ms = ic_cdk::api::time() / MILLISECONDS;
+            store::provision::finish_pool_create(&template_id, canister, now_ms)?;
+            Ok(canister)
+        }
+        CreateOutcome::Refunded(err) => {
+            store::provision::fail_pool_create(&template_id, false);
+            Err(format!("pool create created no canister: {}", err))
+        }
+        CreateOutcome::Unknown(err) => {
+            store::provision::fail_pool_create(&template_id, true);
+            Err(format!(
+                "pool create returned an unknown outcome; refill is circuit-broken \
+                 until governance reconciles: {}",
+                err
+            ))
+        }
+    }
+}
+
+/// Clears a `CreateUnknown` breaker after governance has looked for the canister
+/// a lost create may have produced.
+///
+/// `found` adopts that canister into the pool; `None` records the create as lost.
+#[ic_cdk::update(guard = "is_controller")]
+fn admin_reconcile_pool(template_id: String, found: Option<Principal>) -> Result<(), String> {
+    let now_ms = ic_cdk::api::time() / MILLISECONDS;
+    store::provision::reconcile_pool(&template_id, found, now_ms)
+}
+
+#[ic_cdk::update]
+fn validate_admin_reconcile_pool(
+    template_id: String,
+    found: Option<Principal>,
+) -> Result<String, String> {
+    store::provision::get_template(&template_id)
+        .ok_or_else(|| format!("NotFound: provision template {} not found", template_id))?;
+    pretty_format(&(&template_id, &found))
+}
+
+fn to_canister_settings(settings: &ProvisionSettings) -> mgt::CanisterSettings {
+    mgt::CanisterSettings {
+        controllers: Some(settings.controllers.clone()),
+        compute_allocation: settings.compute_allocation.map(Nat::from),
+        memory_allocation: settings.memory_allocation.map(Nat::from),
+        freezing_threshold: settings.freezing_threshold.map(Nat::from),
+        reserved_cycles_limit: settings.reserved_cycles_limit.map(Nat::from),
+        wasm_memory_limit: settings.wasm_memory_limit.map(Nat::from),
+        log_visibility: None,
+        wasm_memory_threshold: None,
+        log_memory_limit: None,
+        environment_variables: None,
+    }
+}
+
+// ----- chunked artifact upload -----
+
+/// Stages one chunk of a wasm artifact for the caller.
+///
+/// Publishing a module larger than the 2 MiB ingress limit is impossible in a
+/// single `admin_add_wasm` call; chunks are staged here and assembled by
+/// `admin_commit_wasm_chunks`.
+#[ic_cdk::update(guard = "is_controller_or_manager_or_committer")]
+fn admin_add_wasm_chunk(chunk: ByteBuf) -> Result<ByteArray<32>, String> {
+    store::provision::add_chunk(ic_cdk::api::msg_caller(), chunk.into_vec())
+}
+
+/// Assembles the caller's staged chunks into one artifact and publishes it.
+#[ic_cdk::update(guard = "is_controller_or_manager_or_committer")]
+fn admin_commit_wasm_chunks(
+    args: CommitWasmChunksInput,
+    force_prev_hash: Option<ByteArray<32>>,
+) -> Result<ByteArray<32>, String> {
+    let caller = ic_cdk::api::msg_caller();
+    let wasm = store::provision::take_chunks(caller, &args.chunk_hashes)?;
+    let hash: ByteArray<32> = ic_cose_types::cose::sha256(&wasm).into();
+    if hash != args.artifact_hash {
+        return Err(format!(
+            "assembled artifact hash {} does not match the declared {}",
+            hex::encode(hash.as_ref()),
+            hex::encode(args.artifact_hash.as_ref())
+        ));
+    }
+
+    store::wasm::add_wasm(
+        caller,
+        ic_cdk::api::time() / MILLISECONDS,
+        AddWasmInput {
+            name: args.name,
+            description: args.description,
+            wasm: ByteBuf::from(wasm),
+            encoding: args.encoding,
+        },
+        force_prev_hash,
+        false,
+    )?;
+    store::provision::clear_chunks(caller);
+    Ok(hash)
+}
+
+/// Drops the caller's staged chunks, e.g. after an abandoned upload.
+#[ic_cdk::update(guard = "is_controller_or_manager_or_committer")]
+fn admin_clear_wasm_chunks() -> Result<u64, String> {
+    Ok(store::provision::clear_chunks(ic_cdk::api::msg_caller()))
 }
