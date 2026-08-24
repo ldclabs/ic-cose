@@ -92,9 +92,11 @@ async fn ensure_install(req: InstallRequest) -> Result<ProvisionReceipt, String>
 
 /// Upgrades an already deployed canister to an exact module.
 ///
-/// Compare-and-swaps on `expected_prev_module_hash`, so a stale request can
-/// never overwrite a module the caller did not expect to be running, and the
-/// result is verified against `expected_module_hash`.
+/// Restricted to canisters this canister deployed, and to the wasm name they
+/// already run: a provisioner must not be able to push an arbitrary module onto
+/// an arbitrary canister. Compare-and-swaps on `expected_prev_module_hash`, so a
+/// stale request can never overwrite a module the caller did not expect to be
+/// running, and the result is verified against `expected_module_hash`.
 #[ic_cdk::update(guard = "is_provisioner")]
 async fn ensure_deployment(req: DeploymentRequest) -> Result<ProvisionReceipt, String> {
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
@@ -122,6 +124,7 @@ async fn ensure_deployment(req: DeploymentRequest) -> Result<ProvisionReceipt, S
             wasm.name, req.wasm_name
         ));
     }
+    store::provision::assert_upgradable(req.canister, &req.wasm_name)?;
 
     if let Some(receipt) = store::provision::begin_deployment(
         now_ms,

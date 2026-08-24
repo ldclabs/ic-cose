@@ -527,9 +527,11 @@ service : (opt ChainArgs) -> {
   deployment_logs : (text, opt nat, opt nat) -> (Result_7) query;
   // Upgrades an already deployed canister to an exact module.
   // 
-  // Compare-and-swaps on `expected_prev_module_hash`, so a stale request can
-  // never overwrite a module the caller did not expect to be running, and the
-  // result is verified against `expected_module_hash`.
+  // Restricted to canisters this canister deployed, and to the wasm name they
+  // already run: a provisioner must not be able to push an arbitrary module onto
+  // an arbitrary canister. Compare-and-swaps on `expected_prev_module_hash`, so a
+  // stale request can never overwrite a module the caller did not expect to be
+  // running, and the result is verified against `expected_module_hash`.
   ensure_deployment : (DeploymentRequest) -> (Result_8);
   // Installs the template's approved module onto the reserved canister.
   // 

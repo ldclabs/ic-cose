@@ -631,6 +631,12 @@ mod test {
         ByteArray::from([n; 32])
     }
 
+    fn request_id_of(n: u32) -> [u8; 32] {
+        let mut id = [0u8; 32];
+        id[..4].copy_from_slice(&n.to_be_bytes());
+        id
+    }
+
     fn seed_template(id: &str) -> TemplateEntry {
         let wasm_bytes = vec![0u8, 1, 2, 3, id.len() as u8];
         let artifact_hash: ByteArray<32> = sha256(&wasm_bytes).into();
@@ -855,6 +861,114 @@ mod test {
         provision::release(late, &rid(8), pooled).unwrap();
         assert!(provision::get_receipt(&rid(7)).is_none());
         assert_eq!(provision::get_template(id).unwrap().tombstones, 1);
+    }
+
+    #[test]
+    fn release_refuses_a_request_whose_install_is_in_flight() {
+        let id = "tpl_i";
+        let entry = seed_template(id);
+        let pooled = Principal::from_slice(&[3, 1]);
+        provision::finish_pool_create(id, pooled, 1).unwrap();
+        provision::reserve(10, &reserve_req(id, &entry, 30)).unwrap();
+
+        let args = TestByteBuf::from(vec![1u8]);
+        let install = InstallRequest {
+            request_id: rid(30),
+            canister: pooled,
+            provision_template_id: id.to_string(),
+            provision_template_hash: entry.hash,
+            expected_module_hash: entry.template.expected_module_hash,
+            init_args: args.clone(),
+            init_args_hash: sha256(&args).into(),
+            provision_spec_hash: ByteArray::from([1u8; 32]),
+            expires_at: 60_000,
+        };
+        provision::begin_install(20, &install).unwrap();
+
+        // the canister may already be receiving code, so it must not go back
+        // into the pool as Available
+        assert!(provision::release(30, &rid(30), pooled)
+            .unwrap_err()
+            .contains("install is in flight"));
+        assert_eq!(provision::get_template(id).unwrap().available, 0);
+    }
+
+    #[test]
+    fn tombstone_pruning_evicts_only_what_is_over_the_limit() {
+        let id = "tpl_j";
+        let entry = seed_template(id);
+        let pooled = Principal::from_slice(&[3, 2]);
+        provision::finish_pool_create(id, pooled, 1).unwrap();
+
+        // fill the ring past its bound, reusing the single pooled canister
+        let total = provision::MAX_RELEASE_TOMBSTONES + 3;
+        for n in 0..total {
+            let mut req = reserve_req(id, &entry, 0);
+            req.request_id = ByteArray::from(request_id_of(n));
+            provision::reserve(10, &req).unwrap();
+            provision::release(10 + n as u64, &req.request_id, pooled).unwrap();
+        }
+
+        // one release over the bound must evict one tombstone, not a whole batch
+        let info = provision::get_template(id).unwrap();
+        assert_eq!(info.tombstones, provision::MAX_RELEASE_TOMBSTONES);
+        // the newest ids are still rejectable
+        assert!(provision::get_receipt(&ByteArray::from(request_id_of(total - 1))).is_some());
+        // and the three oldest were the ones dropped
+        for n in 0..3 {
+            assert!(provision::get_receipt(&ByteArray::from(request_id_of(n))).is_none());
+        }
+    }
+
+    #[test]
+    fn upgrades_are_limited_to_canisters_this_canister_deployed() {
+        let stranger = Principal::from_slice(&[4, 1]);
+        assert!(provision::assert_upgradable(stranger, "project")
+            .unwrap_err()
+            .contains("was not deployed by this canister"));
+
+        let mine = Principal::from_slice(&[4, 2]);
+        let log_id = wasm::add_log(DeployLog {
+            name: "project".to_string(),
+            deploy_at: 1,
+            canister: mine,
+            prev_hash: Default::default(),
+            wasm_hash: Default::default(),
+            args: TestByteBuf::new(),
+            error: None,
+        })
+        .unwrap();
+        state::with_mut(|s| {
+            s.deployed_list.insert(mine, (log_id, Default::default()));
+        });
+
+        assert!(provision::assert_upgradable(mine, "project").is_ok());
+        // and never across wasm families
+        assert!(provision::assert_upgradable(mine, "other")
+            .unwrap_err()
+            .contains("runs wasm project"));
+    }
+
+    #[test]
+    fn staged_chunks_are_bounded_per_uploader() {
+        let uploader = Principal::from_slice(&[5, 1]);
+        for n in 0..provision::MAX_STAGED_CHUNKS {
+            provision::add_chunk(uploader, vec![n as u8; 4]).unwrap();
+        }
+        assert_eq!(
+            provision::staged_chunks(uploader),
+            provision::MAX_STAGED_CHUNKS
+        );
+        assert!(provision::add_chunk(uploader, vec![255u8; 4])
+            .unwrap_err()
+            .contains("chunks may be staged"));
+        // re-staging a chunk already held is not a new allocation
+        assert!(provision::add_chunk(uploader, vec![0u8; 4]).is_ok());
+        // and the bound is per uploader
+        assert!(provision::add_chunk(Principal::from_slice(&[5, 2]), vec![1u8; 4]).is_ok());
+
+        provision::clear_chunks(uploader);
+        assert_eq!(provision::staged_chunks(uploader), 0);
     }
 
     #[test]
@@ -1644,6 +1758,12 @@ pub mod provision {
         if existing.stage == ProvisionStage::Installed {
             return Err("an installed request cannot be released".to_string());
         }
+        // the caller checked the canister was empty before awaiting; an install
+        // committed in the meantime would otherwise let this hand a canister
+        // that is being given code back to the pool as Available.
+        if existing.stage == ProvisionStage::InstallPending {
+            return Err("an install is in flight for this request".to_string());
+        }
         if existing.canister != canister {
             return Err(format!(
                 "request is bound to canister {}, not {}",
@@ -1697,11 +1817,15 @@ pub mod provision {
     /// Drops released request records once they are older than the tombstone
     /// TTL, and keeps the per-template ring bounded.
     fn prune_tombstones(template_id: &str, now_ms: u64) {
+        // the template's counter is only written back after the loop, so track
+        // the remaining count locally: re-reading it here would keep reporting
+        // the pre-prune value and evict a whole batch of unexpired tombstones
+        // for every single one that is actually over the limit.
+        let mut count = TEMPLATE_STORE
+            .with_borrow(|r| r.get(&template_id.to_string()).map(|e| e.tombstones))
+            .unwrap_or(0);
         let mut pruned = 0u32;
         loop {
-            let count = TEMPLATE_STORE
-                .with_borrow(|r| r.get(&template_id.to_string()).map(|e| e.tombstones))
-                .unwrap_or(0);
             let oldest = TOMBSTONE_STORE.with_borrow(|r| {
                 r.range(ops::RangeFrom {
                     start: TombstoneKey(template_id.to_string(), 0, ByteArray::from([0u8; 32])),
@@ -1717,6 +1841,7 @@ pub mod provision {
             }
             TOMBSTONE_STORE.with_borrow_mut(|r| r.remove(&key));
             REQUEST_STORE.with_borrow_mut(|r| r.remove(&*key.2));
+            count = count.saturating_sub(1);
             pruned = pruned.saturating_add(1);
             // bound the work of a single message
             if pruned >= 64 {
@@ -1729,6 +1854,34 @@ pub mod provision {
                 Ok(())
             });
         }
+    }
+
+    /// Asserts the canister is one this canister deployed, and that the upgrade
+    /// stays within the same wasm name.
+    ///
+    /// Without this a provisioner could push any published artifact onto any
+    /// canister this canister happens to control, which is the "arbitrary deploy"
+    /// power the role is explicitly not meant to have.
+    pub fn assert_upgradable(canister: Principal, wasm_name: &str) -> Result<(), String> {
+        let log_id = state::with(|s| s.deployed_list.get(&canister).map(|(id, _)| *id))
+            .ok_or_else(|| {
+                format!(
+                    "NotFound: canister {} was not deployed by this canister",
+                    canister.to_text()
+                )
+            })?;
+        let deployed = INSTALL_LOGS
+            .with_borrow(|logs| logs.get(log_id))
+            .ok_or_else(|| "NotFound: deployment log not found".to_string())?;
+        if deployed.name != wasm_name {
+            return Err(format!(
+                "canister {} runs wasm {}, not {}",
+                canister.to_text(),
+                deployed.name,
+                wasm_name
+            ));
+        }
+        Ok(())
     }
 
     /// Controllers the template fixes for a reserved canister, so a release can
@@ -1766,6 +1919,20 @@ pub mod provision {
     pub const MAX_CHUNK_BYTES: usize = 1024 * 1024;
     /// Largest artifact that may be assembled from staged chunks.
     pub const MAX_ARTIFACT_BYTES: usize = 64 * 1024 * 1024;
+    /// Chunks one uploader may keep staged. With [`MAX_CHUNK_BYTES`] this bounds
+    /// staged bytes per uploader to [`MAX_ARTIFACT_BYTES`]; without it, staging
+    /// and never committing would grow stable memory without limit.
+    pub const MAX_STAGED_CHUNKS: usize = MAX_ARTIFACT_BYTES / MAX_CHUNK_BYTES;
+
+    pub fn staged_chunks(caller: Principal) -> usize {
+        CHUNK_STORE.with_borrow(|r| {
+            r.keys_range(ops::RangeFrom {
+                start: ChunkKey(caller, ByteArray::from([0u8; 32])),
+            })
+            .take_while(|k| k.0 == caller)
+            .count()
+        })
+    }
 
     pub fn add_chunk(caller: Principal, chunk: Vec<u8>) -> Result<ByteArray<32>, String> {
         if chunk.is_empty() {
@@ -1779,7 +1946,15 @@ pub mod provision {
             ));
         }
         let hash: ByteArray<32> = sha256(&chunk).into();
-        CHUNK_STORE.with_borrow_mut(|r| r.insert(ChunkKey(caller, hash), chunk));
+        let key = ChunkKey(caller, hash);
+        let known = CHUNK_STORE.with_borrow(|r| r.contains_key(&key));
+        if !known && staged_chunks(caller) >= MAX_STAGED_CHUNKS {
+            return Err(format!(
+                "at most {} chunks may be staged at once; commit or clear them first",
+                MAX_STAGED_CHUNKS
+            ));
+        }
+        CHUNK_STORE.with_borrow_mut(|r| r.insert(key, chunk));
         Ok(hash)
     }
 
