@@ -352,12 +352,13 @@ pub trait CoseSDK: CanisterCaller + Sized {
             .map_err(format_error)?
     }
 
+    /// Lists the `(subject, key)` pairs of a namespace's settings.
     async fn namespace_list_setting_keys(
         &self,
         namespace: &str,
         user_owned: bool,
         subject: Option<Principal>,
-    ) -> Result<NamespaceInfo, String> {
+    ) -> Result<Vec<(Principal, ByteBuf)>, String> {
         self.canister_query(
             self.canister(),
             "namespace_list_setting_keys",
@@ -462,6 +463,13 @@ pub trait CoseSDK: CanisterCaller + Sized {
         .map_err(format_error)?
     }
 
+    /// Adds cycles to a namespace's gas balance.
+    ///
+    /// The canister only credits cycles that were *attached* to the call, which
+    /// an ingress call cannot do and [`CanisterCaller`] has no way to express.
+    /// Reaching this endpoint through this trait therefore always fails with
+    /// "insufficient cycles"; a top-up must be sent from a canister that
+    /// attaches the cycles to the call itself.
     async fn namespace_top_up(&self, namespace: &str, cycles: u128) -> Result<u128, String> {
         self.canister_update(self.canister(), "namespace_top_up", (namespace, cycles))
             .await
@@ -1152,14 +1160,19 @@ mod tests {
         );
         sdk.respond(namespace_info());
         sdk.namespace_get_info("namespace_1").await.unwrap();
-        sdk.respond(namespace_info());
-        sdk.namespace_list_setting_keys(
-            "namespace_1",
-            true,
-            Some(Principal::management_canister()),
-        )
-        .await
-        .unwrap();
+        // must decode what the canister actually returns: vec record { principal; blob }
+        let setting_keys = vec![(Principal::management_canister(), ByteBuf::from(vec![1, 2]))];
+        sdk.respond(setting_keys.clone());
+        assert_eq!(
+            sdk.namespace_list_setting_keys(
+                "namespace_1",
+                true,
+                Some(Principal::management_canister()),
+            )
+            .await
+            .unwrap(),
+            setting_keys
+        );
         respond_unit!(sdk.namespace_update_info(&update_namespace));
         respond_unit!(sdk.namespace_delete("namespace_1"));
         respond_unit!(sdk.namespace_add_managers("namespace_1", &managers));

@@ -2,6 +2,21 @@ use ic_agent::{Agent, Identity};
 use ic_cose_types::format_error;
 use std::sync::Arc;
 
+/// Builds an [`Agent`] for the given host.
+///
+/// # Security
+///
+/// Query signature verification is **disabled**, so query responses are not
+/// authenticated: whoever serves the request can return arbitrary data for any
+/// query call. That matters for the query endpoints whose answers are trusted
+/// downstream — `ecdsa_public_key` and `schnorr_public_key` are used to verify
+/// signatures, and `namespace_get_fixed_identity` returns a principal used for
+/// authorization. Update calls (`ecdh_cose_encrypted_key`, `vetkd_*`, every
+/// write) go through consensus and are unaffected.
+///
+/// If your deployment needs verified queries, construct the [`Agent`] yourself
+/// without `with_verify_query_signatures(false)` and pass it to
+/// [`crate::client::Client::new`].
 pub async fn build_agent(host: &str, identity: Arc<dyn Identity>) -> Result<Agent, String> {
     let agent = Agent::builder()
         .with_url(host)
