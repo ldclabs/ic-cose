@@ -59,15 +59,21 @@ pub fn cose_sign1_from(
         .alg()
         .map_err(|err| format!("invalid COSE sign1 token: {}", err))?
     {
-        Some(Label::Int(ES256K)) if !secp256k1_pub_keys.is_empty() => {
+        Some(Label::Int(ES256K)) => {
+            if secp256k1_pub_keys.is_empty() {
+                return Err("no secp256k1 public key provided".to_string());
+            }
             let tbs_hash = sha256(&tbs_data);
             k256::secp256k1_verify_ecdsa_any(secp256k1_pub_keys, &tbs_hash, cs1.signature())?;
         }
-        Some(Label::Int(alg)) if alg == EdDSA && !ed25519_pub_keys.is_empty() => {
+        Some(Label::Int(alg)) if alg == EdDSA => {
+            if ed25519_pub_keys.is_empty() {
+                return Err("no ed25519 public key provided".to_string());
+            }
             ed25519::ed25519_verify_any(ed25519_pub_keys, &tbs_data, cs1.signature())?;
         }
         alg => {
-            Err(format!("unsupported algorithm: {:?}", alg))?;
+            return Err(format!("unsupported algorithm: {:?}", alg));
         }
     }
     Ok(cs1)
@@ -89,12 +95,30 @@ mod test {
             .unwrap_err()
             .starts_with("invalid COSE sign1 token:"));
 
-        let mut unsupported = cose_sign1(b"payload".to_vec(), EdDSA, None).unwrap();
+        let mut unsupported = cose_sign1(b"payload".to_vec(), iana::AlgorithmES256, None).unwrap();
         unsupported.set_signature(vec![0; 64]).unwrap();
         let encoded = unsupported.to_vec().unwrap();
         assert!(cose_sign1_from(&encoded, &[], &[], &[])
             .unwrap_err()
             .starts_with("unsupported algorithm:"));
+
+        // a supported algorithm with no usable key reports the missing key, not
+        // an "unsupported algorithm"
+        let mut eddsa = cose_sign1(b"payload".to_vec(), EdDSA, None).unwrap();
+        eddsa.set_signature(vec![0; 64]).unwrap();
+        let encoded = eddsa.to_vec().unwrap();
+        assert_eq!(
+            cose_sign1_from(&encoded, &[], &[], &[]).unwrap_err(),
+            "no ed25519 public key provided"
+        );
+
+        let mut es256k = cose_sign1(b"payload".to_vec(), ES256K, None).unwrap();
+        es256k.set_signature(vec![0; 64]).unwrap();
+        let encoded = es256k.to_vec().unwrap();
+        assert_eq!(
+            cose_sign1_from(&encoded, &[], &[], &[]).unwrap_err(),
+            "no secp256k1 public key provided"
+        );
 
         let signing_key = k256::ecdsa::SigningKey::from_bytes((&[7u8; 32]).into()).unwrap();
         let verifying_key = *signing_key.verifying_key();
@@ -118,6 +142,12 @@ mod test {
         let data = decode("8443a10127a0589ca801781b35336379672d79796161612d61616161702d61687075612d63616902783f693267616d2d75756533792d75787779642d6d7a7968622d6e697268642d687a336c342d32687733662d34667a76772d6c707676632d64716472672d3771650366746573746572041a66d11526051a66d10716061a66d10716075029420f3d16231d2de11fb7c33bbe971e096d4e616d6573706163652e2a3a5f5840bc6f9f4305a19a4a3952388cb8667e340ead39878d1ada1b671fe9b81f1c2db1c479508e5c9c20e17f5168a0587f5c049047317f4bb5c8b8f2c84e05fce6c806").unwrap();
         let res = cose_sign1_from(&data, subject.as_slice(), &[], &[pk]).unwrap();
         println!("{:?}", res);
+
+        // `ES256K` is a constant pattern, not a fresh binding: a non-empty
+        // secp256k1 key list must not divert an EdDSA token into the ES256K arm.
+        let signing_key = k256::ecdsa::SigningKey::from_bytes((&[7u8; 32]).into()).unwrap();
+        let secp256k1_key = *signing_key.verifying_key();
+        assert!(cose_sign1_from(&data, subject.as_slice(), &[secp256k1_key], &[pk]).is_ok());
 
         assert_eq!(res.payload, Some(decode("a801781b35336379672d79796161612d61616161702d61687075612d63616902783f693267616d2d75756533792d75787779642d6d7a7968622d6e697268642d687a336c342d32687733662d34667a76772d6c707676632d64716472672d3771650366746573746572041a66d11526051a66d10716061a66d10716075029420f3d16231d2de11fb7c33bbe971e096d4e616d6573706163652e2a3a5f").unwrap()));
     }

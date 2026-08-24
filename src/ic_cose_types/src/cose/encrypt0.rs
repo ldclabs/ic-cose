@@ -104,8 +104,19 @@ pub fn cose_decrypt0(
     secret: &[u8; 32],
     aad: &[u8],
 ) -> Result<Vec<u8>, String> {
-    let e0 = try_decode_encrypt0(payload)?;
-    decrypt(&e0, secret, aad)
+    // decrypt in place: the item was just decoded here and is not shared, so
+    // there is no need to clone the ciphertext again.
+    let mut e0 = try_decode_encrypt0(payload)?;
+    decrypt_in(&mut e0, secret, aad)
+}
+
+fn decrypt_in(item: &mut CoseEncrypt0, secret: &[u8; 32], aad: &[u8]) -> Result<Vec<u8>, String> {
+    if item.is_ciphertext_detached() {
+        return Err("missing ciphertext".to_string());
+    }
+    item.decrypt(&Aes256GcmCose { secret }, Some(aad))
+        .map(|payload| payload.to_vec())
+        .map_err(cose_error)
 }
 
 /// Decrypts a COSE_Encrypt0 structure using AES-256-GCM.
@@ -118,13 +129,7 @@ pub fn cose_decrypt0(
 /// # Returns
 /// Result containing the decrypted plaintext or error message
 pub fn decrypt(item: &CoseEncrypt0, secret: &[u8; 32], aad: &[u8]) -> Result<Vec<u8>, String> {
-    if item.is_ciphertext_detached() {
-        return Err("missing ciphertext".to_string());
-    }
-    let mut item = item.clone();
-    item.decrypt(&Aes256GcmCose { secret }, Some(aad))
-        .map(|payload| payload.to_vec())
-        .map_err(cose_error)
+    decrypt_in(&mut item.clone(), secret, aad)
 }
 
 #[cfg(test)]

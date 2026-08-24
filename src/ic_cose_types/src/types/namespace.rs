@@ -7,6 +7,24 @@ use crate::{validate_principals, validate_principals_not_anonymous, validate_str
 
 pub const MAX_PAYLOAD_SIZE: u64 = 2_000_000; // 2MB
 
+/// Maximum session expiration for fixed identity delegations, in milliseconds.
+///
+/// Delegation expirations are computed in nanoseconds as
+/// `(now_ms + session_expires_in_ms) * MILLISECONDS`, so the value must stay
+/// far below `u64::MAX / MILLISECONDS` to keep that computation from
+/// overflowing. 0 is allowed and disables delegation for the namespace.
+pub const MAX_SESSION_EXPIRES_IN_MS: u64 = 365 * 24 * 3600 * 1000; // 365 days
+
+fn validate_session_expires_in_ms(session_expires_in_ms: u64) -> Result<(), String> {
+    if session_expires_in_ms > MAX_SESSION_EXPIRES_IN_MS {
+        Err(format!(
+            "session_expires_in_ms should be less than or equal to {}",
+            MAX_SESSION_EXPIRES_IN_MS
+        ))?;
+    }
+    Ok(())
+}
+
 fn validate_max_payload_size(max_payload_size: u64) -> Result<(), String> {
     if max_payload_size == 0 {
         Err("max_payload_size should be greater than 0".to_string())?;
@@ -69,6 +87,9 @@ impl CreateNamespaceInput {
         if let Some(max_payload_size) = self.max_payload_size {
             validate_max_payload_size(max_payload_size)?;
         }
+        if let Some(session_expires_in_ms) = self.session_expires_in_ms {
+            validate_session_expires_in_ms(session_expires_in_ms)?;
+        }
         validate_visibility(self.visibility)?;
         Ok(())
     }
@@ -92,6 +113,10 @@ impl UpdateNamespaceInput {
         }
         if let Some(max_payload_size) = self.max_payload_size {
             validate_max_payload_size(max_payload_size)?;
+        }
+
+        if let Some(session_expires_in_ms) = self.session_expires_in_ms {
+            validate_session_expires_in_ms(session_expires_in_ms)?;
         }
 
         if let Some(status) = self.status {
@@ -190,6 +215,27 @@ mod test {
                 MAX_PAYLOAD_SIZE
             )
         );
+
+        let mut input = create_namespace_input();
+        input.session_expires_in_ms = Some(MAX_SESSION_EXPIRES_IN_MS + 1);
+        assert_eq!(
+            input.validate().unwrap_err(),
+            format!(
+                "session_expires_in_ms should be less than or equal to {}",
+                MAX_SESSION_EXPIRES_IN_MS
+            )
+        );
+
+        let mut input = create_namespace_input();
+        input.session_expires_in_ms = Some(u64::MAX);
+        assert!(input.validate().is_err());
+
+        // 0 disables delegation for the namespace and stays valid
+        let mut input = create_namespace_input();
+        input.session_expires_in_ms = Some(0);
+        assert!(input.validate().is_ok());
+        input.session_expires_in_ms = Some(MAX_SESSION_EXPIRES_IN_MS);
+        assert!(input.validate().is_ok());
     }
 
     #[test]
@@ -230,6 +276,24 @@ mod test {
                 MAX_PAYLOAD_SIZE
             )
         );
+
+        input.max_payload_size = None;
+        input.session_expires_in_ms = Some(MAX_SESSION_EXPIRES_IN_MS + 1);
+        assert_eq!(
+            input.validate().unwrap_err(),
+            format!(
+                "session_expires_in_ms should be less than or equal to {}",
+                MAX_SESSION_EXPIRES_IN_MS
+            )
+        );
+
+        input.session_expires_in_ms = Some(u64::MAX);
+        assert!(input.validate().is_err());
+
+        input.session_expires_in_ms = Some(MAX_SESSION_EXPIRES_IN_MS);
+        assert!(input.validate().is_ok());
+        input.session_expires_in_ms = Some(0);
+        assert!(input.validate().is_ok());
     }
 
     #[test]

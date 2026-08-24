@@ -209,6 +209,21 @@ mod test {
     }
 
     #[test]
+    fn cbor_serializable_trait_roundtrips() {
+        // exercises the trait methods explicitly: the impls forward to the
+        // inherent `cose2` methods, and would recurse forever if those went away.
+        let key = cose_aes256_key([1u8; 32], b"kid".to_vec());
+        let data = CborSerializable::to_vec(&key).unwrap();
+        let decoded = <CoseKey as CborSerializable>::from_slice(&data).unwrap();
+        assert_eq!(decoded.kid().unwrap(), Some(&b"kid"[..]));
+        assert_eq!(
+            <CoseKey as CborSerializable>::to_vec(&decoded).unwrap(),
+            data
+        );
+        assert!(<CoseKey as CborSerializable>::from_slice(b"not cbor").is_err());
+    }
+
+    #[test]
     fn cose_aes256_key_works() {
         let secret = [7u8; 32];
         let key_id = b"kid-1".to_vec();
