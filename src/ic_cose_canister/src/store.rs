@@ -577,12 +577,35 @@ pub mod state {
 
         let iv: [u8; 32] = rand_bytes().await.expect("failed to generate IV");
 
+        // this runs again after an upgrade when something is still missing, so it
+        // must be idempotent: never clear a key that was already retrieved, and
+        // never rotate the IV, which feeds every KEK derived so far.
         with_mut(|r| {
-            r.ecdsa_public_key = ecdsa_public_key;
-            r.schnorr_ed25519_public_key = schnorr_ed25519_public_key;
-            r.schnorr_secp256k1_public_key = schnorr_secp256k1_public_key;
-            r.init_vector = iv.into();
+            if ecdsa_public_key.is_some() {
+                r.ecdsa_public_key = ecdsa_public_key;
+            }
+            if schnorr_ed25519_public_key.is_some() {
+                r.schnorr_ed25519_public_key = schnorr_ed25519_public_key;
+            }
+            if schnorr_secp256k1_public_key.is_some() {
+                r.schnorr_secp256k1_public_key = schnorr_secp256k1_public_key;
+            }
+            if *r.init_vector == [0u8; 32] {
+                r.init_vector = iv.into();
+            }
         });
+    }
+
+    /// Returns true if some key material could not be retrieved yet, so that
+    /// [`init_public_key`] can be retried instead of leaving the ECDSA, Schnorr
+    /// and KEK APIs permanently broken.
+    pub fn needs_public_key_init() -> bool {
+        with(|s| {
+            s.ecdsa_public_key.is_none()
+                || s.schnorr_ed25519_public_key.is_none()
+                || s.schnorr_secp256k1_public_key.is_none()
+                || *s.init_vector == [0u8; 32]
+        })
     }
 
     pub fn load() {
@@ -1073,16 +1096,19 @@ pub mod ns {
                     Err("no permission".to_string())?;
                 }
                 SETTINGS_STORE.with_borrow(|rr| {
+                    // the range is open-ended, so the first key it yields may already
+                    // belong to a later namespace: only a key still carrying this
+                    // namespace means the namespace is not empty.
                     let mut iter = rr.keys_range(ops::RangeFrom {
                         start: &SettingPathKey(
                             namespace.clone(),
                             0,
-                            Principal::anonymous(),
+                            Principal::management_canister(), // the smallest principal
                             ByteBuf::new(),
                             0,
                         ),
                     });
-                    if iter.next().is_some() {
+                    if iter.next().is_some_and(|k| k.0 == namespace) {
                         return Err(format!("namespace {} is not empty", namespace));
                     }
                     Ok(())
@@ -1118,7 +1144,7 @@ pub mod ns {
 
     pub fn get_setting(caller: Principal, spk: SettingPathKey) -> Result<SettingInfo, String> {
         let setting = try_get_setting(&caller, &spk)
-            .ok_or_else(|| format!("NotFound: setting {} not found or no permission", &spk))?;
+            .ok_or_else(|| format!("NotFound: setting {} not found or no permission", spk))?;
 
         if spk.4 != 0 && spk.4 != setting.version {
             Err("version mismatch".to_string())?;
@@ -1132,7 +1158,7 @@ pub mod ns {
         spk: SettingPathKey,
     ) -> Result<SettingArchivedPayload, String> {
         let setting = try_get_setting(&caller, &spk)
-            .ok_or_else(|| format!("NotFound: setting {} not found or no permission", &spk))?;
+            .ok_or_else(|| format!("NotFound: setting {} not found or no permission", spk))?;
 
         if spk.4 == 0 || spk.4 >= setting.version {
             Err("version mismatch".to_string())?;
@@ -1140,7 +1166,7 @@ pub mod ns {
 
         let payload = PAYLOADS_STORE.with_borrow(|r| {
             r.get(&spk)
-                .ok_or_else(|| format!("NotFound: setting {} payload not found", &spk))
+                .ok_or_else(|| format!("NotFound: setting {} payload not found", spk))
         })?;
 
         Ok(SettingArchivedPayload {
@@ -1179,9 +1205,6 @@ pub mod ns {
                     try_decode_encrypt0(dek)?;
                     // should be valid COSE encrypt0 payload
                     if let Some(ref payload) = input.payload {
-                        if payload.len() as u64 > ns.max_payload_size {
-                            Err("payload size exceeds the limit".to_string())?;
-                        }
                         try_decode_encrypt0(payload)?;
                         payload.len() + dek.len()
                     } else {
@@ -1197,7 +1220,7 @@ pub mod ns {
 
             let output = SETTINGS_STORE.with_borrow_mut(|m| {
                 if m.contains_key(&spk) {
-                    return Err(format!("setting {} already exists", &spk));
+                    return Err(format!("setting {} already exists", spk));
                 }
 
                 m.insert(
@@ -1255,7 +1278,7 @@ pub mod ns {
                         Err(err) => Err(err),
                     }
                 }
-                None => Err(format!("NotFound: setting {} not found", &spk)),
+                None => Err(format!("NotFound: setting {} not found", spk)),
             })
         })
     }
@@ -1289,7 +1312,7 @@ pub mod ns {
 
                     Ok(())
                 }
-                None => Err(format!("NotFound: setting {} not found", &spk)),
+                None => Err(format!("NotFound: setting {} not found", spk)),
             })
         })
     }
@@ -1367,7 +1390,7 @@ pub mod ns {
                         version: setting.version,
                     })
                 }
-                None => Err(format!("NotFound: setting {} not found", &spk)),
+                None => Err(format!("NotFound: setting {} not found", spk)),
             })?;
 
             ns.payload_bytes_total = ns.payload_bytes_total.saturating_add(size as u64);
@@ -1405,6 +1428,62 @@ pub mod ns {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn test_delete_namespace_only_looks_at_its_own_settings() {
+        let manager = Principal::from_slice(&[1, 1, 1, 1]);
+        NAMESPACES_STORE.with_borrow_mut(|r| {
+            for name in ["alpha", "beta"] {
+                r.insert(
+                    name.to_string(),
+                    Namespace {
+                        managers: BTreeSet::from([manager]),
+                        ..Default::default()
+                    },
+                );
+            }
+        });
+        // only "beta" holds settings; "alpha" is empty and must stay deletable
+        SETTINGS_STORE.with_borrow_mut(|r| {
+            r.insert(
+                SettingPathKey("beta".to_string(), 0, manager, ByteBuf::from([1]), 0),
+                Setting::default(),
+            );
+        });
+
+        assert_eq!(ns::delete_namespace(&manager, "alpha".to_string()), Ok(()));
+        assert_eq!(
+            ns::delete_namespace(&manager, "beta".to_string()),
+            Err("namespace beta is not empty".to_string())
+        );
+
+        // a setting owned by the smallest possible principal still counts
+        SETTINGS_STORE.with_borrow_mut(|r| {
+            r.insert(
+                SettingPathKey(
+                    "gamma".to_string(),
+                    0,
+                    Principal::management_canister(),
+                    ByteBuf::new(),
+                    0,
+                ),
+                Setting::default(),
+            );
+        });
+        NAMESPACES_STORE.with_borrow_mut(|r| {
+            r.insert(
+                "gamma".to_string(),
+                Namespace {
+                    managers: BTreeSet::from([manager]),
+                    ..Default::default()
+                },
+            );
+        });
+        assert_eq!(
+            ns::delete_namespace(&manager, "gamma".to_string()),
+            Err("namespace gamma is not empty".to_string())
+        );
+    }
 
     #[test]
     fn test_list_setting_keys() {

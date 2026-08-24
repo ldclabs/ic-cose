@@ -131,7 +131,7 @@ async fn vetkd_public_key(path: SettingPath) -> Result<ByteBuf, String> {
     let caller = ic_cdk::api::msg_caller();
     store::ns::with(&path.ns, |ns| {
         if !ns.can_read_namespace(&caller) {
-            return Err(format!(
+            Err(format!(
                 "vetkd_public_key: {} has no permission for {}",
                 caller.to_text(),
                 path.ns

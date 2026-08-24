@@ -76,7 +76,7 @@ pub async fn sign_with_schnorr(
 
     let rt = mgt::sign_with_schnorr(&args)
         .await
-        .map_err(|err| format!("sign_with_ecdsa failed: {:?}", err))?;
+        .map_err(|err| format!("sign_with_schnorr failed: {:?}", err))?;
 
     Ok(rt.signature)
 }

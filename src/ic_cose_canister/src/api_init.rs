@@ -97,4 +97,10 @@ fn post_upgrade(args: Option<InstallArgs>) {
         }
         _ => {}
     }
+
+    // a key that could not be retrieved during init would otherwise stay missing
+    // forever, leaving the ECDSA, Schnorr and KEK APIs permanently broken.
+    if store::state::needs_public_key_init() {
+        ic_cdk_timers::set_timer(Duration::from_secs(0), store::state::init_public_key());
+    }
 }

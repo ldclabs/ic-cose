@@ -14,6 +14,9 @@ use crate::store;
 
 #[ic_cdk::query]
 fn namespace_get_fixed_identity(namespace: String, name: String) -> Result<Principal, String> {
+    // the write paths store and sign under the lowercased name; normalizing here
+    // too keeps this principal equal to the one namespace_sign_delegation issues.
+    let name = name.to_ascii_lowercase();
     let mut seed = vec![];
     to_writer(&(&namespace, &name), &mut seed).expect("failed to encode seed");
     let user_key = CanisterSigPublicKey::new(ic_cdk::api::canister_self(), seed);
@@ -26,6 +29,7 @@ fn namespace_get_delegators(
     name: String,
 ) -> Result<BTreeSet<Principal>, String> {
     let caller = ic_cdk::api::msg_caller();
+    let name = name.to_ascii_lowercase();
     store::ns::with(&namespace, |ns| {
         if !ns.can_read_namespace(&caller) {
             return Err("no permission".to_string());
@@ -104,7 +108,12 @@ fn namespace_sign_delegation(input: SignDelegationInput) -> Result<SignInRespons
     if session_expires_in_ms == 0 {
         return Err("delegation is disabled".to_string());
     }
-    let expiration = (now_ms + session_expires_in_ms) * MILLISECONDS;
+    // a namespace stored before session_expires_in_ms was bounded can still hold a
+    // value that overflows here, which would silently wrap into a bogus expiration.
+    let expiration = now_ms
+        .checked_add(session_expires_in_ms)
+        .and_then(|ms| ms.checked_mul(MILLISECONDS))
+        .ok_or("session_expires_in_ms of the namespace is too large")?;
     let delegation_hash = delegation_signature_msg(input.pubkey.as_slice(), expiration, None);
     store::state::add_signature(user_key.seed.as_slice(), delegation_hash.as_slice());
 
