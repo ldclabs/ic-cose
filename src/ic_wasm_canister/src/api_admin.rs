@@ -156,6 +156,15 @@ async fn admin_create_canister(
             s.deployed_list.insert(canister_id, (id, hash));
         })
     }
+    // the canister exists either way: report the failure, but keep its id in the
+    // error so the caller can retry the install instead of losing track of it.
+    res.map_err(|err| {
+        format!(
+            "canister {} created, but install failed: {}",
+            canister_id.to_text(),
+            err
+        )
+    })?;
     Ok(canister_id)
 }
 
@@ -202,6 +211,15 @@ async fn admin_create_on(
             s.deployed_list.insert(canister_id, (id, hash));
         })
     }
+    // the canister exists either way: report the failure, but keep its id in the
+    // error so the caller can retry the install instead of losing track of it.
+    res.map_err(|err| {
+        format!(
+            "canister {} created, but install failed: {}",
+            canister_id.to_text(),
+            err
+        )
+    })?;
     Ok(canister_id)
 }
 
@@ -272,7 +290,7 @@ async fn admin_deploy(
         }
         store::wasm::get_latest(&args.name)?
     } else {
-        store::wasm::next_version(prev_hash)?
+        store::wasm::next_version(&args.name, prev_hash)?
     };
 
     let arg = args
@@ -351,16 +369,11 @@ async fn validate_admin_deploy(
                 hex::encode(ignore_prev_hash.as_ref())
             ))?;
         }
-        let hash = store::state::with(|s| {
-            s.latest_version
-                .get(&args.name)
-                .cloned()
-                .unwrap_or_default()
-        });
-        let _ = store::wasm::get_wasm(&hash)
-            .ok_or_else(|| format!("NotFound: wasm not found: {}", hex::encode(hash.as_ref())))?;
+        // mirror admin_deploy: an unknown name must report the name, not a
+        // "wasm not found: 000...0" for the default hash.
+        store::wasm::get_latest(&args.name)?;
     } else {
-        store::wasm::next_version(prev_hash)?;
+        store::wasm::next_version(&args.name, prev_hash)?;
     }
 
     Ok(rt)
@@ -417,15 +430,23 @@ async fn admin_batch_topup() -> Result<u128, String> {
 
     let mut total = 0u128;
     for ids in canisters.chunks(7) {
-        let res = futures::future::try_join_all(ids.iter().map(|id| async {
-            let balance = ic_cdk::api::canister_cycle_balance();
-            if balance < threshold + amount {
-                Err(format!(
-                    "balance {} is less than threshold {} + amount {}",
-                    balance, threshold, amount
-                ))?;
-            }
+        // the whole chunk runs concurrently and the balance does not drop until
+        // the deposits settle, so every canister in it must be covered up front:
+        // checking `threshold + amount` once per future would let a chunk deposit
+        // up to `ids.len()` times what the guard allows.
+        let balance = ic_cdk::api::canister_cycle_balance();
+        let required = threshold.saturating_add(amount.saturating_mul(ids.len() as u128));
+        if balance < required {
+            Err(format!(
+                "balance {} is less than threshold {} + amount {} x {}",
+                balance,
+                threshold,
+                amount,
+                ids.len()
+            ))?;
+        }
 
+        let res = futures::future::try_join_all(ids.iter().map(|id| async {
             let arg = mgt::CanisterStatusArgs { canister_id: *id };
             let status = mgt::canister_status(&arg).await.map_err(format_error)?;
             if status.cycles <= threshold {

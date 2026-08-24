@@ -300,7 +300,16 @@ pub mod wasm {
         WASM_STORE.with_borrow(|r| r.get(hash))
     }
 
-    pub fn next_version(prev_hash: ByteArray<32>) -> Result<(ByteArray<32>, Wasm), String> {
+    /// Resolves the wasm that follows `prev_hash` on the upgrade path.
+    ///
+    /// `upgrade_path` is keyed by `prev_hash` alone and is shared by every wasm
+    /// name, so the all-zero key used by the first version of each name is
+    /// claimed by whichever name was added last. Checking the name here turns
+    /// that collision into an error instead of installing another wasm's module.
+    pub fn next_version(
+        name: &str,
+        prev_hash: ByteArray<32>,
+    ) -> Result<(ByteArray<32>, Wasm), String> {
         state::with(|s| {
             let hash = s
                 .upgrade_path
@@ -310,6 +319,15 @@ pub mod wasm {
                 let w = r
                     .get(hash)
                     .ok_or_else(|| "NotFound: next version not found".to_string())?;
+                if w.name != name {
+                    return Err(format!(
+                        "next version {} of {} belongs to wasm {}, not {}",
+                        hex::encode(hash.as_ref()),
+                        hex::encode(prev_hash.as_ref()),
+                        w.name,
+                        name
+                    ));
+                }
                 Ok((*hash, w))
             })
         })
@@ -344,7 +362,7 @@ pub mod wasm {
         INSTALL_LOGS.with(|r| {
             let logs = r.borrow();
             let latest = logs.len();
-            if latest == 0 {
+            if latest == 0 || take == 0 {
                 return vec![];
             }
 
@@ -356,26 +374,71 @@ pub mod wasm {
             let mut idx = prev.saturating_sub(1);
             let mut res: Vec<DeploymentInfo> = Vec::with_capacity(take);
             while let Some(log) = logs.get(idx) {
-                if log.name != name {
-                    continue;
+                // entries for other wasm names are skipped, but the cursor must
+                // still move or the loop never terminates
+                if log.name == name {
+                    res.push(DeploymentInfo {
+                        name: log.name.clone(),
+                        deploy_at: log.deploy_at,
+                        canister: log.canister,
+                        prev_hash: log.prev_hash,
+                        wasm_hash: log.wasm_hash,
+                        args: Some(log.args),
+                        error: log.error,
+                    });
+
+                    if res.len() >= take {
+                        break;
+                    }
                 }
 
-                res.push(DeploymentInfo {
-                    name: log.name.clone(),
-                    deploy_at: log.deploy_at,
-                    canister: log.canister,
-                    prev_hash: log.prev_hash,
-                    wasm_hash: log.wasm_hash,
-                    args: Some(log.args),
-                    error: log.error,
-                });
-
-                if idx == 0 || res.len() >= take {
+                if idx == 0 {
                     break;
                 }
                 idx -= 1;
             }
             res
         })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn log(name: &str) -> DeployLog {
+        DeployLog {
+            name: name.to_string(),
+            deploy_at: 1,
+            canister: Principal::management_canister(),
+            prev_hash: Default::default(),
+            wasm_hash: Default::default(),
+            args: ByteBuf::new(),
+            error: None,
+        }
+    }
+
+    #[test]
+    fn deployment_logs_skips_other_names_without_hanging() {
+        // interleaved names: the scan must step over "bar" entries instead of
+        // spinning on them forever
+        for name in ["foo", "bar", "foo", "bar", "bar", "foo"] {
+            wasm::add_log(log(name)).unwrap();
+        }
+
+        let foo = wasm::deployment_logs("foo", None, 10);
+        assert_eq!(foo.len(), 3);
+        assert!(foo.iter().all(|d| d.name == "foo"));
+
+        let bar = wasm::deployment_logs("bar", None, 10);
+        assert_eq!(bar.len(), 3);
+
+        // the newest "bar" is at index 4, so a cursor of 4 sees only the older two
+        assert_eq!(wasm::deployment_logs("bar", Some(4), 10).len(), 2);
+        assert_eq!(wasm::deployment_logs("foo", None, 2).len(), 2);
+        assert_eq!(wasm::deployment_logs("foo", None, 0).len(), 0);
+        assert_eq!(wasm::deployment_logs("none", None, 10).len(), 0);
+        assert_eq!(wasm::deployment_logs("foo", Some(0), 10).len(), 0);
+        assert_eq!(wasm::deployment_logs("foo", Some(99), 10).len(), 0);
     }
 }
