@@ -83,7 +83,12 @@ export const idlFactory = ({ IDL }) => {
     'message' : IDL.Vec(IDL.Nat8),
   });
   const Result_5 = IDL.Variant({ 'Ok' : IDL.Vec(IDL.Nat8), 'Err' : IDL.Text });
+  const DelegationPermissions = IDL.Variant({
+    'all' : IDL.Null,
+    'queries' : IDL.Null,
+  });
   const Delegation = IDL.Record({
+    'permissions' : IDL.Opt(DelegationPermissions),
     'pubkey' : IDL.Vec(IDL.Nat8),
     'targets' : IDL.Opt(IDL.Vec(IDL.Principal)),
     'expiration' : IDL.Nat64,

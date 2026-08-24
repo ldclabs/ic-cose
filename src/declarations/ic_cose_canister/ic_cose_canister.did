@@ -20,10 +20,26 @@ type CreateSettingOutput = record {
   created_at : nat64;
   version : nat32;
 };
+// A delegation from one key to another.
+//
+// If key A signs a delegation containing key B, then key B may be used to
+// authenticate as key A's corresponding principal(s).
 type Delegation = record {
+  // The kinds of requests this delegation permits.
+  permissions : opt DelegationPermissions;
+  // The delegated-to key.
   pubkey : blob;
+  // If present, this delegation only applies to requests sent to one of these canisters.
   targets : opt vec principal;
+  // A nanosecond timestamp after which this delegation is no longer valid.
   expiration : nat64;
+};
+// The kinds of requests a [`Delegation`] permits.
+type DelegationPermissions = variant {
+  // All request types are permitted.
+  all;
+  // Only query calls and `read_state` requests are permitted.
+  queries;
 };
 type ECDHInput = record { public_key : blob; nonce : blob };
 type ECDHOutput = record { public_key : blob; payload : blob };
@@ -79,7 +95,15 @@ type Result_6 = variant { Ok : SignedDelegation; Err : text };
 type Result_7 = variant { Ok : vec principal; Err : text };
 type Result_8 = variant { Ok : principal; Err : text };
 type Result_9 = variant { Ok : bool; Err : text };
-type SchnorrAlgorithm = variant { ed25519; bip340secp256k1 };
+// # Schnorr Algorithm.
+//
+// See [`SchnorrKeyId::algorithm`].
+type SchnorrAlgorithm = variant {
+  // ed25519.
+  ed25519;
+  // BIP-340 secp256k1.
+  bip340secp256k1;
+};
 type SettingArchivedPayload = record {
   dek : opt blob;
   version : nat32;
@@ -115,8 +139,12 @@ type SignDelegationInput = record {
 };
 type SignIdentityInput = record { ns : text; audience : text };
 type SignInResponse = record {
+  // The user canister public key. This key is used to derive the user principal.
   user_key : blob;
+  // The seed component used to derive the user key.
   seed : blob;
+  // The session expiration time in nanoseconds since the UNIX epoch. This is the time at which
+  // the delegation will no longer be valid.
   expiration : nat64;
 };
 type SignInput = record {
@@ -124,7 +152,13 @@ type SignInput = record {
   derivation_path : vec blob;
   message : blob;
 };
-type SignedDelegation = record { signature : blob; delegation : Delegation };
+// SignedDelegation is a [`Delegation`] that has been signed by an [`Identity`](https://docs.rs/ic-agent/latest/ic_agent/trait.Identity.html).
+type SignedDelegation = record {
+  // The signature for the delegation.
+  signature : blob;
+  // The signed delegation.
+  delegation : Delegation;
+};
 type StateInfo = record {
   freezing_threshold : nat64;
   ecdsa_key_name : text;

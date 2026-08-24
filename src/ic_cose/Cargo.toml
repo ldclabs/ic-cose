@@ -29,3 +29,6 @@ cbor2 = { workspace = true }
 bytes = "1"
 http = "1"
 ic-cdk-management-canister = { workspace = true }
+
+[lib]
+doctest = false

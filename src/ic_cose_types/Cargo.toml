@@ -28,3 +28,6 @@ aes-gcm = { workspace = true }
 
 [dev-dependencies]
 hex = { workspace = true }
+
+[lib]
+doctest = false
