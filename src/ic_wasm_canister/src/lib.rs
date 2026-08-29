@@ -14,6 +14,7 @@ mod api;
 mod api_admin;
 mod api_provision;
 mod init;
+mod management;
 mod store;
 
 use crate::init::ChainArgs;
@@ -84,9 +85,13 @@ pub fn validate_principals(principals: &BTreeSet<Principal>) -> Result<(), Strin
     Ok(())
 }
 
-/// Like [`call`], but preserves the typed call error so the caller can tell a
-/// pre-dispatch failure from an unknown outcome.
-async fn raw_call<In, Out>(
+/// Calls a trusted system canister while preserving the typed call error so the
+/// caller can tell a pre-dispatch failure from an unknown outcome.
+///
+/// This deliberately uses unbounded wait: the call transfers enough cycles to
+/// create and fund a canister, and a best-effort timeout could lose the response
+/// while those cycles have already been accepted.
+async fn call_with_cycles<In, Out>(
     id: Principal,
     method: &str,
     args: In,
@@ -96,7 +101,7 @@ where
     In: ArgumentEncoder + Send,
     Out: candid::CandidType + for<'a> candid::Deserialize<'a>,
 {
-    ic_cdk::call::Call::bounded_wait(id, method)
+    ic_cdk::call::Call::unbounded_wait(id, method)
         .with_args(&args)
         .with_cycles(cycles)
         .await?
@@ -104,33 +109,10 @@ where
         .map_err(ic_cdk::call::Error::from)
 }
 
-async fn call<In, Out>(id: Principal, method: &str, args: In, cycles: u128) -> Result<Out, String>
-where
-    In: ArgumentEncoder + Send,
-    Out: candid::CandidType + for<'a> candid::Deserialize<'a>,
-{
-    let res = ic_cdk::call::Call::bounded_wait(id, method)
-        .with_args(&args)
-        .with_cycles(cycles)
-        .await
-        .map_err(|err| format!("failed to call {} on {:?}, error: {:?}", method, id, err))?;
-    res.candid().map_err(|err| {
-        format!(
-            "failed to decode response from {} on {:?}, error: {:?}",
-            method, id, err
-        )
-    })
-}
-
-#[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
-pub struct SubnetId {
-    pub principal_id: String,
-}
-
 #[derive(Clone, Eq, PartialEq, Debug, CandidType, Deserialize)]
 pub enum SubnetSelection {
     /// Choose a specific subnet
-    Subnet { subnet: SubnetId },
+    Subnet { subnet: Principal },
     // Skip the SubnetFilter on the CMC SubnetSelection for simplification.
     // https://github.com/dfinity/ic/blob/master/rs/nns/cmc/cmc.did#L35
 }
@@ -176,22 +158,17 @@ fn is_predispatch_error(err: &ic_cdk::call::Error) -> bool {
 }
 
 /// Creates one pool canister, on `subnet` when the template pins one.
+/// `creation_budget` is the total amount attached to creation; the subnet's
+/// creation fee is deducted from it on both paths.
 pub async fn create_pool_canister(
     subnet: Option<Principal>,
     settings: mgt::CanisterSettings,
-    cycles: u128,
+    creation_budget: u128,
 ) -> CreateOutcome {
     match subnet {
-        Some(subnet) => create_canister_on_outcome(subnet, Some(settings), cycles).await,
-        None => match mgt::create_canister_with_extra_cycles(
-            &mgt::CreateCanisterArgs {
-                settings: Some(settings),
-            },
-            cycles,
-        )
-        .await
-        {
-            Ok(res) => CreateOutcome::Created(res.canister_id),
+        Some(subnet) => create_canister_on_outcome(subnet, Some(settings), creation_budget).await,
+        None => match management::create_canister(settings, creation_budget).await {
+            Ok(canister) => CreateOutcome::Created(canister),
             Err(err) if is_predispatch_error(&err) => CreateOutcome::Refunded(format_error(err)),
             Err(err) => CreateOutcome::Unknown(format_error(err)),
         },
@@ -203,19 +180,11 @@ pub async fn create_pool_canister(
 async fn create_canister_on_outcome(
     subnet: Principal,
     settings: Option<mgt::CanisterSettings>,
-    cycles: u128,
+    creation_budget: u128,
 ) -> CreateOutcome {
-    let arg = CreateCanisterInput {
-        settings,
-        subnet_type: None,
-        subnet_selection: Some(SubnetSelection::Subnet {
-            subnet: SubnetId {
-                principal_id: subnet.to_text(),
-            },
-        }),
-    };
+    let arg = create_canister_input(subnet, settings);
     let res: Result<Result<Principal, CreateCanisterOutput>, ic_cdk::call::Error> =
-        raw_call(CMC_PRINCIPAL, "create_canister", (arg,), cycles).await;
+        call_with_cycles(CMC_PRINCIPAL, "create_canister", (arg,), creation_budget).await;
     match res {
         Ok(Ok(canister)) => CreateOutcome::Created(canister),
         Ok(Err(err)) => CreateOutcome::Refunded(format!("{:?}", err)),
@@ -227,20 +196,64 @@ async fn create_canister_on_outcome(
 async fn create_canister_on(
     subnet: Principal,
     settings: Option<mgt::CanisterSettings>,
-    cycles: u128,
+    creation_budget: u128,
 ) -> Result<Principal, String> {
-    let arg = CreateCanisterInput {
+    let arg = create_canister_input(subnet, settings);
+    let res: Result<Principal, CreateCanisterOutput> =
+        call_with_cycles(CMC_PRINCIPAL, "create_canister", (arg,), creation_budget)
+            .await
+            .map_err(|err| {
+                format!(
+                    "failed to call create_canister on {:?}, error: {:?}",
+                    CMC_PRINCIPAL, err
+                )
+            })?;
+    res.map_err(|err| format!("failed to create canister, error: {:?}", err))
+}
+
+fn create_canister_input(
+    subnet: Principal,
+    settings: Option<mgt::CanisterSettings>,
+) -> CreateCanisterInput {
+    CreateCanisterInput {
         settings,
         subnet_type: None,
-        subnet_selection: Some(SubnetSelection::Subnet {
-            subnet: SubnetId {
-                principal_id: subnet.to_text(),
-            },
-        }),
-    };
-    let res: Result<Principal, CreateCanisterOutput> =
-        call(CMC_PRINCIPAL, "create_canister", (arg,), cycles).await?;
-    res.map_err(|err| format!("failed to create canister, error: {:?}", err))
+        subnet_selection: Some(SubnetSelection::Subnet { subnet }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Keeps the local CMC binding aligned with the canonical `cmc.did`, where
+    /// `Subnet.subnet` is a principal (not the legacy protobuf-shaped text).
+    #[test]
+    fn cmc_subnet_selection_encodes_a_principal() {
+        #[derive(CandidType, Deserialize)]
+        enum CanonicalSubnetSelection {
+            Subnet { subnet: Principal },
+        }
+
+        #[derive(CandidType, Deserialize)]
+        struct CanonicalCreateCanisterInput {
+            settings: Option<mgt::CanisterSettings>,
+            subnet_selection: Option<CanonicalSubnetSelection>,
+            subnet_type: Option<String>,
+        }
+
+        let subnet = Principal::from_slice(&[1, 2, 3, 4]);
+        let bytes = candid::encode_one(create_canister_input(subnet, None)).unwrap();
+        let decoded: CanonicalCreateCanisterInput = candid::decode_one(&bytes).unwrap();
+        assert!(decoded.settings.is_none());
+        assert!(decoded.subnet_type.is_none());
+        match decoded.subnet_selection {
+            Some(CanonicalSubnetSelection::Subnet { subnet: actual }) => {
+                assert_eq!(actual, subnet)
+            }
+            None => panic!("subnet selection is missing"),
+        }
+    }
 }
 
 ic_cdk::export_candid!();

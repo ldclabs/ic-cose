@@ -21,7 +21,8 @@ request id?", so creation is kept entirely outside the paid path:
 
 1. **Governance approves a `ProvisionTemplate`** (`admin_add_provision_template`),
    fixing the wasm name, artifact hash, expected module hash, encoding,
-   controllers, subnet, initial cycles and init-args limit. The template's `hash`
+   controllers, subnet, creation budget (inclusive of the network creation fee)
+   and init-args limit. The template's `hash`
    covers all of it.
 2. **Governance pre-creates pool canisters** (`admin_refill_pool`). A create whose
    outcome is unknown flips the template to `CreateUnknown` and circuit-breaks

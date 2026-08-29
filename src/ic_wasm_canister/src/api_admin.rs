@@ -12,12 +12,16 @@ use std::collections::BTreeSet;
 
 use crate::{
     create_canister_on, create_pool_canister, is_controller, is_controller_or_manager,
-    is_controller_or_manager_or_committer, store, validate_principals, CreateOutcome, MILLISECONDS,
+    is_controller_or_manager_or_committer, management, store, validate_principals, CreateOutcome,
+    MILLISECONDS,
 };
 
 // encoded candid arguments: ()
 // println!("{:?}", candid::utils::encode_args(()).unwrap());
 static EMPTY_CANDID_ARGS: &[u8] = &[68, 73, 68, 76, 0, 0];
+/// Cycles attached to legacy admin canister creation, including the subnet's
+/// creation fee.
+const DEFAULT_CREATION_BUDGET: u128 = 2_000_000_000_000;
 
 #[ic_cdk::update(guard = "is_controller")]
 fn admin_add_managers(args: BTreeSet<Principal>) -> Result<(), String> {
@@ -80,7 +84,7 @@ fn validate_admin_remove_committers(args: BTreeSet<Principal>) -> Result<String,
 }
 
 #[ic_cdk::update(guard = "is_controller_or_manager_or_committer")]
-async fn admin_add_wasm(
+fn admin_add_wasm(
     args: AddWasmInput,
     force_prev_hash: Option<ByteArray<32>>,
 ) -> Result<(), String> {
@@ -89,23 +93,18 @@ async fn admin_add_wasm(
         ic_cdk::api::time() / MILLISECONDS,
         args,
         force_prev_hash,
-        false,
+        None,
     )
+    .map(|_| ())
 }
 
 #[ic_cdk::update]
-async fn validate_admin_add_wasm(
+fn validate_admin_add_wasm(
     args: AddWasmInput,
     force_prev_hash: Option<ByteArray<32>>,
 ) -> Result<String, String> {
     let rt = pretty_format(&(&args.name, &args.description, &force_prev_hash))?;
-    store::wasm::add_wasm(
-        ic_cdk::api::msg_caller(),
-        ic_cdk::api::time() / MILLISECONDS,
-        args,
-        force_prev_hash,
-        true,
-    )?;
+    store::wasm::validate_wasm(&args, force_prev_hash)?;
 
     Ok(rt)
 }
@@ -116,64 +115,21 @@ async fn admin_create_canister(
     settings: Option<mgt::CanisterSettings>,
     args: Option<ByteBuf>,
 ) -> Result<Principal, String> {
-    let self_id = ic_cdk::api::canister_self();
-    let mut settings = settings.unwrap_or_default();
-    let controllers = settings.controllers.get_or_insert_with(Default::default);
-    if !controllers.contains(&self_id) {
-        controllers.push(self_id);
-    }
-
-    let (hash, wasm) = store::wasm::get_latest(&wasm_name)?;
-    let res = mgt::create_canister_with_extra_cycles(
-        &mgt::CreateCanisterArgs {
-            settings: Some(settings),
-        },
-        2_000_000_000_000,
-    )
-    .await
-    .map_err(format_error)?;
-    let canister_id = res.canister_id;
-
-    let arg = args.unwrap_or_else(|| ByteBuf::from(EMPTY_CANDID_ARGS));
-    let res = mgt::install_code(&mgt::InstallCodeArgs {
-        mode: mgt::CanisterInstallMode::Install,
-        canister_id,
-        wasm_module: wasm.wasm.into_vec(),
-        arg: arg.clone().into_vec(),
-    })
-    .await
-    .map_err(format_error);
-
-    let id = store::wasm::add_log(store::DeployLog {
-        name: wasm_name,
-        deploy_at: ic_cdk::api::time() / MILLISECONDS,
-        canister: canister_id,
-        prev_hash: Default::default(),
-        wasm_hash: hash,
-        args: arg,
-        error: res.clone().err(),
-    })?;
-
-    if res.is_ok() {
-        store::state::with_mut(|s| {
-            s.deployed_list.insert(canister_id, (id, hash));
-        })
-    }
-    // the canister exists either way: report the failure, but keep its id in the
-    // error so the caller can retry the install instead of losing track of it.
-    res.map_err(|err| {
-        format!(
-            "canister {} created, but install failed: {}",
-            canister_id.to_text(),
-            err
-        )
-    })?;
-    Ok(canister_id)
+    create_and_install(None, wasm_name, settings, args).await
 }
 
 #[ic_cdk::update(guard = "is_controller")]
 async fn admin_create_on(
     subnet: Principal,
+    wasm_name: String,
+    settings: Option<mgt::CanisterSettings>,
+    args: Option<ByteBuf>,
+) -> Result<Principal, String> {
+    create_and_install(Some(subnet), wasm_name, settings, args).await
+}
+
+async fn create_and_install(
+    subnet: Option<Principal>,
     wasm_name: String,
     settings: Option<mgt::CanisterSettings>,
     args: Option<ByteBuf>,
@@ -186,18 +142,21 @@ async fn admin_create_on(
     }
 
     let (hash, wasm) = store::wasm::get_latest(&wasm_name)?;
-    let canister_id = create_canister_on(subnet, Some(settings), 2_000_000_000_000)
-        .await
-        .map_err(format_error)?;
+    let canister_id = match subnet {
+        Some(subnet) => create_canister_on(subnet, Some(settings), DEFAULT_CREATION_BUDGET).await?,
+        None => management::create_canister(settings, DEFAULT_CREATION_BUDGET)
+            .await
+            .map_err(format_error)?,
+    };
     let arg = args.unwrap_or_else(|| ByteBuf::from(EMPTY_CANDID_ARGS));
-    let res = mgt::install_code(&mgt::InstallCodeArgs {
-        mode: mgt::CanisterInstallMode::Install,
+    let res = management::install_code(
         canister_id,
-        wasm_module: wasm.wasm.into_vec(),
-        arg: arg.clone().into_vec(),
-    })
-    .await
-    .map_err(format_error);
+        mgt::CanisterInstallMode::Install,
+        &wasm.wasm,
+        hash,
+        &arg,
+    )
+    .await;
 
     let id = store::wasm::add_log(store::DeployLog {
         name: wasm_name,
@@ -256,12 +215,7 @@ async fn admin_deploy(
     args: DeployWasmInput,
     ignore_prev_hash: Option<ByteArray<32>>,
 ) -> Result<(), String> {
-    let info = mgt::canister_info(&mgt::CanisterInfoArgs {
-        canister_id: args.canister,
-        num_requested_changes: None,
-    })
-    .await
-    .map_err(format_error)?;
+    let info = management::canister_info(args.canister).await?;
     let id = ic_cdk::api::canister_self();
     if !info.controllers.contains(&id) {
         Err(format!(
@@ -277,12 +231,7 @@ async fn admin_deploy(
         mgt::CanisterInstallMode::Upgrade(None)
     };
 
-    let prev_hash: [u8; 32] = if let Some(hash) = info.module_hash {
-        hash.try_into().map_err(format_error)?
-    } else {
-        Default::default()
-    };
-    let prev_hash = ByteArray::from(prev_hash);
+    let prev_hash = info.module_hash.unwrap_or_default();
     let (hash, wasm) = if let Some(ignore_prev_hash) = ignore_prev_hash {
         if ignore_prev_hash != prev_hash {
             Err(format!(
@@ -299,14 +248,7 @@ async fn admin_deploy(
     let arg = args
         .args
         .unwrap_or_else(|| ByteBuf::from(EMPTY_CANDID_ARGS));
-    let res = mgt::install_code(&mgt::InstallCodeArgs {
-        mode,
-        canister_id: args.canister,
-        wasm_module: wasm.wasm.into_vec(),
-        arg: arg.clone().into_vec(),
-    })
-    .await
-    .map_err(format_error);
+    let res = management::install_code(args.canister, mode, &wasm.wasm, hash, &arg).await;
 
     let id = store::wasm::add_log(store::DeployLog {
         name: args.name,
@@ -343,12 +285,7 @@ async fn validate_admin_deploy(
         &args_.to_string(),
         &ignore_prev_hash,
     ))?;
-    let info = mgt::canister_info(&mgt::CanisterInfoArgs {
-        canister_id: args.canister,
-        num_requested_changes: None,
-    })
-    .await
-    .map_err(format_error)?;
+    let info = management::canister_info(args.canister).await?;
     let id = ic_cdk::api::canister_self();
     if !info.controllers.contains(&id) {
         Err(format!(
@@ -358,12 +295,7 @@ async fn validate_admin_deploy(
         ))?;
     }
 
-    let prev_hash: [u8; 32] = if let Some(hash) = info.module_hash {
-        hash.try_into().map_err(format_error)?
-    } else {
-        Default::default()
-    };
-    let prev_hash = ByteArray::from(prev_hash);
+    let prev_hash = info.module_hash.unwrap_or_default();
     if let Some(ignore_prev_hash) = ignore_prev_hash {
         if ignore_prev_hash != prev_hash {
             Err(format!(
@@ -451,8 +383,8 @@ async fn admin_batch_topup() -> Result<u128, String> {
 
         let res = futures::future::try_join_all(ids.iter().map(|id| async {
             let arg = mgt::CanisterStatusArgs { canister_id: *id };
-            let status = mgt::canister_status(&arg).await.map_err(format_error)?;
-            if status.cycles <= threshold {
+            let cycles = management::cycle_balance(*id).await?;
+            if cycles <= threshold {
                 mgt::deposit_cycles(&arg, amount)
                     .await
                     .map_err(format_error)?;
@@ -480,7 +412,7 @@ async fn admin_update_canister_settings(args: mgt::UpdateSettingsArgs) -> Result
 }
 
 #[ic_cdk::update]
-async fn validate_admin_batch_call(
+fn validate_admin_batch_call(
     canisters: BTreeSet<Principal>,
     method: String,
     args: Option<ByteBuf>,
@@ -491,12 +423,12 @@ async fn validate_admin_batch_call(
 }
 
 #[ic_cdk::update]
-async fn validate_admin_batch_topup() -> Result<String, String> {
+fn validate_admin_batch_topup() -> Result<String, String> {
     Ok("ok".to_string())
 }
 
 #[ic_cdk::update]
-async fn validate_admin_update_canister_settings(
+fn validate_admin_update_canister_settings(
     args: mgt::UpdateSettingsArgs,
 ) -> Result<String, String> {
     store::state::with(|s| {
@@ -559,8 +491,8 @@ fn validate_admin_remove_provisioners(args: BTreeSet<Principal>) -> Result<Strin
 /// Approves an immutable provisioning template.
 ///
 /// This is the governance act that fixes which module, settings, controllers,
-/// subnet and cycles a provisioned canister gets: a provisioner can afterwards
-/// only name the template by id and hash.
+/// subnet and creation budget a provisioned canister gets: a provisioner can
+/// afterwards only name the template by id and hash.
 #[ic_cdk::update(guard = "is_controller")]
 fn admin_add_provision_template(args: ProvisionTemplate) -> Result<ProvisionTemplateInfo, String> {
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
@@ -671,16 +603,7 @@ fn admin_commit_wasm_chunks(
 ) -> Result<ByteArray<32>, String> {
     let caller = ic_cdk::api::msg_caller();
     let wasm = store::provision::take_chunks(caller, &args.chunk_hashes)?;
-    let hash: ByteArray<32> = ic_cose_types::cose::sha256(&wasm).into();
-    if hash != args.artifact_hash {
-        return Err(format!(
-            "assembled artifact hash {} does not match the declared {}",
-            hex::encode(hash.as_ref()),
-            hex::encode(args.artifact_hash.as_ref())
-        ));
-    }
-
-    store::wasm::add_wasm(
+    let hash = store::wasm::add_wasm(
         caller,
         ic_cdk::api::time() / MILLISECONDS,
         AddWasmInput {
@@ -690,7 +613,7 @@ fn admin_commit_wasm_chunks(
             encoding: args.encoding,
         },
         force_prev_hash,
-        false,
+        Some(args.artifact_hash),
     )?;
     store::provision::clear_chunks(caller);
     Ok(hash)

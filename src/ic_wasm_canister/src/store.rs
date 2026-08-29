@@ -52,6 +52,14 @@ pub struct State {
     /// release canisters from approved templates, nothing else.
     #[serde(default)]
     pub provisioners: BTreeSet<Principal>,
+    /// Heap index over the stable pool inventory.
+    ///
+    /// A template retains installed canisters for auditability, so scanning the
+    /// stable pool for every reservation would become linear in all historical
+    /// installs. This bounded index contains only currently available entries.
+    /// It is derived and can be rebuilt lazily after upgrading old state.
+    #[serde(default)]
+    pub available_pool: BTreeMap<String, BTreeSet<Principal>>,
 }
 
 impl Storable for State {
@@ -425,48 +433,36 @@ pub mod state {
 pub mod wasm {
     use super::*;
 
+    /// Performs all synchronous checks for publishing an artifact and returns
+    /// the hash under which it would be stored.
+    pub fn validate_wasm(
+        args: &AddWasmInput,
+        force_prev_hash: Option<ByteArray<32>>,
+    ) -> Result<ByteArray<32>, String> {
+        validate_new_wasm(args, force_prev_hash, None)
+    }
+
     pub fn add_wasm(
         caller: Principal,
         now_ms: u64,
         args: AddWasmInput,
         force_prev_hash: Option<ByteArray<32>>,
-        dry_run: bool,
-    ) -> Result<(), String> {
+        expected_hash: Option<ByteArray<32>>,
+    ) -> Result<ByteArray<32>, String> {
+        let hash = validate_new_wasm(&args, force_prev_hash, expected_hash)?;
+
+        state::with_mut(|s| {
+            let prev_hash = force_prev_hash.unwrap_or_else(|| {
+                s.latest_version
+                    .get(&args.name)
+                    .copied()
+                    .unwrap_or_else(|| [0u8; 32].into())
+            });
+            s.upgrade_path.insert(prev_hash, hash);
+            s.latest_version.insert(args.name.clone(), hash);
+        });
+
         WASM_STORE.with_borrow_mut(|m| {
-            let hash: ByteArray<32> = sha256(&args.wasm).into();
-            if m.contains_key(&hash) {
-                return Err("wasm already exists".to_string());
-            }
-
-            if dry_run {
-                return state::with(|s| {
-                    if let Some(force_prev_hash) = force_prev_hash {
-                        if !s.upgrade_path.contains_key(&force_prev_hash) {
-                            Err("force_prev_hash not exists".to_string())?
-                        }
-                    };
-
-                    Ok::<(), String>(())
-                });
-            }
-
-            state::with_mut(|s| {
-                let prev_hash = if let Some(force_prev_hash) = force_prev_hash {
-                    if !s.upgrade_path.contains_key(&force_prev_hash) {
-                        Err("force_prev_hash not exists".to_string())?
-                    }
-                    force_prev_hash
-                } else {
-                    s.latest_version
-                        .get(&args.name)
-                        .copied()
-                        .unwrap_or_else(|| [0u8; 32].into())
-                };
-                s.upgrade_path.insert(prev_hash, hash);
-                s.latest_version.insert(args.name.clone(), hash);
-                Ok::<(), String>(())
-            })?;
-
             m.insert(
                 *hash,
                 Wasm {
@@ -477,9 +473,35 @@ pub mod wasm {
                     wasm: args.wasm,
                     encoding: args.encoding.unwrap_or_default(),
                 },
-            );
-            Ok(())
-        })
+            )
+        });
+        Ok(hash)
+    }
+
+    fn validate_new_wasm(
+        args: &AddWasmInput,
+        force_prev_hash: Option<ByteArray<32>>,
+        expected_hash: Option<ByteArray<32>>,
+    ) -> Result<ByteArray<32>, String> {
+        let hash: ByteArray<32> = sha256(&args.wasm).into();
+        if let Some(expected_hash) = expected_hash {
+            if hash != expected_hash {
+                return Err(format!(
+                    "artifact hash {} does not match the declared {}",
+                    hex::encode(hash.as_ref()),
+                    hex::encode(expected_hash.as_ref())
+                ));
+            }
+        }
+        if WASM_STORE.with_borrow(|m| m.contains_key(&hash)) {
+            return Err("wasm already exists".to_string());
+        }
+        if let Some(force_prev_hash) = force_prev_hash {
+            if !state::with(|s| s.upgrade_path.contains_key(&force_prev_hash)) {
+                return Err("force_prev_hash not exists".to_string());
+            }
+        }
+        Ok(hash)
     }
 
     pub fn get_latest(name: &str) -> Result<(ByteArray<32>, Wasm), String> {
@@ -650,7 +672,7 @@ mod test {
                 encoding: None,
             },
             None,
-            false,
+            None,
         )
         .unwrap();
 
@@ -715,6 +737,29 @@ mod test {
         let receipt = provision::get_receipt(&rid(1)).unwrap();
         assert_eq!(receipt.canister, pooled);
         assert_eq!(receipt.stage, ProvisionStage::Reserved);
+    }
+
+    #[test]
+    fn available_pool_index_rebuilds_old_state_once() {
+        let id = "tpl_index";
+        let entry = seed_template(id);
+        let first = Principal::from_slice(&[7, 8, 1]);
+        let second = Principal::from_slice(&[7, 8, 2]);
+        provision::finish_pool_create(id, first, 1).unwrap();
+        provision::finish_pool_create(id, second, 2).unwrap();
+
+        // Simulate state written by a version that only had the stable pool.
+        state::with_mut(|s| {
+            s.available_pool.remove(id);
+        });
+
+        let reserved = provision::reserve(10, &reserve_req(id, &entry, 31)).unwrap();
+        assert!(reserved.canister == first || reserved.canister == second);
+        state::with(|s| {
+            let remaining = s.available_pool.get(id).unwrap();
+            assert_eq!(remaining.len(), 1);
+            assert!(!remaining.contains(&reserved.canister));
+        });
     }
 
     #[test]
@@ -1078,7 +1123,7 @@ mod test {
                 encoding: None,
             },
             None,
-            false,
+            None,
         )
         .unwrap();
         let latest = wasm::get_latest("project").unwrap().0;
@@ -1347,6 +1392,7 @@ pub mod provision {
                 },
             )
         });
+        add_available(id, canister);
         Ok(())
     }
 
@@ -1391,6 +1437,7 @@ pub mod provision {
                     },
                 )
             });
+            add_available(id, canister);
         }
         Ok(())
     }
@@ -1401,25 +1448,76 @@ pub mod provision {
                 start: PoolKey(id.to_string(), Principal::management_canister()),
             })
             .take_while(|e| e.key().0 == id)
-            .map(|e| PoolCanisterInfo {
-                canister: e.key().1,
-                state: e.value().state,
-                created_at: e.value().created_at,
-                request_id: e.value().request_id,
+            .map(|e| {
+                // `LazyEntry::value` deserializes on every call, so load it once.
+                let value = e.value();
+                PoolCanisterInfo {
+                    canister: e.key().1,
+                    state: value.state,
+                    created_at: value.created_at,
+                    request_id: value.request_id,
+                }
             })
             .collect()
         })
     }
 
     fn take_available(id: &str) -> Option<Principal> {
-        POOL_STORE.with_borrow(|r| {
+        if let Some(canister) = state::with(|s| {
+            s.available_pool
+                .get(id)
+                .and_then(|canisters| canisters.first().copied())
+        }) {
+            return Some(canister);
+        }
+
+        // State written before this index was introduced has no heap index.
+        // Rebuild the whole template once, then future reservations stay O(log n)
+        // even though the stable audit inventory keeps every installed canister.
+        let expected = TEMPLATE_STORE
+            .with_borrow(|r| r.get(&id.to_string()).map(|entry| entry.available))
+            .unwrap_or(0);
+        if expected == 0 {
+            return None;
+        }
+        let available: BTreeSet<Principal> = POOL_STORE.with_borrow(|r| {
             r.range(ops::RangeFrom {
                 start: PoolKey(id.to_string(), Principal::management_canister()),
             })
             .take_while(|e| e.key().0 == id)
-            .find(|e| e.value().state == PoolCanisterState::Available)
-            .map(|e| e.key().1)
-        })
+            .filter_map(|e| (e.value().state == PoolCanisterState::Available).then_some(e.key().1))
+            .collect()
+        });
+        let canister = available.first().copied()?;
+        state::with_mut(|s| {
+            s.available_pool.insert(id.to_string(), available);
+        });
+        Some(canister)
+    }
+
+    fn add_available(id: &str, canister: Principal) {
+        state::with_mut(|s| {
+            s.available_pool
+                .entry(id.to_string())
+                .or_default()
+                .insert(canister);
+        });
+    }
+
+    fn remove_available(id: &str, canister: &Principal) {
+        state::with_mut(|s| {
+            let remove_entry = s
+                .available_pool
+                .get_mut(id)
+                .map(|canisters| {
+                    canisters.remove(canister);
+                    canisters.is_empty()
+                })
+                .unwrap_or(false);
+            if remove_entry {
+                s.available_pool.remove(id);
+            }
+        });
     }
 
     // ----- requests -----
@@ -1493,6 +1591,7 @@ pub mod provision {
                 },
             )
         });
+        remove_available(&req.provision_template_id, &canister);
         with_template_mut(&req.provision_template_id, |e| {
             e.available = e.available.saturating_sub(1);
             e.reserved = e.reserved.saturating_add(1);
@@ -1536,7 +1635,8 @@ pub mod provision {
         /// Proceed with the install of `wasm` onto `canister`.
         Install {
             canister: Principal,
-            wasm: Wasm,
+            wasm: Box<Wasm>,
+            artifact_hash: ByteArray<32>,
             expected_module_hash: ByteArray<32>,
             controllers: Vec<Principal>,
         },
@@ -1621,7 +1721,8 @@ pub mod provision {
 
         Ok(InstallPlan::Install {
             canister: req.canister,
-            wasm,
+            wasm: Box::new(wasm),
+            artifact_hash: entry.template.artifact_hash,
             expected_module_hash: entry.template.expected_module_hash,
             controllers: entry.template.settings.controllers.clone(),
         })
@@ -1696,7 +1797,7 @@ pub mod provision {
         expected_prev_module_hash: ByteArray<32>,
         args_hash: ByteArray<32>,
     ) -> Result<Option<ProvisionReceipt>, String> {
-        if let Some(existing) = REQUEST_STORE.with_borrow(|r| r.get(request_id)) {
+        let created_at = if let Some(existing) = REQUEST_STORE.with_borrow(|r| r.get(request_id)) {
             if existing.canister != canister
                 || existing.artifact_hash != artifact_hash
                 || existing.expected_module_hash != expected_module_hash
@@ -1708,10 +1809,12 @@ pub mod provision {
             if existing.stage == ProvisionStage::Installed {
                 return Ok(Some(existing.into_receipt(*request_id)));
             }
-        }
+            existing.created_at
+        } else {
+            now_ms
+        };
 
         REQUEST_STORE.with_borrow_mut(|r| {
-            let created_at = r.get(request_id).map(|c| c.created_at).unwrap_or(now_ms);
             r.insert(
                 **request_id,
                 ProvisionRequest {
@@ -1776,6 +1879,12 @@ pub mod provision {
             .clone()
             .ok_or_else(|| "only a template reservation can be released".to_string())?;
 
+        with_template_mut(&template_id, |e| {
+            e.reserved = e.reserved.saturating_sub(1);
+            e.available = e.available.saturating_add(1);
+            e.tombstones = e.tombstones.saturating_add(1);
+            Ok(())
+        })?;
         POOL_STORE.with_borrow_mut(|r| {
             let key = PoolKey(template_id.clone(), canister);
             if let Some(mut pc) = r.get(&key) {
@@ -1784,11 +1893,7 @@ pub mod provision {
                 r.insert(key, pc);
             }
         });
-        with_template_mut(&template_id, |e| {
-            e.reserved = e.reserved.saturating_sub(1);
-            e.available = e.available.saturating_add(1);
-            Ok(())
-        })?;
+        add_available(&template_id, canister);
         REQUEST_STORE.with_borrow_mut(|r| {
             let mut cur = existing;
             cur.stage = ProvisionStage::Released;
@@ -1801,10 +1906,6 @@ pub mod provision {
                 now_ms,
             )
         });
-        with_template_mut(&template_id, |e| {
-            e.tombstones = e.tombstones.saturating_add(1);
-            Ok(())
-        })?;
         prune_tombstones(&template_id, now_ms);
 
         Ok(ReleaseReceipt {
@@ -1948,7 +2049,12 @@ pub mod provision {
         let hash: ByteArray<32> = sha256(&chunk).into();
         let key = ChunkKey(caller, hash);
         let known = CHUNK_STORE.with_borrow(|r| r.contains_key(&key));
-        if !known && staged_chunks(caller) >= MAX_STAGED_CHUNKS {
+        if known {
+            // An upload retry is already durably staged. Avoid rewriting up to
+            // 1 MiB of stable memory for an identical content-addressed chunk.
+            return Ok(hash);
+        }
+        if staged_chunks(caller) >= MAX_STAGED_CHUNKS {
             return Err(format!(
                 "at most {} chunks may be staged at once; commit or clear them first",
                 MAX_STAGED_CHUNKS
@@ -1983,11 +2089,10 @@ pub mod provision {
     pub fn clear_chunks(caller: Principal) -> u64 {
         CHUNK_STORE.with_borrow_mut(|r| {
             let keys: Vec<ChunkKey> = r
-                .range(ops::RangeFrom {
+                .keys_range(ops::RangeFrom {
                     start: ChunkKey(caller, ByteArray::from([0u8; 32])),
                 })
-                .take_while(|e| e.key().0 == caller)
-                .map(|e| e.key().clone())
+                .take_while(|key| key.0 == caller)
                 .collect();
             let n = keys.len() as u64;
             for k in keys {

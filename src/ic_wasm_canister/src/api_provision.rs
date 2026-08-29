@@ -2,7 +2,6 @@ use candid::Principal;
 use ic_cdk_management_canister as mgt;
 use ic_cose_types::{
     cose::sha256,
-    format_error,
     types::wasm::{
         DeploymentRequest, InstallRequest, ProvisionReceipt, ReleaseReceipt, ReservationReceipt,
         ReserveRequest, MAX_PROVISION_ARGS_BYTES,
@@ -10,14 +9,7 @@ use ic_cose_types::{
 };
 use serde_bytes::ByteArray;
 
-use crate::{is_provisioner, store, MILLISECONDS};
-
-/// Largest module still installed with a single `install_code` message. Larger
-/// artifacts go through the chunk store, which is what lets a module above the
-/// ingress/request limits be deployed at all.
-const MAX_DIRECT_INSTALL_BYTES: usize = 1_500_000;
-/// Management canister chunk limit is 1 MiB.
-const UPLOAD_CHUNK_BYTES: usize = 1024 * 1024;
+use crate::{is_provisioner, management, store, MILLISECONDS};
 
 /// Claims one pre-created canister for `request_id`.
 ///
@@ -43,22 +35,30 @@ async fn ensure_install(req: InstallRequest) -> Result<ProvisionReceipt, String>
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
     store::provision::validate_epoch(req.expires_at, now_ms)?;
 
-    let (canister, wasm, expected, controllers) =
+    let (canister, wasm, artifact_hash, expected, controllers) =
         match store::provision::begin_install(now_ms, &req)? {
             store::provision::InstallPlan::AlreadyInstalled(receipt) => return Ok(*receipt),
             store::provision::InstallPlan::Install {
                 canister,
                 wasm,
+                artifact_hash,
                 expected_module_hash,
                 controllers,
-            } => (canister, wasm, expected_module_hash, controllers),
+            } => (
+                canister,
+                wasm,
+                artifact_hash,
+                expected_module_hash,
+                controllers,
+            ),
         };
 
     match install_exact(
         canister,
         mgt::CanisterInstallMode::Install,
         wasm,
-        req.init_args.to_vec(),
+        artifact_hash,
+        &req.init_args,
         expected,
         &controllers,
     )
@@ -177,11 +177,11 @@ async fn release_reservation(
     canister: Principal,
 ) -> Result<ReleaseReceipt, String> {
     let expected = store::provision::expected_controllers(&request_id)?;
-    let (module_hash, controllers) = inspect_canister(canister).await?;
-    if module_hash.is_some() {
+    let info = management::canister_info(canister).await?;
+    if info.module_hash.is_some() {
         return Err("canister is not empty and cannot be released".to_string());
     }
-    store::provision::assert_controllers(&controllers, &expected)?;
+    store::provision::assert_controllers(&info.controllers, &expected)?;
 
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
     store::provision::release(now_ms, &request_id, canister)
@@ -196,27 +196,6 @@ fn get_provision_receipt(request_id: ByteArray<32>) -> Result<ProvisionReceipt, 
 
 // ----- helpers -----
 
-/// Reads the module hash and controllers the management canister reports.
-async fn inspect_canister(
-    canister: Principal,
-) -> Result<(Option<ByteArray<32>>, Vec<Principal>), String> {
-    let status = mgt::canister_status(&mgt::CanisterStatusArgs {
-        canister_id: canister,
-    })
-    .await
-    .map_err(format_error)?;
-    let module_hash = match status.module_hash {
-        Some(h) => {
-            let h: [u8; 32] = h
-                .try_into()
-                .map_err(|_| "module_hash is not 32 bytes".to_string())?;
-            Some(ByteArray::from(h))
-        }
-        None => None,
-    };
-    Ok((module_hash, status.settings.controllers))
-}
-
 /// Installs onto an empty canister and returns the resulting module hash.
 ///
 /// A retry whose first attempt succeeded but lost its response finds the
@@ -224,16 +203,17 @@ async fn inspect_canister(
 async fn install_exact(
     canister: Principal,
     mode: mgt::CanisterInstallMode,
-    wasm: store::Wasm,
-    arg: Vec<u8>,
+    wasm: Box<store::Wasm>,
+    artifact_hash: ByteArray<32>,
+    arg: &[u8],
     expected: ByteArray<32>,
     controllers: &[Principal],
 ) -> Result<ByteArray<32>, String> {
-    let (module_hash, actual_controllers) = inspect_canister(canister).await?;
+    let info = management::canister_info(canister).await?;
     // a reserved canister whose controllers drifted is no longer the canister
     // the template approved, so it must not receive the install
-    store::provision::assert_controllers(&actual_controllers, controllers)?;
-    match module_hash {
+    store::provision::assert_controllers(&info.controllers, controllers)?;
+    match info.module_hash {
         Some(h) if h == expected => return Ok(h),
         Some(h) => {
             return Err(format!(
@@ -245,7 +225,7 @@ async fn install_exact(
         None => {}
     }
 
-    install_module(canister, mode, wasm.wasm.into_vec(), arg).await?;
+    management::install_code(canister, mode, &wasm.wasm, artifact_hash, arg).await?;
     assert_module_hash(canister, expected).await
 }
 
@@ -253,7 +233,7 @@ async fn upgrade_exact(
     req: &DeploymentRequest,
     wasm: store::Wasm,
 ) -> Result<ByteArray<32>, String> {
-    let current = inspect_canister(req.canister).await?.0;
+    let current = management::canister_info(req.canister).await?.module_hash;
     if current == Some(req.expected_module_hash) {
         // a retry after a lost response: the upgrade already landed
         return Ok(req.expected_module_hash);
@@ -270,11 +250,12 @@ async fn upgrade_exact(
         None => return Err("canister has no module to upgrade".to_string()),
     }
 
-    install_module(
+    management::install_code(
         req.canister,
         mgt::CanisterInstallMode::Upgrade(None),
-        wasm.wasm.into_vec(),
-        req.args.to_vec(),
+        &wasm.wasm,
+        req.artifact_hash,
+        &req.args,
     )
     .await?;
     assert_module_hash(req.canister, req.expected_module_hash).await
@@ -284,9 +265,9 @@ async fn assert_module_hash(
     canister: Principal,
     expected: ByteArray<32>,
 ) -> Result<ByteArray<32>, String> {
-    let actual = inspect_canister(canister)
+    let actual = management::canister_info(canister)
         .await?
-        .0
+        .module_hash
         .ok_or_else(|| "canister reports no module after install".to_string())?;
     if actual != expected {
         return Err(format!(
@@ -296,55 +277,4 @@ async fn assert_module_hash(
         ));
     }
     Ok(actual)
-}
-
-/// Installs a module, falling back to the chunk store for artifacts too large
-/// for a single inter-canister message.
-async fn install_module(
-    canister: Principal,
-    mode: mgt::CanisterInstallMode,
-    wasm_module: Vec<u8>,
-    arg: Vec<u8>,
-) -> Result<(), String> {
-    if wasm_module.len() <= MAX_DIRECT_INSTALL_BYTES {
-        return mgt::install_code(&mgt::InstallCodeArgs {
-            mode,
-            canister_id: canister,
-            wasm_module,
-            arg,
-        })
-        .await
-        .map_err(format_error);
-    }
-
-    let wasm_module_hash = sha256(&wasm_module).to_vec();
-    let args = mgt::ClearChunkStoreArgs {
-        canister_id: canister,
-    };
-    mgt::clear_chunk_store(&args).await.map_err(format_error)?;
-
-    let mut chunk_hashes_list = Vec::with_capacity(wasm_module.len() / UPLOAD_CHUNK_BYTES + 1);
-    for chunk in wasm_module.chunks(UPLOAD_CHUNK_BYTES) {
-        let hash = mgt::upload_chunk(&mgt::UploadChunkArgs {
-            canister_id: canister,
-            chunk: chunk.to_vec(),
-        })
-        .await
-        .map_err(format_error)?;
-        chunk_hashes_list.push(hash);
-    }
-
-    let rt = mgt::install_chunked_code(&mgt::InstallChunkedCodeArgs {
-        mode,
-        target_canister: canister,
-        store_canister: None,
-        chunk_hashes_list,
-        wasm_module_hash,
-        arg,
-    })
-    .await
-    .map_err(format_error);
-    // the staged chunks are only needed for the install itself
-    let _ = mgt::clear_chunk_store(&args).await;
-    rt
 }

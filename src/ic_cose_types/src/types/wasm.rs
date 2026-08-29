@@ -147,7 +147,7 @@ impl ProvisionSettings {
 /// A provisioner may only name an approved template by `id` and `hash`; every
 /// other provisioning parameter is loaded from here, so approving a template is
 /// the governance act that fixes which module, settings, controllers, subnet and
-/// cycles a provisioned canister gets.
+/// creation budget allocated to a provisioned canister.
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ProvisionTemplate {
     pub id: String,
@@ -160,6 +160,8 @@ pub struct ProvisionTemplate {
     pub settings: ProvisionSettings,
     /// Subnet to create pool canisters on; `None` uses the local subnet.
     pub subnet: Option<Principal>,
+    /// Total cycles attached to canister creation, including the subnet's
+    /// creation fee. The new canister receives the remainder.
     pub initial_cycles: u128,
     pub max_init_args_bytes: u32,
     /// How many `Available` canisters this template keeps pre-created.
@@ -269,6 +271,7 @@ pub struct ReservationReceipt {
     pub settings_hash: ByteArray<32>,
     pub controllers: Vec<Principal>,
     pub subnet_policy_hash: ByteArray<32>,
+    /// Creation budget committed by the template, inclusive of creation fee.
     pub initial_cycles: u128,
     pub reserved_at: u64,
 }

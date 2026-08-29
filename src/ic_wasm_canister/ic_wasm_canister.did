@@ -337,9 +337,11 @@ type ProvisionStage = variant {
 // A provisioner may only name an approved template by `id` and `hash`; every
 // other provisioning parameter is loaded from here, so approving a template is
 // the governance act that fixes which module, settings, controllers, subnet and
-// cycles a provisioned canister gets.
+// creation budget allocated to a provisioned canister.
 type ProvisionTemplate = record {
   id : text;
+  // Total cycles attached to canister creation, including the subnet's
+  // creation fee. The new canister receives the remainder.
   initial_cycles : nat;
   // Hash of the stored artifact bytes, as recorded by `add_wasm`.
   artifact_hash : blob;
@@ -390,6 +392,7 @@ type ReleaseReceipt = record {
 };
 type ReservationReceipt = record {
   request_id : blob;
+  // Creation budget committed by the template, inclusive of creation fee.
   initial_cycles : nat;
   controllers : vec principal;
   provision_template_hash : blob;
@@ -480,8 +483,8 @@ service : (opt ChainArgs) -> {
   // Approves an immutable provisioning template.
   // 
   // This is the governance act that fixes which module, settings, controllers,
-  // subnet and cycles a provisioned canister gets: a provisioner can afterwards
-  // only name the template by id and hash.
+  // subnet and creation budget a provisioned canister gets: a provisioner can
+  // afterwards only name the template by id and hash.
   admin_add_provision_template : (ProvisionTemplate) -> (Result_1);
   // Grants the least-privilege provisioning role.
   // 
