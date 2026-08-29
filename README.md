@@ -36,6 +36,6 @@ A imaginative use case is serving as a state persistence service for enclaves ru
 If you plan to use this project and have any questions, feel free to open an issue. I will address it as soon as possible.
 
 ## License
-Copyright © 2024-2025 [LDC Labs](https://github.com/ldclabs).
+Copyright © 2024-2026 [LDC Labs](https://github.com/ldclabs).
 
 `ldclabs/ic-cose` is licensed under the MIT License. See [LICENSE](LICENSE-MIT) for the full license text.

@@ -15,7 +15,7 @@ opt-level = 's'
 codegen-units = 1
 
 [workspace.package]
-version = "0.10.5"
+version = "0.10.6"
 edition = "2021"
 repository = "https://github.com/ldclabs/ic-cose"
 keywords = ["config", "cbor", "canister", "icp", "encryption"]

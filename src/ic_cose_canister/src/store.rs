@@ -425,20 +425,24 @@ impl SettingPathKey {
     pub fn v0(&self) -> SettingPathKey {
         SettingPathKey(self.0.clone(), self.1, self.2, self.3.clone(), 0)
     }
+
+    fn encoded_size_hint(&self) -> usize {
+        self.0.len().saturating_add(self.3.len()).saturating_add(64)
+    }
 }
 
 impl Storable for SettingPathKey {
     const BOUND: Bound = Bound::Unbounded;
 
     fn into_bytes(self) -> Vec<u8> {
-        let capacity = self.0.len() + self.3.len() + 64;
+        let capacity = self.encoded_size_hint();
         to_cbor_bytes(&self, capacity, "SettingPathKey data")
     }
 
     fn to_bytes(&self) -> Cow<'_, [u8]> {
         Cow::Owned(to_cbor_bytes(
             self,
-            self.0.len() + self.3.len() + 64,
+            self.encoded_size_hint(),
             "SettingPathKey data",
         ))
     }
@@ -475,21 +479,30 @@ pub struct SettingArchived {
     pub dek: Option<ByteBuf>,
 }
 
+impl SettingArchived {
+    fn encoded_size_hint(&self) -> usize {
+        self.payload
+            .as_ref()
+            .map_or(0, |value| value.len())
+            .saturating_add(self.dek.as_ref().map_or(0, |value| value.len()))
+            .saturating_add(64)
+    }
+}
+
 impl Storable for SettingArchived {
     const BOUND: Bound = Bound::Unbounded;
 
     fn into_bytes(self) -> Vec<u8> {
-        let capacity = self.payload.as_ref().map_or(0, |value| value.len())
-            + self.dek.as_ref().map_or(0, |value| value.len())
-            + 64;
+        let capacity = self.encoded_size_hint();
         to_cbor_bytes(&self, capacity, "SettingArchived data")
     }
 
     fn to_bytes(&self) -> Cow<'_, [u8]> {
-        let capacity = self.payload.as_ref().map_or(0, |value| value.len())
-            + self.dek.as_ref().map_or(0, |value| value.len())
-            + 64;
-        Cow::Owned(to_cbor_bytes(self, capacity, "SettingArchived data"))
+        Cow::Owned(to_cbor_bytes(
+            self,
+            self.encoded_size_hint(),
+            "SettingArchived data",
+        ))
     }
 
     fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {

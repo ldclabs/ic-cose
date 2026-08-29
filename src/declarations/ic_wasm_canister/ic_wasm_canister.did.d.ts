@@ -1,6 +1,6 @@
-import type { Principal } from '@dfinity/principal';
-import type { ActorMethod } from '@dfinity/agent';
-import type { IDL } from '@dfinity/candid';
+import type { Principal } from '@icp-sdk/core/principal';
+import type { ActorMethod } from '@icp-sdk/core/agent';
+import type { IDL } from '@icp-sdk/core/candid';
 
 export interface AddWasmInput {
   /**
@@ -13,11 +13,11 @@ export interface AddWasmInput {
 }
 /**
  * # Canister Settings
- *
+ * 
  * For arguments of [`create_canister`](https://internetcomputer.org/docs/current/references/ic-interface-spec/#ic-create_canister),
  * [`update_settings`](https://internetcomputer.org/docs/current/references/ic-interface-spec/#ic-update_settings) and
  * [`provisional_create_canister_with_cycles`](https://internetcomputer.org/docs/current/references/ic-interface-spec/#ic-provisional_create_canister_with_cycles).
- *
+ * 
  * All fields are `Option` types, allowing selective settings/updates.
  */
 export interface CanisterSettings {
@@ -25,97 +25,97 @@ export interface CanisterSettings {
    * Indicates a length of time in seconds.
    * A canister is considered frozen whenever the IC estimates that the canister would be depleted of cycles
    * before `freezing_threshold` seconds pass, given the canister's current size and the IC's current cost for storage.
-   *
+   * 
    * Must be a number between 0 and 2<sup>64</sup>-1, inclusively.
-   *
+   * 
    * Default value: `2_592_000` (approximately 30 days).
    */
   'freezing_threshold' : [] | [bigint],
   /**
    * Indicates the threshold on the remaining wasm memory size of the canister in bytes.
-   *
+   * 
    * If the remaining wasm memory size of the canister is below the threshold, execution of the "on low wasm memory" hook is scheduled.
-   *
+   * 
    * Must be a number between 0 and 2<sup>64</sup>-1, inclusively.
-   *
+   * 
    * Default value: `0` (i.e., the "on low wasm memory" hook is never scheduled).
    */
   'wasm_memory_threshold' : [] | [bigint],
   /**
    * A list of environment variables.
-   *
+   * 
    * These variables are accessible to the canister during execution
    * and can be used to configure canister behavior without code changes.
    * Each key must be unique.
-   *
+   * 
    * Default value: `null` (i.e., no environment variables provided).
    */
   'environment_variables' : [] | [Array<EnvironmentVariable>],
   /**
    * A list of at most 10 principals.
-   *
+   * 
    * The principals in this list become the *controllers* of the canister.
-   *
+   * 
    * Default value: A list containing only the caller of the `create_canister` call.
    */
   'controllers' : [] | [Array<Principal>],
   /**
    * Indicates the upper limit on [`CanisterStatusResult::reserved_cycles`] of the canister.
-   *
+   * 
    * Must be a number between 0 and 2<sup>128</sup>-1, inclusively.
-   *
+   * 
    * Default value: `5_000_000_000_000` (5 trillion cycles).
    */
   'reserved_cycles_limit' : [] | [bigint],
   /**
    * Defines who is allowed to read the canister's logs.
-   *
+   * 
    * Default value: [`LogVisibility::Controllers`].
    */
   'log_visibility' : [] | [LogVisibility],
   /**
    * Indicates the upper limit on the memory used for canister logs (bytes).
-   *
+   * 
    * Default value: `4096`.
    */
   'log_memory_limit' : [] | [bigint],
   /**
    * Indicates the upper limit on the WASM heap memory (bytes) consumption of the canister.
-   *
+   * 
    * Must be a number between 0 and 2<sup>48</sup>-1 (i.e 256TB), inclusively.
-   *
+   * 
    * Default value: `3_221_225_472` (3 GiB).
    */
   'wasm_memory_limit' : [] | [bigint],
   /**
    * Indicates how much memory (bytes) the canister is allowed to use in total.
-   *
+   * 
    * If the IC cannot provide the requested allocation,
    * for example because it is oversubscribed, the call will be **rejected**.
-   *
+   * 
    * If set to 0, then memory growth of the canister will be best-effort and subject to the available memory on the IC.
-   *
+   * 
    * Must be a number between 0 and 2<sup>48</sup> (i.e 256TB), inclusively.
-   *
+   * 
    * Default value: `0`
    */
   'memory_allocation' : [] | [bigint],
   /**
    * Indicates how much compute power should be guaranteed to this canister,
    * expressed as a percentage of the maximum compute power that a single canister can allocate.
-   *
+   * 
    * If the IC cannot provide the requested allocation,
    * for example because it is oversubscribed, the call will be **rejected**.
-   *
+   * 
    * Must be a number between 0 and 100, inclusively.
-   *
+   * 
    * Default value: `0`
    */
   'compute_allocation' : [] | [bigint],
 }
 /**
  * # Canister Status Result
- *
+ * 
  * Result type of [`canister_status`](https://internetcomputer.org/docs/current/references/ic-interface-spec/#ic-canister_status).
  */
 export interface CanisterStatusResult {
@@ -162,7 +162,7 @@ export interface CanisterStatusResult {
   'module_hash' : [] | [Uint8Array | number[]],
   /**
    * The reserved cycles balance of the canister.
-   *
+   * 
    * These are cycles that are reserved by the resource reservation mechanism on storage allocation.
    * See also the [`CanisterSettings::reserved_cycles_limit`] parameter in canister settings.
    */
@@ -170,9 +170,9 @@ export interface CanisterStatusResult {
 }
 /**
  * # Canister Status Type
- *
+ * 
  * Status of a canister.
- *
+ * 
  * See [`CanisterStatusResult::status`].
  */
 export type CanisterStatusType = {
@@ -197,7 +197,7 @@ export type ChainArgs = { 'Upgrade' : UpgradeArgs } |
   { 'Init' : InitArgs };
 /**
  * Assembles a wasm artifact from chunks staged with `admin_add_wasm_chunk`.
- *
+ * 
  * Lets a module larger than the 2 MiB ingress limit be published, which a
  * single `admin_add_wasm` call cannot do.
  */
@@ -216,9 +216,9 @@ export interface CommitWasmChunksInput {
 }
 /**
  * # Definite Canister Settings
- *
+ * 
  * Represents the actual settings in effect.
- *
+ * 
  * For return of [`canister_status`](https://internetcomputer.org/docs/current/references/ic-interface-spec/#ic-canister_status).
  */
 export interface DefiniteCanisterSettings {
@@ -369,9 +369,9 @@ export type LogVisibility = {
   };
 /**
  * # Memory Metrics
- *
+ * 
  * Memory metrics of a canister.
- *
+ * 
  * See [`CanisterStatusResult::memory_metrics`].
  */
 export interface MemoryMetrics {
@@ -492,7 +492,7 @@ export interface ProvisionReceipt {
 }
 /**
  * Canister settings applied to every canister provisioned from a template.
- *
+ * 
  * Held immutably inside the template so a provisioner can never submit its own
  * controllers, allocations or limits.
  */
@@ -515,14 +515,18 @@ export type ProvisionStage = { 'Failed' : null } |
   { 'Installed' : null };
 /**
  * A governance-approved, immutable provisioning template.
- *
+ * 
  * A provisioner may only name an approved template by `id` and `hash`; every
  * other provisioning parameter is loaded from here, so approving a template is
  * the governance act that fixes which module, settings, controllers, subnet and
- * cycles a provisioned canister gets.
+ * creation budget allocated to a provisioned canister.
  */
 export interface ProvisionTemplate {
   'id' : string,
+  /**
+   * Total cycles attached to canister creation, including the subnet's
+   * creation fee. The new canister receives the remainder.
+   */
   'initial_cycles' : bigint,
   /**
    * Hash of the stored artifact bytes, as recorded by `add_wasm`.
@@ -563,9 +567,9 @@ export interface ProvisionTemplateInfo {
 }
 /**
  * # Query Stats
- *
+ * 
  * Query statistics.
- *
+ * 
  * See [`CanisterStatusResult::query_stats`].
  */
 export interface QueryStats {
@@ -593,6 +597,9 @@ export interface ReleaseReceipt {
 }
 export interface ReservationReceipt {
   'request_id' : Uint8Array | number[],
+  /**
+   * Creation budget committed by the template, inclusive of creation fee.
+   */
   'initial_cycles' : bigint,
   'controllers' : Array<Principal>,
   'provision_template_hash' : Uint8Array | number[],
@@ -663,11 +670,11 @@ export interface StateInfo {
 }
 /**
  * Argument type of [`update_settings`]
- *
+ * 
  * # Note
- *
+ * 
  * This type is a reduced version of [`ic_management_canister_types::UpdateSettingsArgs`].
- *
+ * 
  * The `sender_canister_version` field is removed as it is set automatically in [`update_settings`].
  */
 export interface UpdateSettingsArgs {
@@ -689,7 +696,7 @@ export interface UpgradeArgs {
 }
 /**
  * How the stored wasm artifact bytes are encoded.
- *
+ * 
  * The distinction matters because `artifact_hash` covers the bytes this
  * canister stores and transfers, while `module_hash` covers what the management
  * canister reports as installed. For [`WasmEncoding::Gzip`] the two must never
@@ -715,15 +722,15 @@ export interface _SERVICE {
   'admin_add_managers' : ActorMethod<[Array<Principal>], Result>,
   /**
    * Approves an immutable provisioning template.
-   *
+   * 
    * This is the governance act that fixes which module, settings, controllers,
-   * subnet and cycles a provisioned canister gets: a provisioner can afterwards
-   * only name the template by id and hash.
+   * subnet and creation budget a provisioned canister gets: a provisioner can
+   * afterwards only name the template by id and hash.
    */
   'admin_add_provision_template' : ActorMethod<[ProvisionTemplate], Result_1>,
   /**
    * Grants the least-privilege provisioning role.
-   *
+   * 
    * A provisioner may only reserve, install and release canisters from approved
    * templates; it cannot manage roles, publish modules or deploy an arbitrary
    * wasm, so this can be granted to another canister without handing over the
@@ -736,7 +743,7 @@ export interface _SERVICE {
   >,
   /**
    * Stages one chunk of a wasm artifact for the caller.
-   *
+   * 
    * Publishing a module larger than the 2 MiB ingress limit is impossible in a
    * single `admin_add_wasm` call; chunks are staged here and assembled by
    * `admin_commit_wasm_chunks`.
@@ -773,13 +780,13 @@ export interface _SERVICE {
   /**
    * Clears a `CreateUnknown` breaker after governance has looked for the canister
    * a lost create may have produced.
-   *
+   * 
    * `found` adopts that canister into the pool; `None` records the create as lost.
    */
   'admin_reconcile_pool' : ActorMethod<[string, [] | [Principal]], Result>,
   /**
    * Creates one more canister for a template's pool.
-   *
+   * 
    * Deliberately separate from any paid flow: creation is the one step whose
    * response loss cannot be recovered, so it may only ever waste an unpaid pool
    * canister. An unknown outcome circuit-breaks further refills.
@@ -796,15 +803,17 @@ export interface _SERVICE {
   >,
   /**
    * Upgrades an already deployed canister to an exact module.
-   *
-   * Compare-and-swaps on `expected_prev_module_hash`, so a stale request can
-   * never overwrite a module the caller did not expect to be running, and the
-   * result is verified against `expected_module_hash`.
+   * 
+   * Restricted to canisters this canister deployed, and to the wasm name they
+   * already run: a provisioner must not be able to push an arbitrary module onto
+   * an arbitrary canister. Compare-and-swaps on `expected_prev_module_hash`, so a
+   * stale request can never overwrite a module the caller did not expect to be
+   * running, and the result is verified against `expected_module_hash`.
    */
   'ensure_deployment' : ActorMethod<[DeploymentRequest], Result_8>,
   /**
    * Installs the template's approved module onto the reserved canister.
-   *
+   * 
    * Idempotent by `request_id`: a retry after a lost response converges on the
    * already-installed module instead of failing, and the module hash reported by
    * the management canister is verified against the hash the template pins.
@@ -825,7 +834,7 @@ export interface _SERVICE {
   'get_wasm' : ActorMethod<[Uint8Array | number[]], Result_12>,
   /**
    * Recorded pool inventory of a template.
-   *
+   * 
    * Governance watches this against the reservation churn: a pool that keeps
    * draining is the signal to rate-limit callers, not to raise the pool size.
    */
@@ -833,7 +842,7 @@ export interface _SERVICE {
   'list_provision_templates' : ActorMethod<[], Result_14>,
   /**
    * Returns a reserved canister to the pool.
-   *
+   * 
    * Only valid while the reservation never installed anything; the canister must
    * still be empty and still carry the template's controllers, so a released
    * canister cannot come back polluted.
@@ -844,7 +853,7 @@ export interface _SERVICE {
   >,
   /**
    * Claims one pre-created canister for `request_id`.
-   *
+   * 
    * Idempotent and fully synchronous: the `request_id -> canister` binding is
    * committed together with the reply, so a caller that never sees the response
    * recovers the same canister by replaying the call or reading the receipt. It

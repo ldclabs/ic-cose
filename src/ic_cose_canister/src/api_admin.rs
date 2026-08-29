@@ -7,7 +7,7 @@ use ic_cose_types::{
 use std::collections::BTreeSet;
 use std::fmt::Write;
 
-use crate::{is_controller, remove_set_items, store};
+use crate::{is_controller, is_controller_or_manager, remove_set_items, store};
 
 #[ic_cdk::update(guard = "is_controller")]
 fn admin_add_managers(args: BTreeSet<Principal>) -> Result<(), String> {
@@ -61,15 +61,12 @@ fn admin_remove_allowed_apis(args: BTreeSet<String>) -> Result<(), String> {
     })
 }
 
-#[ic_cdk::update]
+#[ic_cdk::update(guard = "is_controller_or_manager")]
 fn admin_create_namespace(args: CreateNamespaceInput) -> Result<NamespaceInfo, String> {
     store::state::allowed_api("admin_create_namespace")?;
-    let caller = ic_cdk::api::msg_caller();
-    if !store::state::is_manager(&caller) {
-        return Err("no permission".to_string());
-    }
     args.validate()?;
 
+    let caller = ic_cdk::api::msg_caller();
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
     store::ns::create_namespace(&caller, args, now_ms)
 }

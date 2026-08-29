@@ -1,6 +1,6 @@
-import type { Principal } from '@dfinity/principal';
-import type { ActorMethod } from '@dfinity/agent';
-import type { IDL } from '@dfinity/candid';
+import type { Principal } from '@icp-sdk/core/principal';
+import type { ActorMethod } from '@icp-sdk/core/agent';
+import type { IDL } from '@icp-sdk/core/candid';
 
 export interface CreateNamespaceInput {
   'session_expires_in_ms' : [] | [bigint],
@@ -26,7 +26,7 @@ export interface CreateSettingOutput {
 }
 /**
  * A delegation from one key to another.
- *
+ * 
  * If key A signs a delegation containing key B, then key B may be used to
  * authenticate as key A's corresponding principal(s).
  */
@@ -150,7 +150,7 @@ export type Result_9 = { 'Ok' : boolean } |
   { 'Err' : string };
 /**
  * # Schnorr Algorithm.
- *
+ * 
  * See [`SchnorrKeyId::algorithm`].
  */
 export type SchnorrAlgorithm = {
