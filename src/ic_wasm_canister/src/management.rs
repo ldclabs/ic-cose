@@ -264,6 +264,50 @@ mod tests {
     }
 
     #[test]
+    fn canister_cycles_projection_accepts_the_full_status_shape() {
+        #[derive(CandidType)]
+        enum FullStatus {
+            #[allow(dead_code)]
+            Running,
+        }
+
+        #[derive(CandidType)]
+        struct FullQueryStats {
+            num_calls_total: Nat,
+            num_instructions_total: Nat,
+        }
+
+        #[derive(CandidType)]
+        struct FullCanisterStatus {
+            status: FullStatus,
+            settings: mgt::DefiniteCanisterSettings,
+            module_hash: Option<Vec<u8>>,
+            memory_size: Nat,
+            cycles: Nat,
+            reserved_cycles: Nat,
+            idle_cycles_burned_per_day: Nat,
+            query_stats: FullQueryStats,
+        }
+
+        let bytes = candid::encode_one(FullCanisterStatus {
+            status: FullStatus::Running,
+            settings: mgt::DefiniteCanisterSettings::default(),
+            module_hash: Some(vec![9; 32]),
+            memory_size: Nat::from(1u8),
+            cycles: Nat::from(4_200_000_000_000u128),
+            reserved_cycles: Nat::from(0u8),
+            idle_cycles_burned_per_day: Nat::from(0u8),
+            query_stats: FullQueryStats {
+                num_calls_total: Nat::from(0u8),
+                num_instructions_total: Nat::from(0u8),
+            },
+        })
+        .unwrap();
+        let projected: CanisterCyclesProjection = candid::decode_one(&bytes).unwrap();
+        assert_eq!(projected.cycles.0.to_u128(), Some(4_200_000_000_000));
+    }
+
+    #[test]
     fn canister_info_projection_accepts_the_full_record_shape() {
         #[derive(CandidType)]
         struct FullCanisterInfo {

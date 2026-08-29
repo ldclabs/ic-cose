@@ -167,11 +167,27 @@ pub async fn create_pool_canister(
 ) -> CreateOutcome {
     match subnet {
         Some(subnet) => create_canister_on_outcome(subnet, Some(settings), creation_budget).await,
-        None => match management::create_canister(settings, creation_budget).await {
-            Ok(canister) => CreateOutcome::Created(canister),
-            Err(err) if is_predispatch_error(&err) => CreateOutcome::Refunded(format_error(err)),
-            Err(err) => CreateOutcome::Unknown(format_error(err)),
-        },
+        None => {
+            // The management canister deducts the creation fee from the attached
+            // budget, so a budget below the fee is a guaranteed rejection. That
+            // rejection is not a pre-dispatch error, so dispatching it anyway
+            // would circuit-break refill on a create that provably never
+            // happened. Refuse it here, where nothing was created for certain.
+            let fee = ic_cdk::api::cost_create_canister();
+            if creation_budget < fee {
+                return CreateOutcome::Refunded(format!(
+                    "creation budget {} is below the subnet creation fee {}",
+                    creation_budget, fee
+                ));
+            }
+            match management::create_canister(settings, creation_budget).await {
+                Ok(canister) => CreateOutcome::Created(canister),
+                Err(err) if is_predispatch_error(&err) => {
+                    CreateOutcome::Refunded(format_error(err))
+                }
+                Err(err) => CreateOutcome::Unknown(format_error(err)),
+            }
+        }
     }
 }
 
