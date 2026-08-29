@@ -2,7 +2,7 @@ use candid::Principal;
 use ic_cose_types::{types::setting::*, validate_principals, MILLISECONDS};
 use std::collections::BTreeSet;
 
-use crate::{is_authenticated, store};
+use crate::{is_authenticated, remove_set_items, store};
 
 #[ic_cdk::query]
 fn setting_get_info(path: SettingPath) -> Result<SettingInfo, String> {
@@ -39,8 +39,7 @@ fn setting_create(
     input.validate()?;
 
     let caller = ic_cdk::api::msg_caller();
-    let subject = path.subject.unwrap_or(caller);
-    let spk = store::SettingPathKey::from_path(path, subject);
+    let spk = store::SettingPathKey::from_path(path, caller);
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
     store::ns::create_setting(caller, spk, input, now_ms)
 }
@@ -55,8 +54,7 @@ fn setting_update_info(
     input.validate()?;
 
     let caller = ic_cdk::api::msg_caller();
-    let subject = path.subject.unwrap_or(caller);
-    let spk = store::SettingPathKey::from_path(path, subject);
+    let spk = store::SettingPathKey::from_path(path, caller);
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
     store::ns::update_setting_info(caller, spk, input, now_ms)
 }
@@ -71,8 +69,7 @@ fn setting_update_payload(
     input.validate()?;
 
     let caller = ic_cdk::api::msg_caller();
-    let subject = path.subject.unwrap_or(caller);
-    let spk = store::SettingPathKey::from_path(path, subject);
+    let spk = store::SettingPathKey::from_path(path, caller);
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
     store::ns::update_setting_payload(caller, spk, input, now_ms)
 }
@@ -84,8 +81,7 @@ fn setting_add_readers(path: SettingPath, input: BTreeSet<Principal>) -> Result<
     validate_principals(&input)?;
 
     let caller = ic_cdk::api::msg_caller();
-    let subject = path.subject.unwrap_or(caller);
-    let spk = store::SettingPathKey::from_path(path, subject);
+    let spk = store::SettingPathKey::from_path(path, caller);
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
     store::ns::with_setting_mut(&caller, &spk, |setting| {
         setting.readers.extend(input);
@@ -101,11 +97,10 @@ fn setting_remove_readers(path: SettingPath, input: BTreeSet<Principal>) -> Resu
     validate_principals(&input)?;
 
     let caller = ic_cdk::api::msg_caller();
-    let subject = path.subject.unwrap_or(caller);
-    let spk = store::SettingPathKey::from_path(path, subject);
+    let spk = store::SettingPathKey::from_path(path, caller);
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
     store::ns::with_setting_mut(&caller, &spk, |setting| {
-        setting.readers.retain(|p| !input.contains(p));
+        remove_set_items(&mut setting.readers, input);
         setting.updated_at = now_ms;
         Ok(())
     })
@@ -117,7 +112,6 @@ fn setting_delete(path: SettingPath) -> Result<(), String> {
     path.validate()?;
 
     let caller = ic_cdk::api::msg_caller();
-    let subject = path.subject.unwrap_or(caller);
-    let spk = store::SettingPathKey::from_path(path, subject);
+    let spk = store::SettingPathKey::from_path(path, caller);
     store::ns::delete_setting(&caller, &spk)
 }

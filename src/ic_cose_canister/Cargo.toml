@@ -16,7 +16,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 ic_cose_types = { path = "../ic_cose_types", version = "0.10" }
-candid = { workspace = true, features = ["value", "printer"] }
+candid.workspace = true
 cbor2 = { workspace = true }
 hex = { workspace = true }
 ic-cdk = { workspace = true }

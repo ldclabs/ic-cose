@@ -12,6 +12,7 @@ debug = 'none'
 lto = true
 strip = true
 opt-level = 's'
+codegen-units = 1
 
 [workspace.package]
 version = "0.10.5"

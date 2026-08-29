@@ -18,7 +18,7 @@ pub fn derive_schnorr_public_key(
 
             let chain_code: [u8; 32] = public_key
                 .chain_code
-                .to_vec()
+                .as_ref()
                 .try_into()
                 .map_err(format_error)?;
             let pk = ic_secp256k1::PublicKey::deserialize_sec1(&public_key.public_key)
@@ -42,7 +42,7 @@ pub fn derive_schnorr_public_key(
 
             let chain_code: [u8; 32] = public_key
                 .chain_code
-                .to_vec()
+                .as_ref()
                 .try_into()
                 .map_err(format_error)?;
             let pk = ic_ed25519::PublicKey::deserialize_raw(&public_key.public_key)

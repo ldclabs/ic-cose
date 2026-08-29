@@ -6,7 +6,7 @@ use ic_cose_types::{
 use serde_bytes::ByteBuf;
 use std::collections::BTreeSet;
 
-use crate::{is_authenticated, is_controller_or_manager, store};
+use crate::{is_authenticated, is_controller_or_manager, remove_set_items, store};
 
 #[ic_cdk::query]
 fn state_get_info() -> Result<StateInfo, String> {
@@ -88,7 +88,7 @@ fn namespace_remove_managers(namespace: String, args: BTreeSet<Principal>) -> Re
         if !ns.can_write_namespace(&caller) {
             Err("no permission".to_string())?;
         }
-        ns.managers.retain(|p| !args.contains(p));
+        remove_set_items(&mut ns.managers, args);
         ns.updated_at = now_ms;
         Ok(())
     })
@@ -122,7 +122,7 @@ fn namespace_remove_auditors(namespace: String, args: BTreeSet<Principal>) -> Re
         if !ns.can_write_namespace(&caller) {
             Err("no permission".to_string())?;
         }
-        ns.auditors.retain(|p| !args.contains(p));
+        remove_set_items(&mut ns.auditors, args);
         ns.updated_at = now_ms;
         Ok(())
     })
@@ -156,7 +156,7 @@ fn namespace_remove_users(namespace: String, args: BTreeSet<Principal>) -> Resul
         if !ns.can_write_namespace(&caller) {
             Err("no permission".to_string())?;
         }
-        ns.users.retain(|p| !args.contains(p));
+        remove_set_items(&mut ns.users, args);
         ns.updated_at = now_ms;
         Ok(())
     })

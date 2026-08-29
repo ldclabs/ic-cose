@@ -20,6 +20,13 @@ mod vetkd;
 
 use api_init::InstallArgs;
 
+#[inline]
+fn remove_set_items<T: Ord>(target: &mut BTreeSet<T>, items: BTreeSet<T>) {
+    for item in items {
+        target.remove(&item);
+    }
+}
+
 fn is_controller() -> Result<(), String> {
     let caller = ic_cdk::api::msg_caller();
     if ic_cdk::api::is_controller(&caller) || store::state::is_controller(&caller) {

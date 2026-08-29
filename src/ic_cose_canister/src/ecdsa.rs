@@ -16,7 +16,7 @@ pub fn derive_public_key(
 
     let chain_code: [u8; 32] = ecdsa_public_key
         .chain_code
-        .to_vec()
+        .as_ref()
         .try_into()
         .map_err(format_error)?;
     let pk = ic_secp256k1::PublicKey::deserialize_sec1(&ecdsa_public_key.public_key)

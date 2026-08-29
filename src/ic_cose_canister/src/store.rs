@@ -1,5 +1,5 @@
 use candid::Principal;
-use cbor2::{from_reader, to_writer, Value};
+use cbor2::{from_slice, to_writer};
 use ic_canister_sig_creation::{
     signature_map::{CanisterSigInputs, SignatureMap, LABEL_SIG},
     DELEGATION_SIG_DOMAIN,
@@ -45,12 +45,16 @@ fn from_cbor_bytes<T>(bytes: &[u8], context: &str) -> T
 where
     T: DeserializeOwned,
 {
-    // Decode through Value so candid::Principal sees CBOR byte strings via visit_bytes.
-    let value: Value =
-        from_reader(bytes).unwrap_or_else(|err| panic!("failed to decode {context}: {err:?}"));
-    value
-        .deserialized()
-        .unwrap_or_else(|err| panic!("failed to deserialize {context}: {err:?}"))
+    from_slice(bytes).unwrap_or_else(|err| panic!("failed to decode {context}: {err:?}"))
+}
+
+fn to_cbor_bytes<T>(value: &T, capacity: usize, context: &str) -> Vec<u8>
+where
+    T: Serialize,
+{
+    let mut buf = Vec::with_capacity(capacity);
+    to_writer(value, &mut buf).unwrap_or_else(|err| panic!("failed to encode {context}: {err:?}"));
+    buf
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -190,6 +194,29 @@ pub enum NamespaceReadPermission {
 }
 
 impl Namespace {
+    fn encoded_size_hint(&self) -> usize {
+        let direct_principals = self
+            .managers
+            .len()
+            .saturating_add(self.auditors.len())
+            .saturating_add(self.users.len());
+        let fixed_id_size = self
+            .fixed_id_names
+            .iter()
+            .fold(0usize, |size, (name, delegators)| {
+                size.saturating_add(name.len()).saturating_add(
+                    delegators
+                        .len()
+                        .saturating_mul(Principal::MAX_LENGTH_IN_BYTES + 2),
+                )
+            });
+
+        256usize
+            .saturating_add(self.desc.len())
+            .saturating_add(direct_principals.saturating_mul(Principal::MAX_LENGTH_IN_BYTES + 2))
+            .saturating_add(fixed_id_size)
+    }
+
     pub fn into_info(self, name: String) -> NamespaceInfo {
         NamespaceInfo {
             name,
@@ -282,15 +309,16 @@ impl Storable for Namespace {
     const BOUND: Bound = Bound::Unbounded;
 
     fn into_bytes(self) -> Vec<u8> {
-        let mut buf = vec![];
-        to_writer(&self, &mut buf).expect("failed to encode Namespace data");
-        buf
+        let capacity = self.encoded_size_hint();
+        to_cbor_bytes(&self, capacity, "Namespace data")
     }
 
     fn to_bytes(&self) -> Cow<'_, [u8]> {
-        let mut buf = vec![];
-        to_writer(self, &mut buf).expect("failed to encode Namespace data");
-        Cow::Owned(buf)
+        Cow::Owned(to_cbor_bytes(
+            self,
+            self.encoded_size_hint(),
+            "Namespace data",
+        ))
     }
 
     fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
@@ -321,6 +349,26 @@ pub struct Setting {
 }
 
 impl Setting {
+    fn encoded_size_hint(&self) -> usize {
+        let payload_size = self.payload.as_ref().map_or(0, |value| value.len());
+        let dek_size = self.dek.as_ref().map_or(0, |value| value.len());
+        let readers_size = self
+            .readers
+            .len()
+            .saturating_mul(Principal::MAX_LENGTH_IN_BYTES + 2);
+        let tags_size = self.tags.iter().fold(0usize, |size, (key, value)| {
+            size.saturating_add(key.len())
+                .saturating_add(value.len())
+                .saturating_add(4)
+        });
+        payload_size
+            .saturating_add(dek_size)
+            .saturating_add(self.desc.len())
+            .saturating_add(readers_size)
+            .saturating_add(tags_size)
+            .saturating_add(256)
+    }
+
     pub fn into_info(self, subject: Principal, key: ByteBuf, with_payload: bool) -> SettingInfo {
         SettingInfo {
             key,
@@ -342,15 +390,16 @@ impl Storable for Setting {
     const BOUND: Bound = Bound::Unbounded;
 
     fn into_bytes(self) -> Vec<u8> {
-        let mut buf = vec![];
-        to_writer(&self, &mut buf).expect("failed to encode Setting data");
-        buf
+        let capacity = self.encoded_size_hint();
+        to_cbor_bytes(&self, capacity, "Setting data")
     }
 
     fn to_bytes(&self) -> Cow<'_, [u8]> {
-        let mut buf = vec![];
-        to_writer(self, &mut buf).expect("failed to encode Setting data");
-        Cow::Owned(buf)
+        Cow::Owned(to_cbor_bytes(
+            self,
+            self.encoded_size_hint(),
+            "Setting data",
+        ))
     }
 
     fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
@@ -382,15 +431,16 @@ impl Storable for SettingPathKey {
     const BOUND: Bound = Bound::Unbounded;
 
     fn into_bytes(self) -> Vec<u8> {
-        let mut buf = vec![];
-        to_writer(&self, &mut buf).expect("failed to encode SettingPathKey data");
-        buf
+        let capacity = self.0.len() + self.3.len() + 64;
+        to_cbor_bytes(&self, capacity, "SettingPathKey data")
     }
 
     fn to_bytes(&self) -> Cow<'_, [u8]> {
-        let mut buf = vec![];
-        to_writer(self, &mut buf).expect("failed to encode SettingPathKey data");
-        Cow::Owned(buf)
+        Cow::Owned(to_cbor_bytes(
+            self,
+            self.0.len() + self.3.len() + 64,
+            "SettingPathKey data",
+        ))
     }
 
     fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
@@ -429,15 +479,17 @@ impl Storable for SettingArchived {
     const BOUND: Bound = Bound::Unbounded;
 
     fn into_bytes(self) -> Vec<u8> {
-        let mut buf = vec![];
-        to_writer(&self, &mut buf).expect("failed to encode SettingArchived data");
-        buf
+        let capacity = self.payload.as_ref().map_or(0, |value| value.len())
+            + self.dek.as_ref().map_or(0, |value| value.len())
+            + 64;
+        to_cbor_bytes(&self, capacity, "SettingArchived data")
     }
 
     fn to_bytes(&self) -> Cow<'_, [u8]> {
-        let mut buf = vec![];
-        to_writer(self, &mut buf).expect("failed to encode SettingArchived data");
-        Cow::Owned(buf)
+        let capacity = self.payload.as_ref().map_or(0, |value| value.len())
+            + self.dek.as_ref().map_or(0, |value| value.len())
+            + 64;
+        Cow::Owned(to_cbor_bytes(self, capacity, "SettingArchived data"))
     }
 
     fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
@@ -454,7 +506,6 @@ const SETTINGS_MEMORY_ID: MemoryId = MemoryId::new(4);
 thread_local! {
     static SIGNATURES : RefCell<SignatureMap> = RefCell::new(SignatureMap::default());
     static STATE: RefCell<State> = RefCell::new(State::default());
-    static NS: RefCell<BTreeMap<String, NamespaceLegacy>> = const { RefCell::new(BTreeMap::new()) };
 
     static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
         RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
@@ -545,37 +596,68 @@ pub mod state {
     }
 
     pub async fn init_public_key() {
-        let (ecdsa_key_name, schnorr_key_name) =
-            with(|r| (r.ecdsa_key_name.clone(), r.schnorr_key_name.clone()));
+        let (ecdsa_key_name, schnorr_ed25519_key_name, schnorr_secp256k1_key_name, needs_iv) =
+            with(|r| {
+                (
+                    r.ecdsa_public_key
+                        .is_none()
+                        .then(|| r.ecdsa_key_name.clone()),
+                    r.schnorr_ed25519_public_key
+                        .is_none()
+                        .then(|| r.schnorr_key_name.clone()),
+                    r.schnorr_secp256k1_public_key
+                        .is_none()
+                        .then(|| r.schnorr_key_name.clone()),
+                    *r.init_vector == [0u8; 32],
+                )
+            });
 
-        let ecdsa_public_key = ecdsa_public_key(ecdsa_key_name, vec![])
-            .await
-            .map_err(|err| {
-                ic_cdk::api::debug_print(format!("failed to retrieve ECDSA public key: {err}"))
-            })
-            .ok();
+        let ecdsa_public_key = if let Some(key_name) = ecdsa_key_name {
+            ecdsa_public_key(key_name, vec![])
+                .await
+                .map_err(|err| {
+                    ic_cdk::api::debug_print(format!("failed to retrieve ECDSA public key: {err}"))
+                })
+                .ok()
+        } else {
+            None
+        };
 
-        let schnorr_ed25519_public_key =
-            schnorr_public_key(schnorr_key_name.clone(), SchnorrAlgorithm::Ed25519, vec![])
+        let schnorr_ed25519_public_key = if let Some(key_name) = schnorr_ed25519_key_name {
+            schnorr_public_key(key_name, SchnorrAlgorithm::Ed25519, vec![])
                 .await
                 .map_err(|err| {
                     ic_cdk::api::debug_print(format!(
                         "failed to retrieve Schnorr Ed25519 public key: {err}"
                     ))
                 })
-                .ok();
+                .ok()
+        } else {
+            None
+        };
 
-        let schnorr_secp256k1_public_key =
-            schnorr_public_key(schnorr_key_name, SchnorrAlgorithm::Bip340secp256k1, vec![])
+        let schnorr_secp256k1_public_key = if let Some(key_name) = schnorr_secp256k1_key_name {
+            schnorr_public_key(key_name, SchnorrAlgorithm::Bip340secp256k1, vec![])
                 .await
                 .map_err(|err| {
                     ic_cdk::api::debug_print(format!(
                         "failed to retrieve Schnorr Secp256k1 public key: {err}"
                     ))
                 })
-                .ok();
+                .ok()
+        } else {
+            None
+        };
 
-        let iv: [u8; 32] = rand_bytes().await.expect("failed to generate IV");
+        let iv = if needs_iv {
+            Some(
+                rand_bytes::<32>()
+                    .await
+                    .expect("failed to generate initialization vector"),
+            )
+        } else {
+            None
+        };
 
         // this runs again after an upgrade when something is still missing, so it
         // must be idempotent: never clear a key that was already retrieved, and
@@ -591,7 +673,9 @@ pub mod state {
                 r.schnorr_secp256k1_public_key = schnorr_secp256k1_public_key;
             }
             if *r.init_vector == [0u8; 32] {
-                r.init_vector = iv.into();
+                if let Some(iv) = iv {
+                    r.init_vector = iv.into();
+                }
             }
         });
     }
@@ -633,9 +717,7 @@ pub mod state {
     pub fn save() {
         STATE.with_borrow(|h| {
             STATE_STORE.with_borrow_mut(|r| {
-                let mut buf = vec![];
-                to_writer(h, &mut buf).expect("failed to encode STATE_STORE data");
-                r.set(buf);
+                r.set(to_cbor_bytes(h, 512, "STATE_STORE data"));
             });
         });
     }
@@ -688,48 +770,67 @@ pub mod ns {
     }
 
     const MAX_KEY: [u8; 64] = [255u8; 64];
+    // The management APIs allow at most 255 components. This canister adds
+    // a domain and namespace component before the caller-provided suffix.
+    const MAX_DERIVATION_PATH_COMPONENTS: usize = 253;
+
+    fn validate_derivation_path(path: &[ByteBuf]) -> Result<(), String> {
+        if path.len() > MAX_DERIVATION_PATH_COMPONENTS {
+            return Err(format!(
+                "derivation path length exceeds the limit {}",
+                MAX_DERIVATION_PATH_COMPONENTS
+            ));
+        }
+        Ok(())
+    }
+
+    fn signing_derivation_path(
+        domain: &[u8],
+        namespace: String,
+        suffix: Vec<ByteBuf>,
+    ) -> Vec<Vec<u8>> {
+        let mut path = Vec::with_capacity(suffix.len() + 2);
+        path.push(domain.to_vec());
+        path.push(namespace.into_bytes());
+        path.extend(suffix.into_iter().map(ByteBuf::into_vec));
+        path
+    }
+
     pub fn list_setting_keys(
         namespace: &str,
         user_owned: bool,
         subject: Option<Principal>,
     ) -> Vec<(Principal, ByteBuf)> {
         SETTINGS_STORE.with_borrow(|r| {
-            let range = if let Some(subject) = subject {
-                ops::Range {
-                    start: &SettingPathKey(
-                        namespace.to_owned(),
-                        if user_owned { 1 } else { 0 },
-                        subject,
-                        ByteBuf::new(),
-                        0,
-                    ),
-                    end: &SettingPathKey(
-                        namespace.to_owned(),
-                        if user_owned { 1 } else { 0 },
-                        subject,
-                        ByteBuf::from(MAX_KEY.as_ref()),
-                        0,
-                    ),
-                }
+            let kind = u8::from(user_owned);
+            let keys = if let Some(subject) = subject {
+                let start = SettingPathKey(namespace.to_owned(), kind, subject, ByteBuf::new(), 0);
+                let end = SettingPathKey(
+                    namespace.to_owned(),
+                    kind,
+                    subject,
+                    ByteBuf::from(MAX_KEY.as_ref()),
+                    u32::MAX,
+                );
+                r.keys_range(start..=end)
             } else {
-                ops::Range {
-                    start: &SettingPathKey(
-                        namespace.to_owned(),
-                        if user_owned { 1 } else { 0 },
-                        Principal::anonymous(),
-                        ByteBuf::new(),
-                        0,
-                    ),
-                    end: &SettingPathKey(
-                        namespace.to_owned(),
-                        if user_owned { 2 } else { 1 },
-                        Principal::management_canister(),
-                        ByteBuf::new(),
-                        u32::MAX,
-                    ),
-                }
+                let start = SettingPathKey(
+                    namespace.to_owned(),
+                    kind,
+                    Principal::management_canister(),
+                    ByteBuf::new(),
+                    0,
+                );
+                let end = SettingPathKey(
+                    namespace.to_owned(),
+                    kind + 1,
+                    Principal::management_canister(),
+                    ByteBuf::new(),
+                    0,
+                );
+                r.keys_range(start..end)
             };
-            r.keys_range(range).map(|k| (k.2, k.3)).collect()
+            keys.map(|key| (key.2, key.3)).collect()
         })
     }
 
@@ -784,19 +885,18 @@ pub mod ns {
         namespace: String,
         derivation_path: Vec<ByteBuf>,
     ) -> Result<PublicKeyOutput, String> {
+        validate_derivation_path(&derivation_path)?;
         with(&namespace, |ns| {
             if !ns.can_read_namespace(caller) {
                 Err("no permission".to_string())?;
             }
+            Ok(())
+        })?;
 
-            state::with(|s| {
-                let pk = s.ecdsa_public_key.as_ref().ok_or("no ecdsa public key")?;
-                let mut path: Vec<Vec<u8>> = Vec::with_capacity(derivation_path.len() + 3);
-                path.push(b"COSE_ECDSA_Signing".to_vec());
-                path.push(namespace.to_bytes().to_vec());
-                path.extend(derivation_path.into_iter().map(|b| b.into_vec()));
-                derive_public_key(pk, path)
-            })
+        state::with(|s| {
+            let pk = s.ecdsa_public_key.as_ref().ok_or("no ecdsa public key")?;
+            let path = signing_derivation_path(b"COSE_ECDSA_Signing", namespace, derivation_path);
+            derive_public_key(pk, path)
         })
     }
 
@@ -806,6 +906,10 @@ pub mod ns {
         derivation_path: Vec<ByteBuf>,
         message: ByteBuf,
     ) -> Result<ByteBuf, String> {
+        if message.len() != 32 {
+            return Err("message must be 32 bytes".to_string());
+        }
+        validate_derivation_path(&derivation_path)?;
         with(&namespace, |ns| {
             if !ns.has_ns_signing_permission(caller) {
                 Err("no permission".to_string())?;
@@ -814,10 +918,7 @@ pub mod ns {
         })?;
 
         let key_name = state::with(|s| s.ecdsa_key_name.clone());
-        let mut path: Vec<Vec<u8>> = Vec::with_capacity(derivation_path.len() + 3);
-        path.push(b"COSE_ECDSA_Signing".to_vec());
-        path.push(namespace.to_bytes().to_vec());
-        path.extend(derivation_path.into_iter().map(|b| b.into_vec()));
+        let path = signing_derivation_path(b"COSE_ECDSA_Signing", namespace, derivation_path);
         let sig = sign_with_ecdsa(key_name, path, message.into_vec()).await?;
         Ok(ByteBuf::from(sig))
     }
@@ -828,28 +929,27 @@ pub mod ns {
         namespace: String,
         derivation_path: Vec<ByteBuf>,
     ) -> Result<PublicKeyOutput, String> {
+        validate_derivation_path(&derivation_path)?;
         with(&namespace, |ns| {
             if !ns.can_read_namespace(caller) {
                 Err("no permission".to_string())?;
             }
+            Ok(())
+        })?;
 
-            state::with(|s| {
-                let pk = match alg {
-                    SchnorrAlgorithm::Bip340secp256k1 => s
-                        .schnorr_secp256k1_public_key
-                        .as_ref()
-                        .ok_or("no schnorr secp256k1 public key")?,
-                    SchnorrAlgorithm::Ed25519 => s
-                        .schnorr_ed25519_public_key
-                        .as_ref()
-                        .ok_or("no schnorr ed25519 public key")?,
-                };
-                let mut path: Vec<Vec<u8>> = Vec::with_capacity(derivation_path.len() + 3);
-                path.push(b"COSE_Schnorr_Signing".to_vec());
-                path.push(namespace.to_bytes().to_vec());
-                path.extend(derivation_path.into_iter().map(|b| b.into_vec()));
-                derive_schnorr_public_key(alg, pk, path)
-            })
+        state::with(|s| {
+            let pk = match alg {
+                SchnorrAlgorithm::Bip340secp256k1 => s
+                    .schnorr_secp256k1_public_key
+                    .as_ref()
+                    .ok_or("no schnorr secp256k1 public key")?,
+                SchnorrAlgorithm::Ed25519 => s
+                    .schnorr_ed25519_public_key
+                    .as_ref()
+                    .ok_or("no schnorr ed25519 public key")?,
+            };
+            let path = signing_derivation_path(b"COSE_Schnorr_Signing", namespace, derivation_path);
+            derive_schnorr_public_key(alg, pk, path)
         })
     }
 
@@ -860,6 +960,7 @@ pub mod ns {
         derivation_path: Vec<ByteBuf>,
         message: ByteBuf,
     ) -> Result<ByteBuf, String> {
+        validate_derivation_path(&derivation_path)?;
         with(&namespace, |ns| {
             if !ns.has_ns_signing_permission(caller) {
                 Err("no permission".to_string())?;
@@ -868,10 +969,7 @@ pub mod ns {
         })?;
 
         let key_name = state::with(|s| s.schnorr_key_name.clone());
-        let mut path: Vec<Vec<u8>> = Vec::with_capacity(derivation_path.len() + 3);
-        path.push(b"COSE_Schnorr_Signing".to_vec());
-        path.push(namespace.to_bytes().to_vec());
-        path.extend(derivation_path.into_iter().map(|b| b.into_vec()));
+        let path = signing_derivation_path(b"COSE_Schnorr_Signing", namespace, derivation_path);
         let sig = sign_with_schnorr(key_name, alg, path, message.into_vec()).await?;
         Ok(ByteBuf::from(sig))
     }
@@ -947,9 +1045,9 @@ pub mod ns {
             let derivation_path = vec![
                 b"COSE_Symmetric_Key".to_vec(),
                 s.init_vector.to_vec(),
-                spk.2.to_bytes().to_vec(),
+                spk.2.as_slice().to_vec(),
                 vec![spk.1],
-                spk.0.to_bytes().to_vec(),
+                spk.0.as_bytes().to_vec(),
             ];
             let pk =
                 derive_schnorr_public_key(SchnorrAlgorithm::Bip340secp256k1, pk, derivation_path)?;
@@ -964,9 +1062,9 @@ pub mod ns {
             key_name,
             &[
                 b"COSE_Symmetric_Key",
-                spk.2.to_bytes().as_ref(),
+                spk.2.as_slice(),
                 &[spk.1],
-                spk.0.to_bytes().as_ref(),
+                spk.0.as_bytes(),
             ],
         )
         .await
@@ -983,9 +1081,9 @@ pub mod ns {
             key_name,
             &[
                 b"COSE_Symmetric_Key",
-                spk.2.to_bytes().as_ref(),
+                spk.2.as_slice(),
                 &[spk.1],
-                spk.0.to_bytes().as_ref(),
+                spk.0.as_bytes(),
             ],
             key_id,
             transport_public_key,
@@ -1027,7 +1125,7 @@ pub mod ns {
         })
     }
 
-    pub async fn create_namespace(
+    pub fn create_namespace(
         caller: &Principal,
         input: CreateNamespaceInput,
         now_ms: u64,
@@ -1224,7 +1322,7 @@ pub mod ns {
                 }
 
                 m.insert(
-                    spk.clone(),
+                    spk,
                     Setting {
                         desc: input.desc.unwrap_or_default(),
                         created_at: now_ms,
@@ -1272,7 +1370,7 @@ pub mod ns {
 
                     match f(&mut setting) {
                         Ok(rt) => {
-                            r.insert(spkv0.clone(), setting);
+                            r.insert(spkv0, setting);
                             Ok(rt)
                         }
                         Err(err) => Err(err),
@@ -1338,6 +1436,9 @@ pub mod ns {
             }
             if let Some(ref dek) = input.dek {
                 size += dek.len();
+                // A DEK is itself a COSE_Encrypt0 envelope. Reject malformed
+                // data before reading or rewriting the current setting.
+                try_decode_encrypt0(dek)?;
             }
 
             let spkv0 = spk.v0();
@@ -1351,21 +1452,32 @@ pub mod ns {
                     }
 
                     if setting.dek.is_some() || input.dek.is_some() {
-                        if let Some(ref payload) = input.payload {
-                            // should be valid COSE encrypt0 payload
+                        // When only the DEK changes, validate the retained payload
+                        // as well; otherwise plaintext could be relabeled as encrypted.
+                        if let Some(payload) = input.payload.as_ref().or(setting.payload.as_ref()) {
                             try_decode_encrypt0(payload)?;
                         }
                     }
 
-                    if let Some(payload) = setting.payload.as_ref() {
-                        PAYLOADS_STORE.with(|r| {
-                            r.borrow_mut().insert(
+                    if setting.payload.is_some() {
+                        let archived_payload = if input.payload.is_some() {
+                            setting.payload.take()
+                        } else {
+                            setting.payload.clone()
+                        };
+                        let archived_dek = if input.dek.is_some() {
+                            setting.dek.take()
+                        } else {
+                            setting.dek.clone()
+                        };
+                        PAYLOADS_STORE.with_borrow_mut(|r| {
+                            r.insert(
                                 spk.clone(),
                                 SettingArchived {
                                     archived_at: now_ms,
                                     deprecated: input.deprecate_current.unwrap_or(false),
-                                    payload: Some(payload.clone()),
-                                    dek: setting.dek.clone(),
+                                    payload: archived_payload,
+                                    dek: archived_dek,
                                 },
                             );
                         });
@@ -1383,12 +1495,13 @@ pub mod ns {
                         setting.dek = Some(dek);
                     }
 
-                    r.insert(spkv0, setting.clone());
-                    Ok(UpdateSettingOutput {
+                    let output = UpdateSettingOutput {
                         created_at: setting.created_at,
                         updated_at: setting.updated_at,
                         version: setting.version,
-                    })
+                    };
+                    r.insert(spkv0, setting);
+                    Ok(output)
                 }
                 None => Err(format!("NotFound: setting {} not found", spk)),
             })?;
@@ -1428,6 +1541,221 @@ pub mod ns {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn test_stable_cbor_round_trip_handles_principals_and_payloads() {
+        let principal = Principal::from_slice(&[1, 2, 3, 4]);
+        let setting = Setting {
+            desc: "round_trip".to_string(),
+            readers: BTreeSet::from([principal]),
+            payload: Some(ByteBuf::from(vec![7; 1024])),
+            dek: Some(ByteBuf::from(vec![8; 32])),
+            version: 3,
+            ..Default::default()
+        };
+        let decoded = Setting::from_bytes(Cow::Owned(setting.clone().into_bytes()));
+        assert_eq!(decoded.desc, setting.desc);
+        assert_eq!(decoded.readers, setting.readers);
+        assert_eq!(decoded.payload, setting.payload);
+        assert_eq!(decoded.dek, setting.dek);
+        assert_eq!(decoded.version, setting.version);
+
+        let key = SettingPathKey(
+            "round_trip".to_string(),
+            1,
+            principal,
+            ByteBuf::from(vec![9; 64]),
+            3,
+        );
+        assert_eq!(
+            SettingPathKey::from_bytes(Cow::Owned(key.clone().into_bytes())),
+            key
+        );
+
+        let namespace = Namespace {
+            desc: "namespace".to_string(),
+            managers: BTreeSet::from([principal]),
+            fixed_id_names: BTreeMap::from([("fixed".to_string(), BTreeSet::from([principal]))]),
+            ..Default::default()
+        };
+        let decoded = Namespace::from_bytes(Cow::Owned(namespace.clone().into_bytes()));
+        assert_eq!(decoded.desc, namespace.desc);
+        assert_eq!(decoded.managers, namespace.managers);
+        assert_eq!(decoded.fixed_id_names, namespace.fixed_id_names);
+
+        let state = State {
+            managers: BTreeSet::from([principal]),
+            ecdsa_public_key: Some(PublicKeyOutput {
+                public_key: ByteBuf::from([1; 33]),
+                chain_code: ByteBuf::from([2; 32]),
+            }),
+            init_vector: [3; 32].into(),
+            ..Default::default()
+        };
+        let encoded = to_cbor_bytes(&state, 256, "State data");
+        let decoded: State = from_cbor_bytes(&encoded, "State data");
+        assert_eq!(decoded.managers, state.managers);
+        assert_eq!(decoded.ecdsa_public_key, state.ecdsa_public_key);
+        assert_eq!(decoded.init_vector, state.init_vector);
+
+        let legacy_key = (principal, ByteBuf::from([4]));
+        let legacy = BTreeMap::from([(
+            "legacy".to_string(),
+            NamespaceLegacy {
+                managers: BTreeSet::from([principal]),
+                settings: BTreeMap::from([(legacy_key.clone(), setting)]),
+                ..Default::default()
+            },
+        )]);
+        let encoded = to_cbor_bytes(&legacy, 1024, "legacy namespace data");
+        let decoded: BTreeMap<String, NamespaceLegacy> =
+            from_cbor_bytes(&encoded, "legacy namespace data");
+        let decoded = decoded.get("legacy").unwrap();
+        assert!(decoded.managers.contains(&principal));
+        assert!(decoded.settings.contains_key(&legacy_key));
+    }
+
+    #[test]
+    fn test_derivation_path_limit_is_checked_before_storage_access() {
+        let namespace = "missing_namespace".to_string();
+        let err = ns::ecdsa_public_key(
+            &Principal::anonymous(),
+            namespace.clone(),
+            vec![ByteBuf::new(); 254],
+        )
+        .unwrap_err();
+        assert_eq!(err, "derivation path length exceeds the limit 253");
+
+        let err = ns::ecdsa_public_key(
+            &Principal::anonymous(),
+            namespace,
+            vec![ByteBuf::new(); 253],
+        )
+        .unwrap_err();
+        assert!(err.starts_with("NotFound:"));
+    }
+
+    #[test]
+    fn test_list_setting_keys_includes_management_principal() {
+        let namespace = "management_subject".to_string();
+        let principal = Principal::management_canister();
+        let key = ByteBuf::from([1]);
+        let max_key = ByteBuf::from([255u8; 64].as_ref());
+        SETTINGS_STORE.with_borrow_mut(|store| {
+            store.insert(
+                SettingPathKey(namespace.clone(), 0, principal, key.clone(), 0),
+                Setting::default(),
+            );
+            store.insert(
+                SettingPathKey(namespace.clone(), 0, principal, max_key.clone(), 0),
+                Setting::default(),
+            );
+        });
+
+        assert_eq!(
+            ns::list_setting_keys(&namespace, false, None),
+            vec![(principal, key), (principal, max_key.clone())]
+        );
+        assert_eq!(
+            ns::list_setting_keys(&namespace, false, Some(principal)),
+            vec![(principal, ByteBuf::from([1])), (principal, max_key)]
+        );
+    }
+
+    #[test]
+    fn test_payload_update_preserves_current_and_archived_versions() {
+        let namespace = "payload_update".to_string();
+        let manager = Principal::from_slice(&[9, 9, 9]);
+        let current_key = SettingPathKey(namespace.clone(), 0, manager, ByteBuf::from([1]), 0);
+        let versioned_key = SettingPathKey(namespace.clone(), 0, manager, ByteBuf::from([1]), 1);
+        let old_payload = ByteBuf::from(vec![1; 128]);
+        let new_payload = ByteBuf::from(vec![2; 256]);
+
+        NAMESPACES_STORE.with_borrow_mut(|store| {
+            store.insert(
+                namespace.clone(),
+                Namespace {
+                    managers: BTreeSet::from([manager]),
+                    max_payload_size: 1024,
+                    ..Default::default()
+                },
+            );
+        });
+        SETTINGS_STORE.with_borrow_mut(|store| {
+            store.insert(
+                current_key.clone(),
+                Setting {
+                    payload: Some(old_payload.clone()),
+                    version: 1,
+                    ..Default::default()
+                },
+            );
+        });
+
+        let output = ns::update_setting_payload(
+            manager,
+            versioned_key.clone(),
+            UpdateSettingPayloadInput {
+                payload: Some(new_payload.clone()),
+                ..Default::default()
+            },
+            42,
+        )
+        .unwrap();
+        assert_eq!(output.version, 2);
+
+        let current = SETTINGS_STORE.with_borrow(|store| store.get(&current_key).unwrap());
+        assert_eq!(current.payload, Some(new_payload));
+        assert_eq!(current.version, 2);
+        let archived = PAYLOADS_STORE.with_borrow(|store| store.get(&versioned_key).unwrap());
+        assert_eq!(archived.payload, Some(old_payload));
+    }
+
+    #[test]
+    fn test_payload_update_rejects_malformed_dek_before_writing() {
+        let namespace = "invalid_dek".to_string();
+        let manager = Principal::from_slice(&[8, 8, 8]);
+        let current_key = SettingPathKey(namespace.clone(), 0, manager, ByteBuf::from([1]), 0);
+        let versioned_key = SettingPathKey(namespace.clone(), 0, manager, ByteBuf::from([1]), 1);
+        let payload = ByteBuf::from(vec![1; 16]);
+
+        NAMESPACES_STORE.with_borrow_mut(|store| {
+            store.insert(
+                namespace,
+                Namespace {
+                    managers: BTreeSet::from([manager]),
+                    max_payload_size: 1024,
+                    ..Default::default()
+                },
+            );
+        });
+        SETTINGS_STORE.with_borrow_mut(|store| {
+            store.insert(
+                current_key.clone(),
+                Setting {
+                    payload: Some(payload.clone()),
+                    version: 1,
+                    ..Default::default()
+                },
+            );
+        });
+
+        assert!(ns::update_setting_payload(
+            manager,
+            versioned_key.clone(),
+            UpdateSettingPayloadInput {
+                dek: Some(ByteBuf::from([0xff])),
+                ..Default::default()
+            },
+            42,
+        )
+        .is_err());
+
+        let current = SETTINGS_STORE.with_borrow(|store| store.get(&current_key).unwrap());
+        assert_eq!(current.payload, Some(payload));
+        assert_eq!(current.version, 1);
+        assert!(PAYLOADS_STORE.with_borrow(|store| store.get(&versioned_key).is_none()));
+    }
 
     #[test]
     fn test_delete_namespace_only_looks_at_its_own_settings() {
