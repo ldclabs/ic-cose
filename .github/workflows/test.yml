@@ -12,5 +12,6 @@ jobs:
       - uses: dfinity/setup-dfx@main
       - name: Run tests
         run: |
-          cargo clippy --verbose --all-targets --all-features
+          cargo fmt --all -- --check
+          cargo clippy --verbose --workspace --all-targets --all-features -- -D warnings
           cargo test --verbose --workspace --all-features -- --nocapture

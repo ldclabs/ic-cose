@@ -15,7 +15,7 @@ license.workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
-ic_cose_types = { path = "../ic_cose_types", version = "0.10" }
+ic_cose_types = { path = "../ic_cose_types", version = "0.11" }
 candid.workspace = true
 cbor2 = { workspace = true }
 hex = { workspace = true }
@@ -33,3 +33,6 @@ ic-certification = { workspace = true }
 ic_auth_types = { workspace = true }
 ic_auth_verifier = { workspace = true }
 ic-dummy-getrandom-for-wasm = { workspace = true }
+
+[target.'cfg(target_arch = "wasm64")'.dependencies]
+getrandom_02 = { package = "getrandom", version = "0.2", features = ["custom"] }

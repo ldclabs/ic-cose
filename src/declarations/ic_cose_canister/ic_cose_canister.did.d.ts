@@ -76,6 +76,7 @@ export interface InitArgs {
   'ecdsa_key_name' : string,
   'governance_canister' : [] | [Principal],
   'name' : string,
+  'vetkd_context_version' : [] | [number],
   'schnorr_key_name' : string,
   'allowed_apis' : Array<string>,
   'subnet_size' : bigint,
@@ -89,9 +90,11 @@ export interface NamespaceDelegatorsInput {
   'name' : string,
 }
 export interface NamespaceInfo {
+  'user_count' : number,
   'status' : number,
   'updated_at' : bigint,
   'session_expires_in_ms' : bigint,
+  'manager_count' : number,
   'managers' : Array<Principal>,
   'payload_bytes_total' : bigint,
   'desc' : string,
@@ -101,8 +104,10 @@ export interface NamespaceInfo {
   'auditors' : Array<Principal>,
   'fixed_id_names' : Array<[string, Array<Principal>]>,
   'users' : Array<Principal>,
+  'fixed_delegator_count' : number,
   'visibility' : number,
   'gas_balance' : bigint,
+  'auditor_count' : number,
 }
 export interface PublicKeyInput {
   'ns' : string,
@@ -116,37 +121,43 @@ export type Result = { 'Ok' : null } |
   { 'Err' : string };
 export type Result_1 = { 'Ok' : NamespaceInfo } |
   { 'Err' : string };
-export type Result_10 = { 'Ok' : Array<[Principal, Uint8Array | number[]]> } |
+export type Result_10 = { 'Ok' : boolean } |
   { 'Err' : string };
-export type Result_11 = { 'Ok' : SignInResponse } |
+export type Result_11 = { 'Ok' : Array<string> } |
   { 'Err' : string };
-export type Result_12 = { 'Ok' : bigint } |
+export type Result_12 = { 'Ok' : Array<Principal> } |
   { 'Err' : string };
-export type Result_13 = { 'Ok' : CreateSettingOutput } |
+export type Result_13 = { 'Ok' : Array<[Principal, Uint8Array | number[]]> } |
   { 'Err' : string };
-export type Result_14 = { 'Ok' : SettingInfo } |
+export type Result_14 = { 'Ok' : SignInResponse } |
   { 'Err' : string };
-export type Result_15 = { 'Ok' : SettingArchivedPayload } |
+export type Result_15 = { 'Ok' : bigint } |
   { 'Err' : string };
-export type Result_16 = { 'Ok' : StateInfo } |
+export type Result_16 = { 'Ok' : CreateSettingOutput } |
   { 'Err' : string };
-export type Result_17 = { 'Ok' : string } |
+export type Result_17 = { 'Ok' : SettingInfo } |
+  { 'Err' : string };
+export type Result_18 = { 'Ok' : SettingArchivedPayload } |
+  { 'Err' : string };
+export type Result_19 = { 'Ok' : StateInfo } |
   { 'Err' : string };
 export type Result_2 = { 'Ok' : Array<NamespaceInfo> } |
   { 'Err' : string };
-export type Result_3 = { 'Ok' : ECDHOutput } |
+export type Result_20 = { 'Ok' : string } |
   { 'Err' : string };
-export type Result_4 = { 'Ok' : PublicKeyOutput } |
+export type Result_3 = { 'Ok' : bigint } |
   { 'Err' : string };
-export type Result_5 = { 'Ok' : Uint8Array | number[] } |
+export type Result_4 = { 'Ok' : ECDHOutput } |
   { 'Err' : string };
-export type Result_6 = { 'Ok' : SignedDelegation } |
+export type Result_5 = { 'Ok' : PublicKeyOutput } |
   { 'Err' : string };
-export type Result_7 = { 'Ok' : Array<Principal> } |
+export type Result_6 = { 'Ok' : Uint8Array | number[] } |
   { 'Err' : string };
-export type Result_8 = { 'Ok' : Principal } |
+export type Result_7 = { 'Ok' : SignedDelegation } |
   { 'Err' : string };
-export type Result_9 = { 'Ok' : boolean } |
+export type Result_8 = { 'Ok' : Array<Principal> } |
+  { 'Err' : string };
+export type Result_9 = { 'Ok' : Principal } |
   { 'Err' : string };
 /**
  * # Schnorr Algorithm.
@@ -238,6 +249,8 @@ export interface StateInfo {
   'managers' : Array<Principal>,
   'governance_canister' : [] | [Principal],
   'name' : string,
+  'vetkd_context_version' : number,
+  'low_wasm_memory' : boolean,
   'auditors' : Array<Principal>,
   'schnorr_secp256k1_public_key' : [] | [PublicKeyOutput],
   'ecdsa_public_key' : [] | [PublicKeyOutput],
@@ -271,17 +284,35 @@ export interface UpgradeArgs {
   'freezing_threshold' : [] | [bigint],
   'governance_canister' : [] | [Principal],
   'name' : [] | [string],
+  'vetkd_context_version' : [] | [number],
   'subnet_size' : [] | [bigint],
+  'clear_governance_canister' : [] | [boolean],
+  /**
+   * Explicit opt-in for deployments upgrading directly from the legacy
+   * monolithic namespace store. Current deployments must leave this false.
+   */
+  'migrate_legacy_namespaces' : [] | [boolean],
   'vetkd_key_name' : [] | [string],
 }
 export interface _SERVICE {
   'admin_add_allowed_apis' : ActorMethod<[Array<string>], Result>,
   'admin_add_auditors' : ActorMethod<[Array<Principal>], Result>,
   'admin_add_managers' : ActorMethod<[Array<Principal>], Result>,
+  'admin_clear_low_wasm_memory' : ActorMethod<[], Result>,
   'admin_create_namespace' : ActorMethod<[CreateNamespaceInput], Result_1>,
   'admin_list_namespace' : ActorMethod<
     [[] | [string], [] | [number]],
     Result_2
+  >,
+  'admin_migrate_legacy_namespace_acls' : ActorMethod<[number], Result_3>,
+  /**
+   * Incrementally moves legacy monolithic setting records into split metadata
+   * and payload stable maps. Re-run until it returns zero.
+   */
+  'admin_migrate_legacy_settings' : ActorMethod<[number], Result_3>,
+  'admin_recover_namespace_managers' : ActorMethod<
+    [string, Array<Principal>],
+    Result
   >,
   'admin_remove_allowed_apis' : ActorMethod<[Array<string>], Result>,
   'admin_remove_auditors' : ActorMethod<[Array<Principal>], Result>,
@@ -290,26 +321,46 @@ export interface _SERVICE {
    * ecdh_encrypted_cose_key returns a permanent partial KEK encrypted with ECDH.
    * It should be used with a local partial key to derive a full KEK.
    */
-  'ecdh_cose_encrypted_key' : ActorMethod<[SettingPath, ECDHInput], Result_3>,
-  'ecdsa_public_key' : ActorMethod<[[] | [PublicKeyInput]], Result_4>,
-  'ecdsa_sign' : ActorMethod<[SignInput], Result_5>,
+  'ecdh_cose_encrypted_key' : ActorMethod<[SettingPath, ECDHInput], Result_4>,
+  'ecdsa_public_key' : ActorMethod<[[] | [PublicKeyInput]], Result_5>,
+  'ecdsa_sign' : ActorMethod<[SignInput], Result_6>,
   'get_delegation' : ActorMethod<
     [Uint8Array | number[], Uint8Array | number[], bigint],
-    Result_6
+    Result_7
   >,
   'namespace_add_auditors' : ActorMethod<[string, Array<Principal>], Result>,
-  'namespace_add_delegator' : ActorMethod<[NamespaceDelegatorsInput], Result_7>,
+  'namespace_add_delegator' : ActorMethod<[NamespaceDelegatorsInput], Result_8>,
   'namespace_add_managers' : ActorMethod<[string, Array<Principal>], Result>,
   'namespace_add_users' : ActorMethod<[string, Array<Principal>], Result>,
   'namespace_delete' : ActorMethod<[string], Result>,
-  'namespace_get_delegators' : ActorMethod<[string, string], Result_7>,
-  'namespace_get_fixed_identity' : ActorMethod<[string, string], Result_8>,
+  'namespace_get_delegators' : ActorMethod<[string, string], Result_8>,
+  'namespace_get_fixed_identity' : ActorMethod<[string, string], Result_9>,
   'namespace_get_info' : ActorMethod<[string], Result_1>,
-  'namespace_is_member' : ActorMethod<[string, string, Principal], Result_9>,
+  'namespace_get_info_v2' : ActorMethod<[string, boolean], Result_1>,
+  'namespace_is_member' : ActorMethod<[string, string, Principal], Result_10>,
+  'namespace_list_fixed_identity_names' : ActorMethod<
+    [string, [] | [string], [] | [number]],
+    Result_11
+  >,
+  'namespace_list_members' : ActorMethod<
+    [string, string, [] | [Principal], [] | [number]],
+    Result_12
+  >,
   'namespace_list_setting_keys' : ActorMethod<
     [string, boolean, [] | [Principal]],
-    Result_10
+    Result_13
   >,
+  'namespace_list_setting_keys_v2' : ActorMethod<
+    [
+      string,
+      boolean,
+      [] | [Principal],
+      [] | [[Principal, Uint8Array | number[]]],
+      [] | [number],
+    ],
+    Result_13
+  >,
+  'namespace_rebuild_payload_bytes' : ActorMethod<[string], Result_3>,
   'namespace_remove_auditors' : ActorMethod<[string, Array<Principal>], Result>,
   'namespace_remove_delegator' : ActorMethod<
     [NamespaceDelegatorsInput],
@@ -317,51 +368,51 @@ export interface _SERVICE {
   >,
   'namespace_remove_managers' : ActorMethod<[string, Array<Principal>], Result>,
   'namespace_remove_users' : ActorMethod<[string, Array<Principal>], Result>,
-  'namespace_sign_delegation' : ActorMethod<[SignDelegationInput], Result_11>,
-  'namespace_top_up' : ActorMethod<[string, bigint], Result_12>,
+  'namespace_sign_delegation' : ActorMethod<[SignDelegationInput], Result_14>,
+  'namespace_top_up' : ActorMethod<[string, bigint], Result_15>,
   'namespace_update_info' : ActorMethod<[UpdateNamespaceInput], Result>,
   'schnorr_public_key' : ActorMethod<
     [SchnorrAlgorithm, [] | [PublicKeyInput]],
-    Result_4
-  >,
-  'schnorr_sign' : ActorMethod<[SchnorrAlgorithm, SignInput], Result_5>,
-  'schnorr_sign_identity' : ActorMethod<
-    [SchnorrAlgorithm, SignIdentityInput],
     Result_5
   >,
+  'schnorr_sign' : ActorMethod<[SchnorrAlgorithm, SignInput], Result_6>,
+  'schnorr_sign_identity' : ActorMethod<
+    [SchnorrAlgorithm, SignIdentityInput],
+    Result_6
+  >,
   'setting_add_readers' : ActorMethod<[SettingPath, Array<Principal>], Result>,
-  'setting_create' : ActorMethod<[SettingPath, CreateSettingInput], Result_13>,
+  'setting_create' : ActorMethod<[SettingPath, CreateSettingInput], Result_16>,
   'setting_delete' : ActorMethod<[SettingPath], Result>,
-  'setting_get' : ActorMethod<[SettingPath], Result_14>,
-  'setting_get_archived_payload' : ActorMethod<[SettingPath], Result_15>,
-  'setting_get_info' : ActorMethod<[SettingPath], Result_14>,
+  'setting_get' : ActorMethod<[SettingPath], Result_17>,
+  'setting_get_archived_payload' : ActorMethod<[SettingPath], Result_18>,
+  'setting_get_info' : ActorMethod<[SettingPath], Result_17>,
   'setting_remove_readers' : ActorMethod<
     [SettingPath, Array<Principal>],
     Result
   >,
   'setting_update_info' : ActorMethod<
     [SettingPath, UpdateSettingInfoInput],
-    Result_13
+    Result_16
   >,
   'setting_update_payload' : ActorMethod<
     [SettingPath, UpdateSettingPayloadInput],
-    Result_13
+    Result_16
   >,
-  'state_get_info' : ActorMethod<[], Result_16>,
-  'validate2_admin_add_allowed_apis' : ActorMethod<[Array<string>], Result_17>,
-  'validate2_admin_add_auditors' : ActorMethod<[Array<Principal>], Result_17>,
-  'validate2_admin_add_managers' : ActorMethod<[Array<Principal>], Result_17>,
+  'state_get_info' : ActorMethod<[], Result_19>,
+  'validate2_admin_add_allowed_apis' : ActorMethod<[Array<string>], Result_20>,
+  'validate2_admin_add_auditors' : ActorMethod<[Array<Principal>], Result_20>,
+  'validate2_admin_add_managers' : ActorMethod<[Array<Principal>], Result_20>,
   'validate2_admin_remove_allowed_apis' : ActorMethod<
     [Array<string>],
-    Result_17
+    Result_20
   >,
   'validate2_admin_remove_auditors' : ActorMethod<
     [Array<Principal>],
-    Result_17
+    Result_20
   >,
   'validate2_admin_remove_managers' : ActorMethod<
     [Array<Principal>],
-    Result_17
+    Result_20
   >,
   'validate_admin_add_allowed_apis' : ActorMethod<[Array<string>], Result>,
   'validate_admin_add_auditors' : ActorMethod<[Array<Principal>], Result>,
@@ -371,9 +422,9 @@ export interface _SERVICE {
   'validate_admin_remove_managers' : ActorMethod<[Array<Principal>], Result>,
   'vetkd_encrypted_key' : ActorMethod<
     [SettingPath, Uint8Array | number[]],
-    Result_5
+    Result_6
   >,
-  'vetkd_public_key' : ActorMethod<[SettingPath], Result_5>,
+  'vetkd_public_key' : ActorMethod<[SettingPath], Result_6>,
 }
 export declare const idlFactory: IDL.InterfaceFactory;
 export declare const init: (args: { IDL: typeof IDL }) => IDL.Type[];

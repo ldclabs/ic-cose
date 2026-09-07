@@ -17,8 +17,6 @@ use serde_bytes::ByteArray;
 /// Keep direct install payloads comfortably below the 2 MiB inter-canister
 /// message limit, including Candid framing and init/upgrade arguments.
 const MAX_DIRECT_INSTALL_PAYLOAD_BYTES: usize = 1_500_000;
-/// The management-canister chunk limit is 1 MiB.
-const UPLOAD_CHUNK_BYTES: usize = 1024 * 1024;
 
 /// The narrow projection used by deployment checks.
 ///
@@ -144,61 +142,80 @@ pub async fn cycle_balance(canister: Principal) -> Result<u128, String> {
         .ok_or_else(|| "canister cycle balance exceeds u128".to_string())
 }
 
-/// Installs one exact stored artifact, using chunked installation only when the
-/// combined direct payload would be too large.
-///
-/// `artifact_hash` is the SHA-256 key under which `wasm_module` was loaded. It
-/// is also the hash required by `install_chunked_code`, so the caller does not
-/// need to hash a multi-megabyte artifact again on every deployment.
-pub async fn install_code(
+async fn install_code(
     canister: Principal,
     mode: mgt::CanisterInstallMode,
     wasm_module: &[u8],
+    arg: &[u8],
+) -> Result<(), String> {
+    let response = Call::unbounded_wait(Principal::management_canister(), "install_code")
+        .with_arg(InstallCodeArgs {
+            mode,
+            canister_id: canister,
+            wasm_module,
+            arg,
+            sender_canister_version: Some(ic_cdk::api::canister_version()),
+        })
+        .await
+        .map_err(format_error)?;
+    response.candid().map_err(format_error)
+}
+
+/// Installs an artifact from the repository without assembling a large module
+/// in Wasm heap memory. Small artifacts keep the direct-call fast path; large
+/// artifacts are read and uploaded one stable chunk at a time.
+pub async fn install_stored_code(
+    canister: Principal,
+    mode: mgt::CanisterInstallMode,
     artifact_hash: ByteArray<32>,
     arg: &[u8],
 ) -> Result<(), String> {
-    if use_direct_install(wasm_module.len(), arg.len()) {
-        let response = Call::unbounded_wait(Principal::management_canister(), "install_code")
-            .with_arg(InstallCodeArgs {
-                mode,
-                canister_id: canister,
-                wasm_module,
-                arg,
-                sender_canister_version: Some(ic_cdk::api::canister_version()),
-            })
-            .await
-            .map_err(format_error)?;
-        return response.candid().map_err(format_error);
+    let metadata = crate::store::wasm::get_metadata(&artifact_hash)?;
+    let direct = use_direct_install(metadata.wasm_size as usize, arg.len());
+    if !direct && crate::store::wasm::is_legacy_artifact(&artifact_hash) {
+        return Err(
+            "large legacy artifact must be migrated with admin_migrate_legacy_wasm_artifact before installation"
+                .to_string(),
+        );
+    }
+    // ICP requires an empty target chunk store before installation. The
+    // caller holds this repository's per-target operation lock while here.
+    mgt::clear_chunk_store(&mgt::ClearChunkStoreArgs {
+        canister_id: canister,
+    })
+    .await
+    .map_err(format_error)?;
+    if direct {
+        let wasm = crate::store::wasm::get_wasm(&artifact_hash)
+            .ok_or_else(|| "NotFound: artifact not found".to_string())?;
+        return install_code(canister, mode, &wasm.wasm, arg).await;
     }
 
-    install_chunked_code(canister, mode, wasm_module, artifact_hash, arg).await
+    install_stored_chunked_code(canister, mode, artifact_hash, arg).await
 }
 
 fn use_direct_install(wasm_bytes: usize, arg_bytes: usize) -> bool {
     wasm_bytes.saturating_add(arg_bytes) <= MAX_DIRECT_INSTALL_PAYLOAD_BYTES
 }
 
-async fn install_chunked_code(
+async fn install_stored_chunked_code(
     canister: Principal,
     mode: mgt::CanisterInstallMode,
-    wasm_module: &[u8],
     artifact_hash: ByteArray<32>,
     arg: &[u8],
 ) -> Result<(), String> {
     let clear_args = mgt::ClearChunkStoreArgs {
         canister_id: canister,
     };
-    mgt::clear_chunk_store(&clear_args)
-        .await
-        .map_err(format_error)?;
-
     let install_result = async {
-        let mut chunk_hashes = Vec::with_capacity(wasm_module.len().div_ceil(UPLOAD_CHUNK_BYTES));
-        for chunk in wasm_module.chunks(UPLOAD_CHUNK_BYTES) {
+        let count = crate::store::wasm::storage_chunk_count(&artifact_hash)?;
+        let mut chunk_hashes = Vec::with_capacity(count as usize);
+        for index in 0..count {
+            let chunk = crate::store::wasm::storage_chunk(&artifact_hash, index)?;
             let response = Call::unbounded_wait(Principal::management_canister(), "upload_chunk")
                 .with_arg(UploadChunkArgs {
                     canister_id: canister,
-                    chunk,
+                    chunk: &chunk,
                 })
                 .await
                 .map_err(format_error)?;
@@ -223,10 +240,9 @@ async fn install_chunked_code(
     }
     .await;
 
-    // The chunks are billed as target-canister memory and are not needed after
-    // the install attempt. Cleanup is best effort because a successful install
-    // must not be reported as failed solely due to cleanup.
-    let _ = mgt::clear_chunk_store(&clear_args).await;
+    let _ = Call::bounded_wait(Principal::management_canister(), "clear_chunk_store")
+        .with_arg(&clear_args)
+        .await;
     install_result
 }
 

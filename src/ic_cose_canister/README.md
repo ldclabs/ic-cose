@@ -1,119 +1,621 @@
-# `ic_cose_canister`
-⚙️ A decentralized COnfiguration service with Signing and Encryption on the Internet Computer.
+# `ic_cose_canister` Integration Guide
 
-## Features
+[English](README.md) · [简体中文](README.zh-CN.md)
 
-- Supports message signing and configuration data encryption (COSE, Threshold ECDSA, Threshold Schnorr, VetKeys).
-- Organizes configuration data by namespaces and client subjects with fine-grained access control.
+`ic_cose_canister` is a configuration, signing, and encryption service deployed on the Internet Computer. Applications isolate configurations and access policies by namespace. The canister supports storing plaintext or client-encrypted payloads, issuing Threshold ECDSA / Schnorr signatures, retrieving transport-encrypted key material, and delegating fixed-identity IC sessions.
 
-## Demo
+This document serves as a technical reference for frontend, backend, and canister developers integrating against the current implementation in this repository. Definitive Candid interfaces are defined in [ic_cose_canister.did](ic_cose_canister.did), and state transition and permission behaviors are implemented in [src/store.rs](src/store.rs). Deployed instances may run different versions; always verify the target canister's Candid interface before integrating.
 
-Try it online: https://a4gq6-oaaaa-aaaab-qaa4q-cai.raw.icp0.io/?id=53cyg-yyaaa-aaaap-ahpua-cai
+## Table of Contents
 
-## Quick Start
+- [`ic_cose_canister` Integration Guide](#ic_cose_canister-integration-guide)
+  - [Table of Contents](#table-of-contents)
+  - [1. Integration Endpoints and Conventions](#1-integration-endpoints-and-conventions)
+  - [2. Deployment and Minimal Workflow](#2-deployment-and-minimal-workflow)
+    - [2.1 Initialization](#21-initialization)
+    - [2.2 Roles and Namespace Setup](#22-roles-and-namespace-setup)
+    - [2.3 Create, Read, Update, and History](#23-create-read-update-and-history)
+  - [3. Data Model and Permissions](#3-data-model-and-permissions)
+    - [3.1 Namespaces and Setting Paths](#31-namespaces-and-setting-paths)
+    - [3.2 Role Boundaries](#32-role-boundaries)
+    - [3.3 Visibility, Status, and Key Access](#33-visibility-status-and-key-access)
+  - [4. Namespace Endpoints](#4-namespace-endpoints)
+  - [5. Setting Endpoints and Versioning](#5-setting-endpoints-and-versioning)
+  - [6. ECDSA and Schnorr Signatures](#6-ecdsa-and-schnorr-signatures)
+  - [7. Encrypted Settings and Key Retrieval](#7-encrypted-settings-and-key-retrieval)
+    - [7.1 Encryption Data Format](#71-encryption-data-format)
+    - [7.2 Partial KEK via ECDH](#72-partial-kek-via-ecdh)
+    - [7.3 VetKeys](#73-vetkeys)
+  - [8. Identity Tokens and Fixed-Identity Delegations](#8-identity-tokens-and-fixed-identity-delegations)
+    - [8.1 `schnorr_sign_identity`: Identity CWT](#81-schnorr_sign_identity-identity-cwt)
+    - [8.2 Fixed-Identity Endpoints](#82-fixed-identity-endpoints)
+    - [8.3 Requesting Session Delegations](#83-requesting-session-delegations)
+  - [9. Administration and Governance](#9-administration-and-governance)
+  - [10. Client Integration Examples](#10-client-integration-examples)
+    - [10.1 TypeScript Actor](#101-typescript-actor)
+    - [10.2 Rust SDK](#102-rust-sdk)
+  - [11. Error Handling and Operational Constraints](#11-error-handling-and-operational-constraints)
+    - [Cycles and Resources](#cycles-and-resources)
+  - [License](#license)
 
-### Local Deployment
+## 1. Integration Endpoints and Conventions
 
-Deploy the canister:
+| Resource                  | Location / Description                                                                                                 |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Canister Candid           | [ic_cose_canister.did](ic_cose_canister.did) — Complete method signatures, record types, and query annotations         |
+| JS / TS Declarations      | [src/declarations/ic_cose_canister](../declarations/ic_cose_canister) — Regenerate via `dfx generate ic_cose_canister` |
+| Rust SDK                  | [ic_cose](../ic_cose) — Core trait `client::CoseSDK`, implementation `client::Client`                                  |
+| Shared Types & COSE Tools | [ic_cose_types](../ic_cose_types)                                                                                      |
+| VetKeys Examples          | [Rust Example](../ic_cose/examples/vetkeys.rs), [Frontend Example](../../examples/vetkeys)                             |
+| Historical Demo Instance  | `53cyg-yyaaa-aaaap-ahpua-cai` — For test exploration only; no SLA or version guarantees                                |
+
+Integration requires a network host, canister ID, caller identity, and target namespace. The authenticated identity dictates `caller`. When `subject = null`, the canister defaults to the `caller` principal.
+
+All business endpoints return Candid `variant { Ok : T; Err : text }`, or `variant { Ok; Err : text }` when no payload is returned. This guide denotes them as `Result<T>` and `Result<()>`. Candid identifiers like `Result_1` are autogenerated type aliases. Clients must handle application `Err` responses, network failures, canister rejects, guard rejections, and traps.
+
+| Candid Type                            | JavaScript / TypeScript Representation              |
+| -------------------------------------- | --------------------------------------------------- |
+| `opt T`                                | `[]` for empty, `[value]` for present; never `null` |
+| `blob`                                 | `Uint8Array` or `number[]`; never a hex string      |
+| `principal`                            | `Principal` instance; never raw text                |
+| `nat`, `nat64`                         | `bigint` (e.g., `1n`)                               |
+| `nat32`, `nat8`, `int8`                | `number`                                            |
+| `vec record { text; text }`            | `[string, string][]`                                |
+| `variant { ed25519; bip340secp256k1 }` | `{ ed25519: null }` or `{ bip340secp256k1: null }`  |
+| `Result<T>`                            | `{ Ok: value }` or `{ Err: message }`               |
+
+Timestamp conventions:
+- Configuration and namespace `created_at`, `updated_at`, and `archived_at` are Unix **milliseconds**.
+- Delegation `expiration` is Unix **nanoseconds**.
+- CWT time claims are Unix **seconds**.
+
+Query vs. Update conventions:
+- `query` calls run quickly on a single node without consensus; `update` calls pass through IC consensus.
+- The canister author recommends calling `setting_get` via `update` when cryptographic verification through consensus is required. The Rust SDK currently invokes `setting_get` as a query; when consensus verification is required, invoke `canister_update` explicitly.
+- `get_delegation` relies on certified state returned by query calls and must be invoked as a `query`.
+
+## 2. Deployment and Minimal Workflow
+
+### 2.1 Initialization
+
+Run the following from the workspace root with Rust, the `wasm32-unknown-unknown` target, and `dfx` available. Key names in this snippet are local test defaults; the target replica must support the specified algorithms and key IDs. A successful deploy does not guarantee threshold keys are instantly ready.
+
 ```bash
-RUSTFLAGS="--cfg=getrandom_backend=\"custom\"" dfx deploy ic_cose_canister
+rustup target add wasm32-unknown-unknown
+dfx start --background
 
-# or with arguments
-# dfx canister create --specified-id 53cyg-yyaaa-aaaap-ahpua-cai ic_cose_canister
-RUSTFLAGS="--cfg=getrandom_backend=\"custom\"" dfx deploy ic_cose_canister --argument "(opt variant {Init =
-  record {
-    name = \"LDC Labs\";
-    ecdsa_key_name = \"test_key_1\";
-    schnorr_key_name = \"test_key_1\";
-    vetkd_key_name = \"test_key_1\";
-    allowed_apis = vec {};
-    subnet_size = 0;
-    freezing_threshold = 1_000_000_000_000;
-  }
-})"
+RUSTFLAGS='--cfg=getrandom_backend="custom"' dfx deploy ic_cose_canister --argument '(opt variant { Init = record {
+  name = "Local IC COSE";
+  ecdsa_key_name = "dfx_test_key";
+  schnorr_key_name = "dfx_test_key";
+  vetkd_key_name = "dfx_test_key";
+  allowed_apis = vec {};
+  subnet_size = 0;
+  freezing_threshold = 1_000_000_000_000;
+  governance_canister = null;
+  vetkd_context_version = opt 2;
+}})'
 
 dfx canister call ic_cose_canister state_get_info '()'
+```
 
-export MYID=$(dfx identity get-principal)
+Although the canister accepts `opt InstallArgs`, initial installation requires `opt variant { Init = ... }`. Passing `null` traps with `init args is missing`. The three key names identify subnet-managed keys rather than raw private keys.
 
-# add managers
-dfx canister call ic_cose_canister admin_add_managers "(vec {principal \"$MYID\"})"
+`InitArgs` field definitions:
 
+| Field                                                    | Type            | Description                                                                                         |
+| -------------------------------------------------------- | --------------- | --------------------------------------------------------------------------------------------------- |
+| `name`                                                   | `text`          | Display label for this canister instance; unrelated to namespace names                              |
+| `ecdsa_key_name` / `schnorr_key_name` / `vetkd_key_name` | `text`          | Subnet key identifiers for each algorithm                                                           |
+| `allowed_apis`                                           | `vec text`      | Whitelist for business update methods; empty allows all methods                                     |
+| `governance_canister`                                    | `opt principal` | Principal granted application-level controller permissions; does not modify IC canister controllers |
+| `subnet_size`                                            | `nat64`         | Subnet size parameter; retained for compatibility, does not drive dynamic billing                   |
+| `freezing_threshold`                                     | `nat64`         | Application-level cycles floor; required liquid balance before initiating paid management calls     |
+| `vetkd_context_version`                                  | `opt nat8`      | Defaults to 2 (length-prefixed and domain-separated); 1 is for legacy context derivation            |
+
+Post-initialization timers periodically fetch root public keys and internal random initialization vectors (IV) for ECDSA and Schnorr. Failed attempts retry with exponential backoff (starting at 30 seconds, up to 1 hour) without overwriting already loaded keys. Query public key status with:
+
+```bash
 dfx canister call ic_cose_canister ecdsa_public_key '(null)'
-
 dfx canister call ic_cose_canister schnorr_public_key '(variant { ed25519 }, null)'
-
 dfx canister call ic_cose_canister schnorr_public_key '(variant { bip340secp256k1 }, null)'
+```
 
-dfx canister call ic_cose_canister admin_create_namespace "(record {
-  managers = vec { principal \"$MYID\"; };
-  desc = opt \"System namespace\";
-  name = \"_\";
-  max_payload_size = opt 1024;
-  auditors = vec {};
-  users = vec {};
-  visibility = 0;
-})"
+VetKD public keys are fetched per request and are not pre-cached at startup.
+
+### 2.2 Roles and Namespace Setup
+
+Namespaces can be created by the canister controller, configured `governance_canister`, or a global manager. Operational principals should be added to **global managers**, leaving IC controller access as a recovery channel.
+
+```bash
+export MYID=$(dfx identity get-principal)
+dfx canister call ic_cose_canister admin_add_managers "(vec { principal \"$MYID\" })"
 
 dfx canister call ic_cose_canister admin_create_namespace "(record {
   name = \"testing\";
-  visibility = 1;
-  desc = null;
+  visibility = 0;
+  desc = opt \"Integration example\";
   max_payload_size = opt 1_000_000;
-  managers = vec {principal \"$MYID\"};
+  session_expires_in_ms = opt 86_400_000;
+  managers = vec { principal \"$MYID\" };
   auditors = vec {};
-  users = vec {};
+  users = vec { principal \"$MYID\" };
 })"
+```
 
-dfx canister call ic_cose_canister admin_list_namespace "(null, null)"
+This example grants both namespace manager and user roles to the caller, allowing management of both server-wide and user-owned configuration entries.
 
-dfx canister call ic_cose_canister ecdsa_public_key '(opt record {
-  ns = "testing";
-  derivation_path = vec {};
+### 2.3 Create, Read, Update, and History
+
+The following example configures a server setting (`user_owned = false`). Passing `subject = null` binds the setting to the current `caller`. The `key` parameter is raw bytes, here provided as the UTF-8 string `"app_config"`.
+
+```bash
+# Creation requires version = 0; returns version = 1 on success.
+dfx canister call ic_cose_canister setting_create '(record {
+  ns = "testing"; user_owned = false; subject = null;
+  key = blob "app_config"; version = 0;
+}, record {
+  payload = opt blob "hello"; dek = null; status = opt 0;
+  desc = opt "Example config";
+  tags = opt vec { record { "env"; "local" } };
 })'
 
-dfx canister call ic_cose_canister namespace_add_users "(\"testing\", vec {principal \"hpudd-yqaaa-aaaap-ahnbq-cai\"})"
+# version = 0 reads the latest revision; --update routes through consensus.
+dfx canister call ic_cose_canister setting_get '(record {
+  ns = "testing"; user_owned = false; subject = null;
+  key = blob "app_config"; version = 0;
+})' --update
+
+# Updates must provide the current version (1); returns version = 2.
+dfx canister call ic_cose_canister setting_update_payload '(record {
+  ns = "testing"; user_owned = false; subject = null;
+  key = blob "app_config"; version = 1;
+}, record {
+  payload = opt blob "hello v2"; dek = null;
+  status = null; deprecate_current = opt false;
+})'
+
+# Historical revisions are queried via the dedicated archive endpoint.
+dfx canister call ic_cose_canister setting_get_archived_payload '(record {
+  ns = "testing"; user_owned = false; subject = null;
+  key = blob "app_config"; version = 1;
+})'
 ```
 
-## API Reference
+Creating an existing path returns `already exists`. When reading across identities, explicitly provide the original `subject`; passing `null` binds to the new caller, pointing to a different setting path.
 
-The canister exposes a comprehensive Candid API. Key endpoints include:
+## 3. Data Model and Permissions
+
+### 3.1 Namespaces and Setting Paths
+
+A namespace defines a permission boundary, including member sets, visibility flags, operational status, payload size limits, and fixed-identity delegations.
 
 ```candid
-# Namespace Operations
-namespace_add_managers : (text, vec principal) -> (Result)
-namespace_update_info : (UpdateNamespaceInput) -> (Result)
-namespace_get_info : (text) -> (Result) query
-namespace_list_setting_keys : (text, bool, opt principal) -> (Result) query
-
-# Setting Operations
-setting_create : (SettingPath, CreateSettingInput) -> (Result)
-setting_get : (SettingPath) -> (Result) query
-setting_add_readers : (SettingPath, vec principal) -> (Result)
-setting_update_payload : (SettingPath, UpdateSettingPayloadInput) -> (Result)
-namespace_top_up : (text, nat) -> (Result)
-
-# COSE Operations
-schnorr_public_key : (SchnorrAlgorithm, opt PublicKeyInput) -> (Result) query
-schnorr_sign : (SchnorrAlgorithm, SignInput) -> (Result)
-ecdsa_sign : (SignInput) -> (Result)
-ecdh_cose_encrypted_key : (SettingPath, ECDHInput) -> (Result)
-
-# Identity Operations
-namespace_get_fixed_identity : (text, text) -> (Result) query
-namespace_add_delegator : (NamespaceDelegatorsInput) -> (Result)
-namespace_sign_delegation : (SignDelegationInput) -> (Result)
-get_delegation : (blob, blob, nat64) -> (Result) query
-
-# Admin Operations
-admin_add_managers : (vec principal) -> (Result)
-admin_create_namespace : (CreateNamespaceInput) -> (Result)
-admin_add_allowed_apis : (vec text) -> (Result)
+type SettingPath = record {
+  ns : text;
+  user_owned : bool;
+  subject : opt principal;
+  key : blob;
+  version : nat32;
+};
 ```
 
-Full Candid API definition: [ic_cose_canister.did](https://github.com/ldclabs/ic-cose/tree/main/src/ic_cose_canister/ic_cose_canister.did)
+A logical setting is uniquely identified by `(ns, user_owned, subject, key)`. The `version` field validates concurrent updates or specifies historical reads. `user_owned = false` (server-managed) and `true` (user-owned) reside in distinct storage partitions; they never collide, even when all other path components match.
+
+| Field / Property        | Constraints & Defaults                                                                                                            |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Namespace `name`        | 1–64 bytes, matching `^[a-z0-9_]+$`; immutable after creation                                                                     |
+| Setting `key`           | 1–64 bytes, arbitrary binary; not restricted to namespace naming rules                                                            |
+| `subject`               | Defaults to `caller` when `null`; specifying another principal does not grant permissions on it                                   |
+| `desc`                  | Up to 1024 UTF-8 bytes; defaults to an empty string                                                                               |
+| `tags`                  | Up to 32 items; keys must match namespace naming rules, values up to 256 bytes                                                    |
+| `max_payload_size`      | 1–2,000,000 bytes (default: 2,000,000); limits stored bytes inclusive of encryption overhead                                      |
+| `dek`                   | Up to 3072 bytes; must parse as a valid `COSE_Encrypt0` structure                                                                 |
+| `session_expires_in_ms` | Default 86,400,000 (1 day), maximum 31,536,000,000 (365 days); 0 disables new delegations                                         |
+| Member sets             | Deduplicated sets. `managers` must be non-empty on creation; `auditors` and `users` may be empty. Anonymous principal is rejected |
+| Add / Remove members    | Inputs must be non-empty and cannot include the anonymous principal                                                               |
+
+### 3.2 Role Boundaries
+
+Roles do not inherit permissions hierarchically:
+
+| Role                                  | Operational Scope                                                                                                                                                               |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| IC Controller / `governance_canister` | Manage global managers, auditors, and allowed APIs; does not inherit namespace data permissions                                                                                 |
+| Global Manager                        | Create and list namespaces; does not automatically manage individual namespaces                                                                                                 |
+| Global Auditor                        | List namespaces across the canister; cannot read private namespace data                                                                                                         |
+| Namespace Manager                     | Administrate namespace metadata, read settings, write server-managed settings (`user_owned = false`), and sign messages; cannot edit user-owned settings unless also in `users` |
+| Namespace Auditor                     | Read settings, fetch decryption keys (KEK), and issue self-identity CWTs; cannot write settings or issue generic signatures                                                     |
+| Namespace User                        | Write user-owned settings where `caller == subject`, issue generic signatures, and issue self-identity CWTs                                                                     |
+| Setting Subject                       | Read the setting in unarchived namespaces, and retrieve decryption keys; writing still requires membership in namespace `users`                                                 |
+| Setting Reader                        | Read granted settings and retrieve their decryption keys; does not receive namespace metadata or key listing privileges                                                         |
+| Fixed Identity Delegator              | Request session delegations for assigned fixed-identity names; does not grant namespace membership                                                                              |
+
+To write a user-owned setting (`user_owned = true`), the caller must be a **namespace user and `caller == subject`**. A manager who is also in `users` may write their own user settings. Server settings (`user_owned = false`) can only be written by namespace managers, even if the caller matches the `subject`.
+
+### 3.3 Visibility, Status, and Key Access
+
+Visibility is either `0` (private) or `1` (public). A public namespace allows any caller (including anonymous) to inspect namespace metadata, enumerate setting keys, and read setting contents. Public visibility does not grant write, sign, or key retrieval rights. Plaintext payloads in public namespaces can be read by anyone.
+
+| Status          | Namespace Semantics                                                                                                   | Setting Semantics                                                                                                                 |
+| --------------- | --------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `0` (Active)    | Normal read and write operations permitted                                                                            | Normal read and write operations permitted                                                                                        |
+| `1` (Read-only) | Setting content writes blocked; managers can edit metadata, roles, or restore status to `0`; signatures remain active | Payload updates, reader additions, and deletions blocked; writers can update metadata or restore status via `setting_update_info` |
+| `-1` (Archived) | Setting writes blocked; private reads restricted to manager and auditor; managers can manage or restore               | Payload updates and readers blocked; can be restored via `setting_update_info`, and deletion is permitted                         |
+
+Status transitions can be reversed by authorized managers; status restrictions guard payload mutations without locking out administrative recovery.
+
+Additional access rules:
+- **Private & Unarchived**: Read access permitted to managers, auditors, setting subject, and registered readers; subjects and readers do not need to belong to `users`.
+- **Private & Archived**: Read access restricted to managers and auditors; public namespace read rules override the archived flag.
+- **KEK Access**: Non-managers are rejected if the namespace is archived. Otherwise, access is granted to the subject, namespace auditors, namespace managers (for server settings), or registered setting readers. Managers of user-owned settings have no implicit KEK access.
+- **Pre-creation KEK retrieval**: Authorized principals (such as the intended subject) can derive KEKs before a setting is created. Access is not revoked by setting status or version changes.
+- **Signatures**: Generic signing requires manager or user roles; when a namespace is archived, only managers may sign. `schnorr_sign_identity` and session delegations enforce separate role checks independent of the setting status flag.
+
+## 4. Namespace Endpoints
+
+Unless noted as query, all methods are updates. `()` indicates success without a return payload.
+
+| Method                                                 | Signature (`Input → Ok`)                                                                                  | Description                                                                                                   |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `state_get_info` (query)                               | `() → StateInfo`                                                                                          | Publicly readable; root public key fields only returned to controller / governance / global manager           |
+| `namespace_get_info` (query)                           | `(text) → NamespaceInfo`                                                                                  | Requires namespace read permission                                                                            |
+| `namespace_get_info_v2` (query)                        | `(text, bool with_members) → NamespaceInfo`                                                               | Supports fetching summary only; use pagination when member sets are large                                     |
+| `namespace_is_member` (query)                          | `(text, text, principal) → bool`                                                                          | Second argument: `"manager"`, `"auditor"`, or `"user"`; caller must be authenticated and have read permission |
+| `namespace_list_members` (query)                       | `(text, text, opt principal, opt nat32) → vec principal`                                                  | Paginate members by role (`manager` / `auditor` / `user`)                                                     |
+| `namespace_list_fixed_identity_names` (query)          | `(text, opt text, opt nat32) → vec text`                                                                  | Paginate registered fixed-identity names                                                                      |
+| `namespace_list_setting_keys` (query)                  | `(text, bool, opt principal) → vec record { principal; blob }`                                            | Compatibility endpoint; rejects lists exceeding 1000 items (use v2)                                           |
+| `namespace_list_setting_keys_v2` (query)               | `(text, bool, opt principal, opt record { principal; blob }, opt nat32) → vec record { principal; blob }` | Keyset cursor pagination over `(subject, key)`                                                                |
+| `namespace_update_info`                                | `(UpdateNamespaceInput) → ()`                                                                             | Namespace manager; restores read-only or archived status                                                      |
+| `namespace_delete`                                     | `(text) → ()`                                                                                             | Namespace manager; namespace must be empty                                                                    |
+| `namespace_add_managers` / `namespace_remove_managers` | `(text, vec principal) → ()`                                                                              | Manage namespace managers                                                                                     |
+| `namespace_add_auditors` / `namespace_remove_auditors` | `(text, vec principal) → ()`                                                                              | Manage namespace auditors                                                                                     |
+| `namespace_add_users` / `namespace_remove_users`       | `(text, vec principal) → ()`                                                                              | Manage namespace users                                                                                        |
+| `namespace_top_up`                                     | `(text, nat) → nat`                                                                                       | Returns accepted cycles; see operational constraints                                                          |
+| `namespace_rebuild_payload_bytes`                      | `(text) → nat64`                                                                                          | Namespace manager; recalculates current + archived storage consumption                                        |
+
+`NamespaceInfo` includes `manager_count`, `auditor_count`, `user_count`, and `fixed_delegator_count`. The legacy endpoint returns empty member arrays with preserved counts when serialized sizes risk exceeding message limits; use `namespace_list_members` for pagination.
+
+In `UpdateNamespaceInput`, `name` specifies the target namespace. All other fields (`desc`, `max_payload_size`, `status`, `visibility`, `session_expires_in_ms`) are optional; omitting them retains existing values.
+
+Key listing rules:
+- Public namespaces, managers, and auditors can pass `subject = null` to list all keys, or filter by a specific subject.
+- Regular users in private, active namespaces can only list their own keys (`subject = null` defaults to caller; passing another subject is rejected).
+- Setting readers cannot list keys.
+
+Role management requires manager permissions. Member counts are subject to system limits. The canister refuses removal of the last manager; if historical corruption left a namespace without managers, recovery must be executed via `admin_recover_namespace_managers`.
+
+## 5. Setting Endpoints and Versioning
+
+| Method                                           | Mode   | Signature (`Input → Ok`)                                             |
+| ------------------------------------------------ | ------ | -------------------------------------------------------------------- |
+| `setting_create`                                 | update | `(SettingPath, CreateSettingInput) → CreateSettingOutput`            |
+| `setting_get_info`                               | query  | `(SettingPath) → SettingInfo` (`payload` and `dek` are always empty) |
+| `setting_get`                                    | query  | `(SettingPath) → SettingInfo` (includes current `payload` and `dek`) |
+| `setting_get_archived_payload`                   | query  | `(SettingPath) → SettingArchivedPayload`                             |
+| `setting_update_info`                            | update | `(SettingPath, UpdateSettingInfoInput) → CreateSettingOutput`        |
+| `setting_update_payload`                         | update | `(SettingPath, UpdateSettingPayloadInput) → CreateSettingOutput`     |
+| `setting_add_readers` / `setting_remove_readers` | update | `(SettingPath, vec principal) → ()`                                  |
+| `setting_delete`                                 | update | `(SettingPath) → ()`                                                 |
+
+`SettingInfo` returns `key`, `subject`, `desc`, timestamps, `status`, `version`, `readers`, `tags`, `payload`, and `dek`. `CreateSettingOutput` returns `created_at`, `updated_at`, and `version`; update endpoints reuse this response shape.
+
+| Input Type                  | Fields & Semantics                                                                                                                               |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `CreateSettingInput`        | `payload`, `dek`, `desc`, `tags`, `status` are optional. `status` defaults to 0 (only 0 or 1 permitted on creation). `readers` initializes empty |
+| `UpdateSettingInfoInput`    | `desc`, `tags`, `status` are optional. Provided `tags` replace existing tags completely (empty list clears tags). `status` accepts -1, 0, or 1   |
+| `UpdateSettingPayloadInput` | At least one of `payload` or `dek` must be supplied. Supports `status` and `deprecate_current`                                                   |
+| `SettingArchivedPayload`    | `version`, `archived_at`, `deprecated`, historical `payload` and `dek`                                                                           |
+
+Versioning Rules:
+
+1. Creation requires `path.version = 0`. The first committed version is 1.
+2. For `setting_get`, passing `version = 0` queries the latest revision. Passing a non-zero version requires it to match the current revision; older versions cannot be queried through this endpoint.
+3. `setting_get_info` returns current metadata. It accepts `version = 0` or any version less than or equal to the current revision; it never returns historical metadata.
+4. All mutations and deletions (including reader modifications) must supply the exact current version. `0` is not accepted as a wildcard for writes.
+5. Only `setting_update_payload` increments the version number. Updating descriptions, tags, status, or readers modifies metadata in place without bumping the version, so the version field does not guard against concurrent metadata overwrites.
+6. When `setting_update_payload` is called, if either a payload or DEK exists in the current revision, it is archived before applying the update. Updating only the DEK preserves a copy of the existing payload in archive storage.
+7. Historical payload queries require `0 < version < current_version`, evaluated against the current setting permissions. The `deprecated` flag is advisory; data is still returned.
+8. Deleting a setting removes its entire historical archive; past versions can no longer be retrieved.
+
+When updating payloads or DEKs, omitted fields retain their existing values; passing `null` does not delete a field. Passing `opt blob ""` stores an empty byte sequence rather than clearing the field. For encrypted paths, empty byte sequences must still conform to COSE encoding rules.
+
+On a `version mismatch` error, fetch the latest version, reconcile changes, and retry with the new version number. Do not blindly overwrite the version number without re-reading state.
+
+## 6. ECDSA and Schnorr Signatures
+
+| Method               | Mode   | Signature (`Input → Ok`)                                   |
+| -------------------- | ------ | ---------------------------------------------------------- |
+| `ecdsa_public_key`   | query  | `(opt PublicKeyInput) → PublicKeyOutput`                   |
+| `ecdsa_sign`         | update | `(SignInput) → blob`                                       |
+| `schnorr_public_key` | query  | `(SchnorrAlgorithm, opt PublicKeyInput) → PublicKeyOutput` |
+| `schnorr_sign`       | update | `(SchnorrAlgorithm, SignInput) → blob`                     |
+
+`PublicKeyInput = { ns : text; derivation_path : vec blob }`. `SignInput` extends this with `message : blob`. `PublicKeyOutput` contains `public_key` and `chain_code`. Omitting input returns the canister's root public key without checking namespace permissions; supplying input requires read permissions on the specified namespace.
+
+| Algorithm                 | Message Input                                                                | Output & Verification Format                                                                                |
+| ------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| ECDSA (secp256k1)         | Must be a **32-byte digest**; canister does not hash payloads                | Raw signature bytes without COSE envelope; derived public key in compressed SEC1 format                     |
+| Schnorr (ed25519)         | Arbitrary raw message bytes                                                  | Raw signature bytes; derived public key is a 32-byte raw Ed25519 public key                                 |
+| Schnorr (bip340secp256k1) | Forwarded directly to management canister; callers must agree on pre-hashing | BIP340 signature; derived public key in SEC1 compressed format (verifiers may require conversion to x-only) |
+
+Derivation paths support up to 253 elements, each up to 64 bytes, with a total length not exceeding 4 KiB. Schnorr messages must not exceed 64 KiB. The canister prepends domain-separation prefixes:
+
+```text
+ECDSA:   [UTF8("COSE_ECDSA_Signing"),   UTF8(ns), ...derivation_path]
+Schnorr: [UTF8("COSE_Schnorr_Signing"), UTF8(ns), ...derivation_path]
+```
+
+Derivation paths **do not automatically include caller identities**. Any member with signing rights in the namespace can sign against any path in that namespace. Derivation path suffixes cannot isolate authorization between users; multi-tenant user isolation requires separate namespaces or application-level signing guards.
+
+```bash
+dfx canister call ic_cose_canister schnorr_public_key '(variant { ed25519 }, opt record {
+  ns = "testing"; derivation_path = vec { blob "app_v1" };
+})'
+
+dfx canister call ic_cose_canister schnorr_sign '(variant { ed25519 }, record {
+  ns = "testing"; derivation_path = vec { blob "app_v1" }; message = blob "hello";
+})'
+```
+
+Signature verification must use the exact algorithm, namespace prefix, and derivation path. Standard signatures cannot be verified against the root public key. In contrast, identity CWTs described in Section 8.1 verify against the root public key.
+
+## 7. Encrypted Settings and Key Retrieval
+
+### 7.1 Encryption Data Format
+
+The canister stores raw bytes and does not automatically encrypt plaintext. Recommended envelope encryption pattern:
+
+1. Client generates a random Data Encryption Key (DEK) and encrypts application data into a `COSE_Encrypt0` structure using the DEK.
+2. Client derives or fetches a Key Encryption Key (KEK) and encrypts the DEK into a secondary `COSE_Encrypt0` envelope.
+3. Client invokes `setting_create` or `setting_update_payload`, passing `payload` and `dek`.
+4. Readers decrypt the `dek` envelope with the KEK, then decrypt the `payload` with the recovered DEK.
+
+When `dek` is provided, the canister validates that `dek` parses as a `COSE_Encrypt0` envelope and that the accompanying `payload` also conforms to `COSE_Encrypt0`. This format check also applies during updates when retaining an existing payload. This check only validates CBOR structure; it does not confirm cryptographic correctness or that keys match.
+
+The [ic_cose_types](../ic_cose_types/src/cose/encrypt0.rs) crate provides AES-256-GCM helpers. Clients must agree on DEK plaintext encoding, external AAD, and key IDs, using distinct 12-byte nonces for each encryption.
+
+### 7.2 Partial KEK via ECDH
+
+`ecdh_cose_encrypted_key(SettingPath, ECDHInput) → Result<ECDHOutput>` is an update call requiring an authenticated caller and KEK read permissions.
+
+| Field                   | Format                                                                   |
+| ----------------------- | ------------------------------------------------------------------------ |
+| `ECDHInput.public_key`  | Ephemeral client X25519 public key, 32 bytes                             |
+| `ECDHInput.nonce`       | Ephemeral client nonce, 12 bytes                                         |
+| `ECDHOutput.public_key` | Ephemeral canister X25519 public key, 32 bytes                           |
+| `ECDHOutput.payload`    | `COSE_Encrypt0` payload encrypted with the shared secret via AES-256-GCM |
+
+The client completes X25519 Diffie-Hellman against the returned public key and decrypts the payload using the **raw bytes of the subject principal** as external AAD. The decrypted plaintext is a `COSE_Key` containing 32 bytes of AES key material with `kid` set to `SettingPath.key`.
+
+This material represents a **server-side partial KEK**. Clients must combine it with a local secret component using an application-defined KDF to derive the final KEK. Neither this endpoint nor the Rust `get_cose_encrypted_key` helper performs this derivation automatically. The Rust helper requires an explicit `path.subject` to construct the external AAD.
+
+Server-side key material is derived from internal IV, subject, user_owned flag, namespace, and key; it **does not depend on version**. Updating setting versions or removing readers does not alter previously derived key material. Revoking access blocks future key derivations but cannot recall previously distributed keys or decrypted data. When key rotation is required, write to a new setting key path.
+
+### 7.3 VetKeys
+
+| Method                | Mode   | Signature (`Input → Ok`)                                  |
+| --------------------- | ------ | --------------------------------------------------------- |
+| `vetkd_public_key`    | update | `(SettingPath) → blob` (Derived public key)               |
+| `vetkd_encrypted_key` | update | `(SettingPath, blob) → blob` (Transport-encrypted VetKey) |
+
+Both methods require authenticated callers and are governed by `allowed_apis`. The public key endpoint requires namespace read access; the encrypted key endpoint requires KEK permissions. Setting readers can retrieve encrypted VetKeys even if they cannot call the public key endpoint; the namespace owner must distribute the public key to them.
+
+Client Decryption Workflow:
+
+1. Generate a random seed, instantiate a `TransportSecretKey`, and export the 48-byte transport public key.
+2. Fetch the derived public key and encrypted VetKey for the target setting path.
+3. Parse `DerivedPublicKey` and `EncryptedVetKey`, then call `decrypt_and_verify(transport_secret_key, derived_public_key, path.key)`.
+4. Derive the application key or execute identity-based encryption (IBE) workflows. Never bypass decryption verification.
+
+With `vetkd_context_version = 2`, the derivation context computes SHA3-256 over domain separators and 64-bit length prefixes for each element to prevent boundary collisions:
+
+```text
+"COSE_Symmetric_Key", subject.raw_bytes, [user_owned ? 1 : 0], UTF8(ns)
+```
+
+Version 1 uses raw concatenation and is maintained only for backwards compatibility with legacy deployments. `path.key` acts as an independent input to the VetKD derivation; `path.version` is not included. Altering namespace, subject, user_owned, key, VetKD key ID, or context version changes the resulting cryptographic key; migrating encrypted data requires an explicit migration path. The Rust helper `CoseSDK::vetkey` wraps key retrieval, decryption, and verification; see [src/client.rs](../ic_cose/src/client.rs).
+
+## 8. Identity Tokens and Fixed-Identity Delegations
+
+### 8.1 `schnorr_sign_identity`: Identity CWT
+
+`schnorr_sign_identity(SchnorrAlgorithm, { ns; audience }) → Result<blob>` is an update call returning a CBOR Web Token (CWT) wrapped in a `COSE_Sign1` envelope. This is not an IC delegation.
+
+| Claim / Verification Input | Value                                                             |
+| -------------------------- | ----------------------------------------------------------------- |
+| `iss` (Issuer)             | Textual representation of the current canister ID                 |
+| `sub` (Subject)            | Textual representation of the caller principal                    |
+| `aud` (Audience)           | Requested audience string                                         |
+| `iat` / `nbf`              | Current Unix timestamp in seconds                                 |
+| `exp`                      | Current timestamp + 3600 seconds                                  |
+| `cti`                      | Random 16-byte identifier                                         |
+| External AAD               | Raw bytes of the caller principal                                 |
+| Verification Public Key    | Root public key returned by `schnorr_public_key(algorithm, null)` |
+
+Granted scopes depend on the caller's role in the namespace:
+- Manager: `Namespace.*:<ns>`
+- Auditor: `Namespace.Read:<ns>`
+- User: `Namespace.Read.Info:<ns> Namespace.*.SubjectedSetting:<ns>`
+- User + Auditor: `Namespace.Read:<ns> Namespace.*.SubjectedSetting:<ns>`
+Manager scopes take precedence.
+
+This endpoint checks role membership but does not block issuance if the namespace status is non-zero. Relying parties must verify the signature, issuer, subject, audience, expiration, and scopes. Revoking a role does not invalidate previously issued tokens before they expire.
+
+Identity CWTs only support Ed25519 / EdDSA. BIP340 is rejected because standard COSE algorithm identifier `ES256K` specifies secp256k1 ECDSA rather than BIP340 Schnorr; the canister does not issue tokens with mismatched algorithm headers.
+
+### 8.2 Fixed-Identity Endpoints
+
+| Method                         | Mode   | Signature (`Input → Ok`)                                          |
+| ------------------------------ | ------ | ----------------------------------------------------------------- |
+| `namespace_get_fixed_identity` | query  | `(text ns, text name) → principal`                                |
+| `namespace_get_delegators`     | query  | `(text ns, text name) → vec principal`                            |
+| `namespace_add_delegator`      | update | `(NamespaceDelegatorsInput) → vec principal` (returns merged set) |
+| `namespace_remove_delegator`   | update | `(NamespaceDelegatorsInput) → ()`                                 |
+| `namespace_sign_delegation`    | update | `(SignDelegationInput) → SignInResponse`                          |
+| `get_delegation`               | query  | `(blob seed, blob pubkey, nat64 expiration) → SignedDelegation`   |
+
+`NamespaceDelegatorsInput = { ns : text; name : text; delegators : vec principal }`. Adding or removing delegators requires namespace manager permissions. The input name must conform to lowercase namespace naming rules. Queries and sign calls normalize `name` to ASCII lowercase. Querying delegators requires namespace read access.
+
+The fixed principal is deterministically derived from the canister ID and a seed computed as `CBOR([ns, lowercase(name)])`. `namespace_get_fixed_identity` calculates the principal without checking if the namespace or authorization record exists. Removing the final delegator purges the record for that name.
+
+### 8.3 Requesting Session Delegations
+
+1. A namespace manager adds the caller's authenticated principal to the target identity's `delegators` list.
+2. The client generates an ephemeral session key pair and encodes the public key into DER format as expected by IC delegations (`pubkey`).
+3. The client signs the challenge `CBOR([ns, lowercase(name), caller])` using the session private key. The `caller` is encoded as a CBOR byte string (raw bytes of the principal), not textual string.
+4. The delegator invokes `namespace_sign_delegation({ ns; name; pubkey; sig })`. The session key does not need to equal the caller identity key, but `sig` must verify against `pubkey`.
+5. The canister returns `{ user_key; seed; expiration }`. `user_key` is the fixed identity's DER-encoded canister signature public key. `expiration` is returned in nanoseconds.
+6. The client immediately queries `get_delegation(seed, session_pubkey, expiration)` to obtain the full `SignedDelegation` envelope for use with IC delegation identity providers.
+
+Issuance verifies that `caller` is in `delegators` and `session_expires_in_ms != 0`. The returned delegation leaves `targets = null` and `permissions = null`; the canister does not scope target canister IDs. Clients must account for this broad scope when handling session keys.
+
+Certified signature intents are retained in stable storage and reconstructed across upgrades, with a TTL of approximately 60 seconds and bounded capacity; fetch the full delegation immediately. Removing a delegator or setting session expiration to 0 does not revoke previously signed delegations; they remain valid until their expiration timestamp.
+
+## 9. Administration and Governance
+
+| Method                                                 | Mode   | Signature (`Input → Ok`)                              | Required Privilege                                     |
+| ------------------------------------------------------ | ------ | ----------------------------------------------------- | ------------------------------------------------------ |
+| `admin_add_managers` / `admin_remove_managers`         | update | `(vec principal) → ()`                                | Controller / governance                                |
+| `admin_add_auditors` / `admin_remove_auditors`         | update | `(vec principal) → ()`                                | Controller / governance                                |
+| `admin_add_allowed_apis` / `admin_remove_allowed_apis` | update | `(vec text) → ()`                                     | Controller / governance                                |
+| `admin_create_namespace`                               | update | `(CreateNamespaceInput) → NamespaceInfo`              | Controller / governance / Global manager               |
+| `admin_list_namespace`                                 | query  | `(opt text prev, opt nat32 take) → vec NamespaceInfo` | Controller / governance / Global manager / auditor     |
+| `admin_migrate_legacy_settings`                        | update | `(nat32 take) → nat64`                                | Controller / governance; incremental setting migration |
+| `admin_migrate_legacy_namespace_acls`                  | update | `(nat32 take) → nat64`                                | Controller / governance; incremental ACL migration     |
+| `admin_recover_namespace_managers`                     | update | `(text, vec principal) → ()`                          | Controller / governance; only if manager set is empty  |
+| `admin_clear_low_wasm_memory`                          | update | `() → ()`                                             | Controller / governance; clears low-memory protection  |
+
+`admin_list_namespace` orders entries lexicographically by namespace name. `prev` acts as an exclusive cursor; `take` defaults to 10 (maximum 100). Fetch subsequent pages by passing the last name of the previous page.
+
+When `allowed_apis` is **empty, all endpoints are permitted**. When non-empty, only exact matching method names are allowed. This whitelist applies to state-modifying business updates: namespace and setting writes, signing, key derivations, CWT issuance, delegator updates, delegation issuance, and `admin_create_namespace`. Queries, administrative role/whitelist updates, and validation endpoints are exempt. Emptying the list re-enables all methods rather than locking them down.
+
+Governance proposals can validate inputs ahead of execution using six validation endpoints corresponding to `admin_{add,remove}_{managers,auditors,allowed_apis}`:
+
+- `validate2_admin_add_managers`, `validate2_admin_remove_managers`
+- `validate2_admin_add_auditors`, `validate2_admin_remove_auditors`
+- `validate2_admin_add_allowed_apis`, `validate2_admin_remove_allowed_apis`
+
+These methods require controller/governance callers and return `Result<text>` with a Candid-formatted preview of the changes without modifying state. Legacy `validate_admin_*` endpoints returning `Result<()>` remain available; prefer `validate2_` for new integrations. Method existence is not validated when whitelisting APIs.
+
+Canister upgrades take `opt variant { Upgrade = record { ... } }` or `null` to restore state without parameter changes. Optional upgrade fields include `name`, `subnet_size`, `freezing_threshold`, `governance_canister`, `vetkd_key_name`, `clear_governance_canister`, `vetkd_context_version`, and `migrate_legacy_namespaces`. To remove governance privileges, explicitly set `clear_governance_canister = opt true` while leaving `governance_canister` null. ECDSA and Schnorr key names cannot be modified during upgrades.
+
+Namespaces, settings, ACLs, archives, and short-term delegation intents are stored in stable storage. Set `migrate_legacy_namespaces = opt true` only when upgrading directly from very early monolithic storage layouts; modern deployments using stable structures must leave this false or null. Changing VetKD key names or context versions breaks compatibility with existing ciphertexts. Upgrades preserve state; never execute a reinstall in place of an upgrade.
+
+Both wasm32 and wasm64 utilize native IC stable memory. The wasm64 target explicitly configures stable memory backends to avoid simulated in-memory storage. Both architectures synchronize with IC time and maintain certified data roots.
+
+## 10. Client Integration Examples
+
+### 10.1 TypeScript Actor
+
+The following helper uses `@dfinity/agent` and autogenerated declarations. The caller must supply an authenticated `identity` with access to the target namespace.
+
+```typescript
+import { Actor, HttpAgent, type Identity } from '@dfinity/agent';
+import { idlFactory } from '../declarations/ic_cose_canister/ic_cose_canister.did.js';
+import type { _SERVICE } from '../declarations/ic_cose_canister/ic_cose_canister.did';
+
+function unwrap<T>(result: { Ok: T } | { Err: string }): T {
+  if ('Err' in result) throw new Error(result.Err);
+  return result.Ok;
+}
+
+export async function readAndUpdate(
+  canisterId: string,
+  host: string,
+  identity: Identity,
+  localReplica = false,
+) {
+  const agent = await HttpAgent.create({ host, identity });
+  if (localReplica) await agent.fetchRootKey(); // Local replica only
+  const actor = Actor.createActor<_SERVICE>(idlFactory, { agent, canisterId });
+  const path = {
+    ns: 'testing',
+    user_owned: false,
+    subject: [identity.getPrincipal()] as [ReturnType<Identity['getPrincipal']>],
+    key: new TextEncoder().encode('app_config'),
+    version: 0,
+  };
+
+  // Read via query; switch to update if consensus verification is required.
+  const current = unwrap(await actor.setting_get(path));
+  const updated = unwrap(await actor.setting_update_payload(
+    { ...path, version: current.version },
+    {
+      payload: [new TextEncoder().encode('updated from TypeScript')],
+      dek: [],
+      status: [],
+      deprecate_current: [false],
+    },
+  ));
+  return updated.version;
+}
+```
+
+This example modifies a **plaintext** setting initialized in Section 2. If the setting contains a DEK, update payloads must be formatted as `COSE_Encrypt0` structures rather than raw UTF-8 strings.
+
+### 10.2 Rust SDK
+
+In Rust applications using compatible versions of `ic_cose` and `ic_cose_types`, interact with the canister using `Client`:
+
+```rust
+use ic_cose::client::{Client, CoseSDK};
+use ic_cose_types::types::setting::{SettingPath, UpdateSettingPayloadInput};
+
+pub async fn update_plaintext(cli: &Client, mut path: SettingPath) -> Result<u32, String> {
+    path.version = 0;
+    let current = cli.setting_get(&path).await?;
+    if current.dek.is_some() {
+        return Err("expected a plaintext setting".into());
+    }
+    path.version = current.version;
+    let output = cli.setting_update_payload(&path, &UpdateSettingPayloadInput {
+        payload: Some(b"updated from Rust".to_vec().into()),
+        ..Default::default()
+    }).await?;
+    Ok(output.version)
+}
+```
+
+Instantiate `Client::new(Arc<Agent>, Principal)` with a configured agent. For end-to-end examples of VetKeys verification and IBE workflows, see [examples/vetkeys.rs](../ic_cose/examples/vetkeys.rs).
+
+## 11. Error Handling and Operational Constraints
+
+| Error / Message                                                   | Cause and Remediation                                                                                       |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `anonymous user is not allowed`                                   | Authenticate the caller; guard errors may not return structured `Result` types                              |
+| `user is not a controller`                                        | Invoke administrative methods using a controller or configured governance identity                          |
+| `no permission`                                                   | Check global roles, namespace membership, `user_owned` scope, `subject`, and namespace status               |
+| `API <method> not allowed`                                        | The invoked method is missing from the active `allowed_apis` whitelist                                      |
+| `NotFound: setting ... not found or no permission`                | Access denied or setting does not exist (combined to prevent enumeration)                                   |
+| `version mismatch`                                                | Update provided a stale version or attempted historical reads via current endpoints; re-read and reconcile  |
+| `setting is not writable` / `readonly setting can not be deleted` | Restore active status via `setting_update_info`, or delete an archived setting according to policy          |
+| `namespace ... is not empty`                                      | Delete all child settings before removing a namespace                                                       |
+| `payload size exceeds the limit` / `DEK size exceeds the limit`   | Stored bytes exceed configured limits (inclusive of encryption envelopes)                                   |
+| COSE parsing errors                                               | `dek` or encrypted payload failed `COSE_Encrypt0` validation; do not pass raw ciphertexts or base64 strings |
+| `message must be 32 bytes`                                        | ECDSA signing requires a 32-byte digest rather than a 64-character hex string                               |
+| `derivation path length exceeds the limit 253`                    | Shorten the derivation path component array                                                                 |
+| `no ... public key` / `failed to retrieve ... public key`         | Key caching still in progress or key name unsupported by subnet; inspect canister logs                      |
+| `caller ... is not a delegator` / `NotFound: name not found`      | Verify that the fixed-identity name exists and includes caller in its delegators list                       |
+| `challenge verification failed`                                   | Check DER encoding, session signature, CBOR ordering, name lowercasing, and raw principal bytes             |
+| `delegation is disabled`                                          | The namespace configured `session_expires_in_ms = 0`                                                        |
+| `cycles should be at least 1T` / `insufficient cycles`            | Top-up calls must supply at least 1T cycles in the message payload                                          |
+
+Business errors do not return numeric status codes; avoid coupling application control flows to exact error string matches. Timeouts do not imply that an update failed; verify state before retrying mutations or delegation issuance.
+
+### Cycles and Resources
+
+- Invocations of `namespace_top_up` must specify an amount of at least **1,000,000,000,000 cycles (1T)**, and the incoming call must attach sufficient cycles. Ingress calls passing numbers alone do not transfer cycles; invoke via a wallet or canister capable of attaching cycles.
+- Any authenticated caller can top up an existing namespace without needing member permissions. Accepted cycles increment `gas_balance`.
+- Management calls triggered by ECDSA, Schnorr, VetKD, and ECDH atomically debit dynamic signature and execution fees from the namespace gas balance before awaiting responses. Calls are rejected if the namespace balance is insufficient or if liquid canister cycles fall below `freezing_threshold`. Multi-step identity signing accounts separately for raw randomness and Schnorr phases.
+- `subnet_size` is maintained for compatibility; management call fees are determined dynamically rather than calculated from manual node counts. `freezing_threshold` acts as an application-layer buffer, distinct from the IC system canister setting of the same name measured in seconds.
+- `payload_bytes_total` tracks current and archived storage bytes. Updates record new revision bytes; deletions subtract all versions. Desynchronized counters can be rebuilt via `namespace_rebuild_payload_bytes`; this counter excludes metadata and indexing overhead.
+- The compatibility endpoint `namespace_list_setting_keys` returns at most 1000 items; larger datasets require v2 cursor pagination. Historical payloads lack bulk cleanup endpoints; plan stable memory capacity accordingly.
+- When low memory triggers, creation and expansion writes are rejected to protect state integrity. Delete or migrate data to restore headroom before having a controller clear the low-memory flag.
+- Queries do not return cryptographic certification proofs for arbitrary setting contents; use update calls when consensus verification is required. Delegation certificates should be verified by clients using standard IC canister signature tooling.
 
 ## License
-Copyright © 2024-2025 [LDC Labs](https://github.com/ldclabs).
 
-`ldclabs/ic-cose` is licensed under the MIT License. See [LICENSE](../../LICENSE-MIT) for the full license text.
+Copyright © 2024-2026 [LDC Labs](https://github.com/ldclabs).
+
+Licensed under either of [Apache License, Version 2.0](../../LICENSE-APACHE) or [MIT License](../../LICENSE-MIT) at your option.

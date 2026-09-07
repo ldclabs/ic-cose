@@ -2,9 +2,10 @@ use candid::{utils::ArgumentEncoder, CandidType, Nat, Principal};
 use ic_cdk_management_canister as mgt;
 use ic_cose_types::format_error;
 use ic_cose_types::types::wasm::{
-    AddWasmInput, CommitWasmChunksInput, DeployWasmInput, DeploymentInfo, DeploymentRequest,
-    InstallRequest, PoolCanisterInfo, ProvisionReceipt, ProvisionTemplate, ProvisionTemplateInfo,
-    ReleaseReceipt, ReservationReceipt, ReserveRequest, StateInfo, WasmInfo,
+    AddWasmInput, BatchCallResult, CommitWasmChunksInput, DeployWasmInput, DeploymentInfo,
+    DeploymentRequest, InstallRequest, PoolCanisterInfo, ProvisionReceipt, ProvisionTemplate,
+    ProvisionTemplateInfo, ReleaseReceipt, ReservationReceipt, ReserveRequest, StateInfo,
+    TopupResult, WasmInfo, WasmMetadata,
 };
 use serde::{Deserialize, Serialize};
 use serde_bytes::{ByteArray, ByteBuf};
@@ -13,11 +14,20 @@ use std::collections::BTreeSet;
 mod api;
 mod api_admin;
 mod api_provision;
+#[path = "../../canister_memory.rs"]
+mod canister_memory;
 mod init;
 mod management;
 mod store;
 
 use crate::init::ChainArgs;
+
+#[cfg(target_arch = "wasm64")]
+getrandom_02::register_custom_getrandom!(unsupported_getrandom);
+#[cfg(target_arch = "wasm64")]
+fn unsupported_getrandom(_: &mut [u8]) -> Result<(), getrandom_02::Error> {
+    Err(getrandom_02::Error::UNSUPPORTED)
+}
 
 static ANONYMOUS: Principal = Principal::anonymous();
 // NNS Cycles Minting Canister: "rkp4c-7iaaa-aaaaa-aaaca-cai"
@@ -82,6 +92,31 @@ pub fn validate_principals(principals: &BTreeSet<Principal>) -> Result<(), Strin
     if principals.contains(&ANONYMOUS) {
         return Err("anonymous user is not allowed".to_string());
     }
+    if principals.len() > ic_cose_types::MAX_PRINCIPALS_PER_REQUEST {
+        return Err(format!(
+            "principals count exceeds the per-request limit {}",
+            ic_cose_types::MAX_PRINCIPALS_PER_REQUEST
+        ));
+    }
+    Ok(())
+}
+
+fn extend_role_set(
+    target: &mut BTreeSet<Principal>,
+    values: BTreeSet<Principal>,
+    label: &str,
+) -> Result<(), String> {
+    let additions = values
+        .iter()
+        .filter(|principal| !target.contains(*principal))
+        .count();
+    if target.len().saturating_add(additions) > ic_cose_types::MAX_PRINCIPALS_PER_SET {
+        return Err(format!(
+            "{label} count exceeds the limit {}",
+            ic_cose_types::MAX_PRINCIPALS_PER_SET
+        ));
+    }
+    target.extend(values);
     Ok(())
 }
 
@@ -236,6 +271,12 @@ fn create_canister_input(
         subnet_type: None,
         subnet_selection: Some(SubnetSelection::Subnet { subnet }),
     }
+}
+
+#[ic_cdk::on_low_wasm_memory]
+fn on_low_wasm_memory() {
+    store::state::set_low_wasm_memory(true);
+    ic_cdk::api::debug_print("ic_wasm_canister entered low Wasm memory mode");
 }
 
 #[cfg(test)]

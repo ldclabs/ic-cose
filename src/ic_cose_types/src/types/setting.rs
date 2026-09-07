@@ -12,6 +12,8 @@ pub const MAX_DEK_SIZE: u64 = 3 * 1024;
 pub const MAX_TAGS: usize = 32;
 /// Maximum byte length of a tag value.
 pub const MAX_TAG_VALUE_SIZE: usize = 256;
+/// Bounds archived versions and the work needed to delete one setting.
+pub const MAX_SETTING_VERSIONS: u32 = 10_000;
 
 fn validate_tags(tags: &BTreeMap<String, String>) -> Result<(), String> {
     if tags.len() > MAX_TAGS {

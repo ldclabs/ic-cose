@@ -2,7 +2,9 @@ use candid::Principal;
 use ic_cose_types::{types::setting::*, validate_principals, MILLISECONDS};
 use std::collections::BTreeSet;
 
-use crate::{is_authenticated, remove_set_items, store};
+use crate::{extend_set_bounded, is_authenticated, remove_set_items, store};
+
+const MAX_SETTING_READERS: usize = 1_000;
 
 #[ic_cdk::query]
 fn setting_get_info(path: SettingPath) -> Result<SettingInfo, String> {
@@ -35,6 +37,7 @@ fn setting_create(
     input: CreateSettingInput,
 ) -> Result<CreateSettingOutput, String> {
     store::state::allowed_api("setting_create")?;
+    store::state::ensure_memory_available()?;
     path.validate()?;
     input.validate()?;
 
@@ -50,6 +53,9 @@ fn setting_update_info(
     input: UpdateSettingInfoInput,
 ) -> Result<UpdateSettingOutput, String> {
     store::state::allowed_api("setting_update_info")?;
+    if input.desc.is_some() || input.tags.is_some() {
+        store::state::ensure_memory_available()?;
+    }
     path.validate()?;
     input.validate()?;
 
@@ -65,6 +71,7 @@ fn setting_update_payload(
     input: UpdateSettingPayloadInput,
 ) -> Result<UpdateSettingOutput, String> {
     store::state::allowed_api("setting_update_payload")?;
+    store::state::ensure_memory_available()?;
     path.validate()?;
     input.validate()?;
 
@@ -77,6 +84,7 @@ fn setting_update_payload(
 #[ic_cdk::update(guard = "is_authenticated")]
 fn setting_add_readers(path: SettingPath, input: BTreeSet<Principal>) -> Result<(), String> {
     store::state::allowed_api("setting_add_readers")?;
+    store::state::ensure_memory_available()?;
     path.validate()?;
     validate_principals(&input)?;
 
@@ -84,7 +92,15 @@ fn setting_add_readers(path: SettingPath, input: BTreeSet<Principal>) -> Result<
     let spk = store::SettingPathKey::from_path(path, caller);
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
     store::ns::with_setting_mut(&caller, &spk, |setting| {
-        setting.readers.extend(input);
+        if setting.status != 0 {
+            return Err("setting is not writable".to_string());
+        }
+        extend_set_bounded(
+            &mut setting.readers,
+            input,
+            MAX_SETTING_READERS,
+            "setting readers",
+        )?;
         setting.updated_at = now_ms;
         Ok(())
     })
@@ -100,6 +116,9 @@ fn setting_remove_readers(path: SettingPath, input: BTreeSet<Principal>) -> Resu
     let spk = store::SettingPathKey::from_path(path, caller);
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
     store::ns::with_setting_mut(&caller, &spk, |setting| {
+        if setting.status != 0 {
+            return Err("setting is not writable".to_string());
+        }
         remove_set_items(&mut setting.readers, input);
         setting.updated_at = now_ms;
         Ok(())

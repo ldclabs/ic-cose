@@ -10,11 +10,17 @@ pub struct StateInfo {
     pub name: String,
     pub managers: BTreeSet<Principal>,
     pub committers: BTreeSet<Principal>,
+    pub provisioners: BTreeSet<Principal>,
     pub latest_version: BTreeMap<String, ByteArray<32>>,
+    pub latest_version_total: u64,
+    pub latest_version_truncated: bool,
     pub wasm_total: u64,
     pub deployed_total: u64,
     pub deployment_logs: u64,
     pub governance_canister: Option<Principal>,
+    pub topup_threshold: u128,
+    pub topup_amount: u128,
+    pub low_wasm_memory: bool,
 }
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize)]
@@ -25,8 +31,23 @@ pub struct WasmInfo {
     pub description: String,
     pub wasm: ByteBuf,
     pub hash: ByteArray<32>, // sha256 hash of the stored artifact bytes
+    /// SHA-256 of the raw Wasm module after decoding `encoding`.
+    pub module_hash: ByteArray<32>,
+    pub wasm_size: u64,
     /// Encoding of `wasm`. For `Gzip`, `hash` is the artifact hash and must not
     /// be assumed equal to the module hash reported once installed.
+    pub encoding: WasmEncoding,
+}
+
+#[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct WasmMetadata {
+    pub name: String,
+    pub created_at: u64,
+    pub created_by: Principal,
+    pub description: String,
+    pub hash: ByteArray<32>,
+    pub module_hash: ByteArray<32>,
+    pub wasm_size: u64,
     pub encoding: WasmEncoding,
 }
 
@@ -63,12 +84,16 @@ pub struct DeployWasmInput {
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize)]
 pub struct DeploymentInfo {
+    pub log_id: u64,
     pub name: String,
     pub deploy_at: u64, // in milliseconds
     pub canister: Principal,
     pub prev_hash: ByteArray<32>,
     pub wasm_hash: ByteArray<32>,
+    pub module_hash: Option<ByteArray<32>>,
     pub args: Option<ByteBuf>,
+    pub args_hash: Option<ByteArray<32>>,
+    pub args_size: u64,
     pub error: Option<String>,
 }
 
@@ -134,6 +159,25 @@ impl ProvisionSettings {
         if unique.contains(&Principal::anonymous()) {
             return Err("anonymous user is not allowed".to_string());
         }
+        if !self.controllers.windows(2).all(|pair| pair[0] < pair[1]) {
+            return Err("controllers must be sorted in canonical principal order".to_string());
+        }
+        if self.compute_allocation.is_some_and(|value| value > 100) {
+            return Err("compute_allocation must be in 0..=100".to_string());
+        }
+        const MAX_MEMORY_BYTES: u64 = 1u64 << 48;
+        if self
+            .memory_allocation
+            .is_some_and(|value| value > MAX_MEMORY_BYTES)
+        {
+            return Err("memory_allocation exceeds 2^48 bytes".to_string());
+        }
+        if self
+            .wasm_memory_limit
+            .is_some_and(|value| value > MAX_MEMORY_BYTES)
+        {
+            return Err("wasm_memory_limit exceeds 2^48 bytes".to_string());
+        }
         Ok(())
     }
 
@@ -187,6 +231,9 @@ impl ProvisionTemplate {
         }
         if self.initial_cycles == 0 {
             return Err("initial_cycles should be greater than 0".to_string());
+        }
+        if self.subnet == Some(Principal::anonymous()) {
+            return Err("subnet must not be anonymous".to_string());
         }
         Ok(())
     }
@@ -265,6 +312,8 @@ pub struct ReserveRequest {
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ReservationReceipt {
     pub request_id: ByteArray<32>,
+    pub owner: Principal,
+    pub expires_at: u64,
     pub canister: Principal,
     pub provision_template_id: String,
     pub provision_template_hash: ByteArray<32>,
@@ -328,6 +377,8 @@ pub enum ProvisionStage {
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ProvisionReceipt {
     pub request_id: ByteArray<32>,
+    pub owner: Principal,
+    pub expires_at: u64,
     pub stage: ProvisionStage,
     pub canister: Principal,
     pub wasm_name: String,
@@ -344,6 +395,21 @@ pub struct ProvisionReceipt {
     pub error: Option<String>,
     pub created_at: u64,
     pub updated_at: u64,
+}
+
+#[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct BatchCallResult {
+    pub canister: Principal,
+    pub reply: Option<ByteBuf>,
+    pub error: Option<String>,
+}
+
+#[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct TopupResult {
+    pub canister: Principal,
+    pub balance_before: Option<u128>,
+    pub deposited: u128,
+    pub error: Option<String>,
 }
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -456,6 +522,9 @@ mod tests {
         let mut bad = tpl.clone();
         bad.initial_cycles = 0;
         assert!(bad.validate().unwrap_err().contains("initial_cycles"));
+        let mut bad = tpl;
+        bad.subnet = Some(Principal::anonymous());
+        assert!(bad.validate().unwrap_err().contains("subnet"));
     }
 
     #[test]
@@ -490,6 +559,8 @@ mod tests {
         });
         assert_candid_roundtrip(ProvisionReceipt {
             request_id: [1u8; 32].into(),
+            owner: Principal::management_canister(),
+            expires_at: 10,
             stage: ProvisionStage::Installed,
             canister: Principal::management_canister(),
             wasm_name: "project".to_string(),
@@ -506,6 +577,8 @@ mod tests {
         });
         assert_candid_roundtrip(ReservationReceipt {
             request_id: [1u8; 32].into(),
+            owner: Principal::management_canister(),
+            expires_at: 10,
             canister: Principal::management_canister(),
             provision_template_id: "project_v1".to_string(),
             provision_template_hash: [2u8; 32].into(),
@@ -547,11 +620,17 @@ mod tests {
             name: "wasm".to_string(),
             managers: BTreeSet::from([Principal::management_canister()]),
             committers: BTreeSet::new(),
+            provisioners: BTreeSet::new(),
             latest_version: BTreeMap::from([("module".to_string(), [1u8; 32].into())]),
+            latest_version_total: 1,
+            latest_version_truncated: false,
             wasm_total: 1,
             deployed_total: 2,
             deployment_logs: 3,
             governance_canister: None,
+            topup_threshold: 1,
+            topup_amount: 2,
+            low_wasm_memory: false,
         };
         assert_eq!(state.latest_version["module"].as_ref(), &[1u8; 32]);
         assert!(!format!("{:?}", state.clone()).is_empty());
@@ -565,6 +644,8 @@ mod tests {
             description: "desc".to_string(),
             wasm: ByteBuf::from(vec![0, 1]),
             hash: [2u8; 32].into(),
+            module_hash: [3u8; 32].into(),
+            wasm_size: 2,
             encoding: WasmEncoding::Gzip,
         };
         assert_eq!(wasm.hash.as_ref(), &[2u8; 32]);
@@ -594,12 +675,16 @@ mod tests {
         assert!(!crate::to_cbor_bytes(&deploy).is_empty());
 
         let deployment = DeploymentInfo {
+            log_id: 1,
             name: "module".to_string(),
             deploy_at: 4,
             canister: Principal::management_canister(),
             prev_hash: [5u8; 32].into(),
             wasm_hash: [6u8; 32].into(),
+            module_hash: Some([7u8; 32].into()),
             args: None,
+            args_hash: Some([8u8; 32].into()),
+            args_size: 0,
             error: Some("failed".to_string()),
         };
         assert_eq!(deployment.error.as_deref(), Some("failed"));

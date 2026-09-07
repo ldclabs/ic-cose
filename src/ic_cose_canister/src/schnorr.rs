@@ -2,6 +2,31 @@ use ic_cdk_management_canister as mgt;
 use ic_cose_types::{format_error, types::PublicKeyOutput};
 use serde_bytes::ByteBuf;
 
+pub fn sign_with_schnorr_cost(
+    key_name: &str,
+    alg: mgt::SchnorrAlgorithm,
+    derivation_path: &[Vec<u8>],
+    message: &[u8],
+) -> Result<u128, String> {
+    let args = mgt::SignWithSchnorrArgs {
+        message: message.to_vec(),
+        derivation_path: derivation_path.to_vec(),
+        key_id: mgt::SchnorrKeyId {
+            algorithm: alg,
+            name: key_name.to_string(),
+        },
+        aux: None,
+    };
+    let payload_bytes = candid::encode_one(&args).map_err(format_error)?.len() as u64;
+    mgt::cost_sign_with_schnorr(&args)
+        .map_err(format_error)?
+        .checked_add(ic_cdk::api::cost_call(
+            "sign_with_schnorr".len() as u64,
+            payload_bytes,
+        ))
+        .ok_or_else(|| "Schnorr call cost overflowed".to_string())
+}
+
 pub fn derive_schnorr_public_key(
     alg: mgt::SchnorrAlgorithm,
     public_key: &PublicKeyOutput,

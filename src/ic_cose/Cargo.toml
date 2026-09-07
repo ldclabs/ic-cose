@@ -10,7 +10,7 @@ categories.workspace = true
 license.workspace = true
 
 [dependencies]
-ic_cose_types = { path = "../ic_cose_types", version = "0.10" }
+ic_cose_types = { path = "../ic_cose_types", version = "0.11" }
 async-trait = { workspace = true }
 candid = { workspace = true }
 futures = { workspace = true }
@@ -24,7 +24,7 @@ ic-vetkeys = { workspace = true }
 [dev-dependencies]
 hex = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
-ic-transport-types = "0.47"
+ic-transport-types = "0.49"
 cbor2 = { workspace = true }
 bytes = "1"
 http = "1"

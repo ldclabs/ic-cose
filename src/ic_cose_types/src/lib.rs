@@ -12,6 +12,10 @@ pub use cose::format_error;
 
 pub static ANONYMOUS: Principal = Principal::anonymous();
 pub const MILLISECONDS: u64 = 1_000_000u64;
+/// Maximum principals accepted in one role mutation request.
+pub const MAX_PRINCIPALS_PER_REQUEST: usize = 1_000;
+/// Maximum principals retained in one role/readers set.
+pub const MAX_PRINCIPALS_PER_SET: usize = 10_000;
 
 /// Converts a serializable object to CBOR-encoded bytes
 ///
@@ -99,6 +103,12 @@ pub fn validate_str(s: &str) -> Result<(), String> {
 pub fn validate_principals(principals: &BTreeSet<Principal>) -> Result<(), String> {
     if principals.is_empty() {
         return Err("principals cannot be empty".to_string());
+    }
+    if principals.len() > MAX_PRINCIPALS_PER_REQUEST {
+        return Err(format!(
+            "principals count exceeds the per-request limit {}",
+            MAX_PRINCIPALS_PER_REQUEST
+        ));
     }
     validate_principals_not_anonymous(principals)
 }

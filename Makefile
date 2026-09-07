@@ -9,8 +9,8 @@ WASM_RUSTFLAGS := --cfg=getrandom_backend="custom"
 .PHONY: lint fix test build-wasm build-wasm64 build-did
 
 lint:
-	@cargo fmt
-	@cargo clippy --all-targets --all-features
+	@cargo fmt --all -- --check
+	@cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 fix:
 	@cargo clippy --fix --workspace --tests

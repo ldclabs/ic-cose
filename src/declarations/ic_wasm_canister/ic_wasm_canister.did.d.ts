@@ -11,6 +11,11 @@ export interface AddWasmInput {
   'wasm' : Uint8Array | number[],
   'description' : string,
 }
+export interface BatchCallResult {
+  'error' : [] | [string],
+  'canister' : Principal,
+  'reply' : [] | [Uint8Array | number[]],
+}
 /**
  * # Canister Settings
  * 
@@ -269,12 +274,16 @@ export interface DeployWasmInput {
   'canister' : Principal,
 }
 export interface DeploymentInfo {
+  'args_hash' : [] | [Uint8Array | number[]],
+  'args_size' : bigint,
   'args' : [] | [Uint8Array | number[]],
   'name' : string,
   'prev_hash' : Uint8Array | number[],
+  'log_id' : bigint,
   'error' : [] | [string],
   'deploy_at' : bigint,
   'canister' : Principal,
+  'module_hash' : [] | [Uint8Array | number[]],
   'wasm_hash' : Uint8Array | number[],
 }
 /**
@@ -471,6 +480,7 @@ export interface ProvisionReceipt {
   'args_hash' : [] | [Uint8Array | number[]],
   'artifact_hash' : Uint8Array | number[],
   'provision_spec_hash' : [] | [Uint8Array | number[]],
+  'owner' : Principal,
   'provision_template_hash' : [] | [Uint8Array | number[]],
   'created_at' : bigint,
   'error' : [] | [string],
@@ -488,6 +498,7 @@ export interface ProvisionReceipt {
    * Module hash reported by the management canister after installation.
    */
   'module_hash' : [] | [Uint8Array | number[]],
+  'expires_at' : bigint,
   'wasm_name' : string,
 }
 /**
@@ -602,12 +613,14 @@ export interface ReservationReceipt {
    */
   'initial_cycles' : bigint,
   'controllers' : Array<Principal>,
+  'owner' : Principal,
   'provision_template_hash' : Uint8Array | number[],
   'provision_template_id' : string,
   'settings_hash' : Uint8Array | number[],
   'canister' : Principal,
   'reserved_at' : bigint,
   'subnet_policy_hash' : Uint8Array | number[],
+  'expires_at' : bigint,
 }
 /**
  * Claims one pre-created canister for `request_id`.
@@ -626,47 +639,73 @@ export type Result = { 'Ok' : null } |
   { 'Err' : string };
 export type Result_1 = { 'Ok' : ProvisionTemplateInfo } |
   { 'Err' : string };
-export type Result_10 = { 'Ok' : Array<Principal> } |
+export type Result_10 = { 'Ok' : ReleaseReceipt } |
   { 'Err' : string };
-export type Result_11 = { 'Ok' : StateInfo } |
+export type Result_11 = { 'Ok' : Array<DeploymentInfo> } |
   { 'Err' : string };
-export type Result_12 = { 'Ok' : WasmInfo } |
+export type Result_12 = { 'Ok' : ProvisionReceipt } |
   { 'Err' : string };
-export type Result_13 = { 'Ok' : Array<PoolCanisterInfo> } |
+export type Result_13 = { 'Ok' : CanisterStatusResult } |
   { 'Err' : string };
-export type Result_14 = { 'Ok' : Array<ProvisionTemplateInfo> } |
+export type Result_14 = { 'Ok' : Array<Principal> } |
   { 'Err' : string };
-export type Result_15 = { 'Ok' : ReleaseReceipt } |
+export type Result_15 = { 'Ok' : WasmMetadata } |
   { 'Err' : string };
-export type Result_16 = { 'Ok' : ReservationReceipt } |
+export type Result_16 = { 'Ok' : StateInfo } |
   { 'Err' : string };
-export type Result_17 = { 'Ok' : string } |
+export type Result_17 = { 'Ok' : WasmInfo } |
+  { 'Err' : string };
+export type Result_18 = { 'Ok' : Uint8Array | number[] } |
+  { 'Err' : string };
+export type Result_19 = { 'Ok' : Array<ProvisionReceipt> } |
   { 'Err' : string };
 export type Result_2 = { 'Ok' : Uint8Array | number[] } |
   { 'Err' : string };
-export type Result_3 = { 'Ok' : Array<Uint8Array | number[]> } |
+export type Result_20 = { 'Ok' : Array<[string, Uint8Array | number[]]> } |
   { 'Err' : string };
-export type Result_4 = { 'Ok' : bigint } |
+export type Result_21 = { 'Ok' : Array<PoolCanisterInfo> } |
   { 'Err' : string };
-export type Result_5 = { 'Ok' : bigint } |
+export type Result_22 = { 'Ok' : Array<ProvisionTemplateInfo> } |
   { 'Err' : string };
-export type Result_6 = { 'Ok' : Principal } |
+export type Result_23 = { 'Ok' : ReservationReceipt } |
   { 'Err' : string };
-export type Result_7 = { 'Ok' : Array<DeploymentInfo> } |
+export type Result_24 = { 'Ok' : string } |
   { 'Err' : string };
-export type Result_8 = { 'Ok' : ProvisionReceipt } |
+export type Result_3 = { 'Ok' : bigint } |
   { 'Err' : string };
-export type Result_9 = { 'Ok' : CanisterStatusResult } |
+export type Result_4 = { 'Ok' : Array<Uint8Array | number[]> } |
+  { 'Err' : string };
+export type Result_5 = { 'Ok' : Array<BatchCallResult> } |
+  { 'Err' : string };
+export type Result_6 = { 'Ok' : bigint } |
+  { 'Err' : string };
+export type Result_7 = { 'Ok' : Array<TopupResult> } |
+  { 'Err' : string };
+export type Result_8 = { 'Ok' : Principal } |
+  { 'Err' : string };
+export type Result_9 = { 'Ok' : boolean } |
   { 'Err' : string };
 export interface StateInfo {
+  'provisioners' : Array<Principal>,
   'managers' : Array<Principal>,
   'governance_canister' : [] | [Principal],
   'name' : string,
+  'low_wasm_memory' : boolean,
+  'topup_threshold' : bigint,
+  'latest_version_total' : bigint,
+  'topup_amount' : bigint,
   'deployment_logs' : bigint,
   'deployed_total' : bigint,
   'wasm_total' : bigint,
+  'latest_version_truncated' : boolean,
   'latest_version' : Array<[string, Uint8Array | number[]]>,
   'committers' : Array<Principal>,
+}
+export interface TopupResult {
+  'deposited' : bigint,
+  'balance_before' : [] | [bigint],
+  'error' : [] | [string],
+  'canister' : Principal,
 }
 /**
  * Argument type of [`update_settings`]
@@ -693,6 +732,7 @@ export interface UpgradeArgs {
   'token_expiration' : [] | [bigint],
   'topup_threshold' : [] | [bigint],
   'topup_amount' : [] | [bigint],
+  'clear_governance_canister' : [] | [boolean],
 }
 /**
  * How the stored wasm artifact bytes are encoded.
@@ -716,6 +756,21 @@ export interface WasmInfo {
   'description' : string,
   'created_at' : bigint,
   'created_by' : Principal,
+  /**
+   * SHA-256 of the raw Wasm module after decoding `encoding`.
+   */
+  'module_hash' : Uint8Array | number[],
+  'wasm_size' : bigint,
+}
+export interface WasmMetadata {
+  'encoding' : WasmEncoding,
+  'hash' : Uint8Array | number[],
+  'name' : string,
+  'description' : string,
+  'created_at' : bigint,
+  'created_by' : Principal,
+  'module_hash' : Uint8Array | number[],
+  'wasm_size' : bigint,
 }
 export interface _SERVICE {
   'admin_add_committers' : ActorMethod<[Array<Principal>], Result>,
@@ -749,15 +804,31 @@ export interface _SERVICE {
    * `admin_commit_wasm_chunks`.
    */
   'admin_add_wasm_chunk' : ActorMethod<[Uint8Array | number[]], Result_2>,
+  /**
+   * Compacts old successful request receipts into permanent request-id
+   * tombstones. Callers should retain receipts externally before archiving.
+   */
+  'admin_archive_completed_requests' : ActorMethod<[bigint, number], Result_3>,
   'admin_batch_call' : ActorMethod<
     [Array<Principal>, string, [] | [Uint8Array | number[]]],
-    Result_3
+    Result_4
   >,
-  'admin_batch_topup' : ActorMethod<[], Result_4>,
+  'admin_batch_call_v2' : ActorMethod<
+    [Array<Principal>, string, [] | [Uint8Array | number[]]],
+    Result_5
+  >,
+  'admin_batch_topup' : ActorMethod<[], Result_6>,
+  'admin_batch_topup_page' : ActorMethod<
+    [[] | [Principal], [] | [number]],
+    Result_7
+  >,
+  'admin_batch_topup_v2' : ActorMethod<[], Result_7>,
+  'admin_clear_low_wasm_memory' : ActorMethod<[], Result>,
   /**
    * Drops the caller's staged chunks, e.g. after an abandoned upload.
    */
-  'admin_clear_wasm_chunks' : ActorMethod<[], Result_5>,
+  'admin_clear_wasm_chunks' : ActorMethod<[], Result_3>,
+  'admin_clear_wasm_chunks_for' : ActorMethod<[Principal], Result_3>,
   /**
    * Assembles the caller's staged chunks into one artifact and publishes it.
    */
@@ -767,14 +838,41 @@ export interface _SERVICE {
   >,
   'admin_create_canister' : ActorMethod<
     [string, [] | [CanisterSettings], [] | [Uint8Array | number[]]],
-    Result_6
+    Result_8
   >,
   'admin_create_on' : ActorMethod<
     [Principal, string, [] | [CanisterSettings], [] | [Uint8Array | number[]]],
-    Result_6
+    Result_8
   >,
   'admin_deploy' : ActorMethod<
     [DeployWasmInput, [] | [Uint8Array | number[]]],
+    Result
+  >,
+  'admin_forget_deployment' : ActorMethod<[Principal], Result_9>,
+  /**
+   * Explicitly transfers target control away from this canister and removes the
+   * target from the managed deployment index after the settings call succeeds.
+   */
+  'admin_handoff_canister' : ActorMethod<[UpdateSettingsArgs], Result>,
+  /**
+   * Migrates one legacy monolithic artifact into the chunked stable layout.
+   */
+  'admin_migrate_legacy_wasm_artifact' : ActorMethod<
+    [Uint8Array | number[]],
+    Result_9
+  >,
+  /**
+   * Incrementally builds the per-wasm deployment-log index for records written
+   * by versions that only maintained the global stable log.
+   */
+  'admin_rebuild_log_index' : ActorMethod<[bigint, number], Result_3>,
+  /**
+   * Repairs the deployment index after a successful target install whose local
+   * callback could not append its log. The target's live module hash is checked
+   * against repository metadata before any record is written.
+   */
+  'admin_reconcile_deployment' : ActorMethod<
+    [Principal, string, Uint8Array | number[]],
     Result
   >,
   /**
@@ -791,15 +889,20 @@ export interface _SERVICE {
    * response loss cannot be recovered, so it may only ever waste an unpaid pool
    * canister. An unknown outcome circuit-breaks further refills.
    */
-  'admin_refill_pool' : ActorMethod<[string], Result_6>,
+  'admin_refill_pool' : ActorMethod<[string], Result_8>,
+  'admin_release_expired_reservation' : ActorMethod<
+    [Uint8Array | number[]],
+    Result_10
+  >,
   'admin_remove_committers' : ActorMethod<[Array<Principal>], Result>,
   'admin_remove_managers' : ActorMethod<[Array<Principal>], Result>,
   'admin_remove_provision_template' : ActorMethod<[string], Result>,
   'admin_remove_provisioners' : ActorMethod<[Array<Principal>], Result>,
+  'admin_remove_wasm' : ActorMethod<[Uint8Array | number[]], Result>,
   'admin_update_canister_settings' : ActorMethod<[UpdateSettingsArgs], Result>,
   'deployment_logs' : ActorMethod<
     [string, [] | [bigint], [] | [bigint]],
-    Result_7
+    Result_11
   >,
   /**
    * Upgrades an already deployed canister to an exact module.
@@ -810,7 +913,7 @@ export interface _SERVICE {
    * stale request can never overwrite a module the caller did not expect to be
    * running, and the result is verified against `expected_module_hash`.
    */
-  'ensure_deployment' : ActorMethod<[DeploymentRequest], Result_8>,
+  'ensure_deployment' : ActorMethod<[DeploymentRequest], Result_12>,
   /**
    * Installs the template's approved module onto the reserved canister.
    * 
@@ -818,28 +921,74 @@ export interface _SERVICE {
    * already-installed module instead of failing, and the module hash reported by
    * the management canister is verified against the hash the template pins.
    */
-  'ensure_install' : ActorMethod<[InstallRequest], Result_8>,
-  'get_canister_status' : ActorMethod<[[] | [Principal]], Result_9>,
-  'get_deployed_canisters' : ActorMethod<[], Result_10>,
-  'get_deployed_canisters_info' : ActorMethod<[], Result_7>,
+  'ensure_install' : ActorMethod<[InstallRequest], Result_12>,
+  'get_canister_status' : ActorMethod<[[] | [Principal]], Result_13>,
+  'get_deployed_canisters' : ActorMethod<[], Result_14>,
+  'get_deployed_canisters_info' : ActorMethod<[], Result_11>,
+  'get_deployed_canisters_info_v2' : ActorMethod<
+    [[] | [Principal], [] | [number]],
+    Result_11
+  >,
+  'get_deployed_canisters_v2' : ActorMethod<
+    [[] | [Principal], [] | [number]],
+    Result_14
+  >,
+  'get_next_wasm_version' : ActorMethod<
+    [string, Uint8Array | number[]],
+    Result_15
+  >,
   /**
    * The durable outcome of a `request_id`, readable after any lost response.
    */
-  'get_provision_receipt' : ActorMethod<[Uint8Array | number[]], Result_8>,
+  'get_provision_receipt' : ActorMethod<[Uint8Array | number[]], Result_12>,
   /**
    * The approved template a provisioner must name by id and hash.
    */
   'get_provision_template' : ActorMethod<[string], Result_1>,
-  'get_state' : ActorMethod<[], Result_11>,
-  'get_wasm' : ActorMethod<[Uint8Array | number[]], Result_12>,
+  'get_state' : ActorMethod<[], Result_16>,
+  'get_wasm' : ActorMethod<[Uint8Array | number[]], Result_17>,
+  'get_wasm_chunk' : ActorMethod<
+    [Uint8Array | number[], bigint, number],
+    Result_18
+  >,
+  'get_wasm_metadata' : ActorMethod<[Uint8Array | number[]], Result_15>,
+  'list_expired_reservations' : ActorMethod<
+    [[] | [Uint8Array | number[]], [] | [number]],
+    Result_19
+  >,
+  'list_latest_wasm_versions' : ActorMethod<
+    [[] | [string], [] | [number]],
+    Result_20
+  >,
+  'list_legacy_wasm_artifacts' : ActorMethod<
+    [[] | [Uint8Array | number[]], [] | [number]],
+    Result_4
+  >,
   /**
    * Recorded pool inventory of a template.
    * 
    * Governance watches this against the reservation churn: a pool that keeps
    * draining is the signal to rate-limit callers, not to raise the pool size.
    */
-  'list_provision_pool' : ActorMethod<[string], Result_13>,
-  'list_provision_templates' : ActorMethod<[], Result_14>,
+  'list_provision_pool' : ActorMethod<[string], Result_21>,
+  'list_provision_pool_v2' : ActorMethod<
+    [string, [] | [Principal], [] | [number]],
+    Result_21
+  >,
+  'list_provision_templates' : ActorMethod<[], Result_22>,
+  'list_provision_templates_v2' : ActorMethod<
+    [[] | [string], [] | [number]],
+    Result_22
+  >,
+  /**
+   * Resolves an interrupted install or upgrade, including after its request
+   * epoch expires. Only probes the target: this never installs or upgrades code.
+   * An empty reserved target becomes Failed and may then be released normally.
+   */
+  'reconcile_provision_request' : ActorMethod<
+    [Uint8Array | number[]],
+    Result_12
+  >,
   /**
    * Returns a reserved canister to the pool.
    * 
@@ -849,7 +998,7 @@ export interface _SERVICE {
    */
   'release_reservation' : ActorMethod<
     [Uint8Array | number[], Principal],
-    Result_15
+    Result_10
   >,
   /**
    * Claims one pre-created canister for `request_id`.
@@ -860,55 +1009,59 @@ export interface _SERVICE {
    * never creates a canister, which is why a lost management-canister create can
    * only ever waste an unpaid pool canister.
    */
-  'reserve_canister' : ActorMethod<[ReserveRequest], Result_16>,
-  'validate_admin_add_committers' : ActorMethod<[Array<Principal>], Result_17>,
-  'validate_admin_add_managers' : ActorMethod<[Array<Principal>], Result_17>,
+  'reserve_canister' : ActorMethod<[ReserveRequest], Result_23>,
+  'validate_admin_add_committers' : ActorMethod<[Array<Principal>], Result_24>,
+  'validate_admin_add_managers' : ActorMethod<[Array<Principal>], Result_24>,
   'validate_admin_add_provision_template' : ActorMethod<
     [ProvisionTemplate],
-    Result_17
+    Result_24
   >,
   'validate_admin_add_provisioners' : ActorMethod<
     [Array<Principal>],
-    Result_17
+    Result_24
   >,
   'validate_admin_add_wasm' : ActorMethod<
     [AddWasmInput, [] | [Uint8Array | number[]]],
-    Result_17
+    Result_24
   >,
   'validate_admin_batch_call' : ActorMethod<
     [Array<Principal>, string, [] | [Uint8Array | number[]]],
-    Result_17
+    Result_24
   >,
-  'validate_admin_batch_topup' : ActorMethod<[], Result_17>,
+  'validate_admin_batch_topup' : ActorMethod<[], Result_24>,
   'validate_admin_create_canister' : ActorMethod<
     [string, [] | [CanisterSettings], [] | [Uint8Array | number[]]],
-    Result_17
+    Result_24
   >,
   'validate_admin_create_on' : ActorMethod<
     [Principal, string, [] | [CanisterSettings], [] | [Uint8Array | number[]]],
-    Result_17
+    Result_24
   >,
   'validate_admin_deploy' : ActorMethod<
     [DeployWasmInput, [] | [Uint8Array | number[]]],
-    Result_17
+    Result_24
   >,
   'validate_admin_reconcile_pool' : ActorMethod<
     [string, [] | [Principal]],
-    Result_17
+    Result_24
   >,
   'validate_admin_remove_committers' : ActorMethod<
     [Array<Principal>],
-    Result_17
+    Result_24
   >,
-  'validate_admin_remove_managers' : ActorMethod<[Array<Principal>], Result_17>,
-  'validate_admin_remove_provision_template' : ActorMethod<[string], Result_17>,
+  'validate_admin_remove_managers' : ActorMethod<[Array<Principal>], Result_24>,
+  'validate_admin_remove_provision_template' : ActorMethod<[string], Result_24>,
   'validate_admin_remove_provisioners' : ActorMethod<
     [Array<Principal>],
-    Result_17
+    Result_24
+  >,
+  'validate_admin_remove_wasm' : ActorMethod<
+    [Uint8Array | number[]],
+    Result_24
   >,
   'validate_admin_update_canister_settings' : ActorMethod<
     [UpdateSettingsArgs],
-    Result_17
+    Result_24
   >,
 }
 export declare const idlFactory: IDL.InterfaceFactory;

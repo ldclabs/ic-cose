@@ -2,6 +2,29 @@ use ic_cdk_management_canister as mgt;
 use ic_cose_types::{format_error, types::PublicKeyOutput};
 use serde_bytes::ByteBuf;
 
+pub fn sign_with_ecdsa_cost(
+    key_name: &str,
+    derivation_path: &[Vec<u8>],
+    message_hash: &[u8],
+) -> Result<u128, String> {
+    let args = mgt::SignWithEcdsaArgs {
+        message_hash: message_hash.to_vec(),
+        derivation_path: derivation_path.to_vec(),
+        key_id: mgt::EcdsaKeyId {
+            curve: mgt::EcdsaCurve::Secp256k1,
+            name: key_name.to_string(),
+        },
+    };
+    let payload_bytes = candid::encode_one(&args).map_err(format_error)?.len() as u64;
+    mgt::cost_sign_with_ecdsa(&args)
+        .map_err(format_error)?
+        .checked_add(ic_cdk::api::cost_call(
+            "sign_with_ecdsa".len() as u64,
+            payload_bytes,
+        ))
+        .ok_or_else(|| "ECDSA call cost overflowed".to_string())
+}
+
 /// Returns a valid extended BIP-32 derivation path from an Account (Principal + subaccount)
 pub fn derive_public_key(
     ecdsa_public_key: &PublicKeyOutput,

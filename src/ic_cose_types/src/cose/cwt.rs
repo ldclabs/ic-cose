@@ -1,4 +1,9 @@
-use cose2::{cwt::Claims, iana, CoseMap, Label};
+use std::cmp::Ordering;
+
+use cose2::{
+    cwt::{Claims, NumericDate},
+    iana, CoseMap, Label,
+};
 
 pub type ClaimsSet = Claims;
 
@@ -21,12 +26,13 @@ pub const SCOPE_NAME: Label = Label::Int(iana::CWTClaimScope);
 pub fn cwt_from(data: &[u8], now_sec: i64) -> Result<ClaimsSet, String> {
     let claims = ClaimsSet::from_slice(data).map_err(|err| format!("invalid claims: {}", err))?;
     if let Some(exp) = claims.expiration {
-        if timestamp_secs(exp) < now_sec - CLOCK_SKEW {
+        if compare_timestamp(exp, i128::from(now_sec) - i128::from(CLOCK_SKEW)) == Ordering::Less {
             return Err("token expired".to_string());
         }
     }
     if let Some(nbf) = claims.not_before {
-        if timestamp_secs(nbf) > now_sec + CLOCK_SKEW {
+        if compare_timestamp(nbf, i128::from(now_sec) + i128::from(CLOCK_SKEW)) == Ordering::Greater
+        {
             return Err("token not yet valid".to_string());
         }
     }
@@ -34,8 +40,28 @@ pub fn cwt_from(data: &[u8], now_sec: i64) -> Result<ClaimsSet, String> {
     Ok(claims)
 }
 
-fn timestamp_secs(ts: u64) -> i64 {
-    i64::try_from(ts).unwrap_or(i64::MAX)
+fn compare_timestamp(ts: NumericDate, seconds: i128) -> Ordering {
+    match ts {
+        NumericDate::Integer(value) => value.cmp(&seconds),
+        NumericDate::Float(value) => {
+            // NumericDate deserialization rejects non-finite values. Compare without
+            // converting `seconds` to f64, which would lose precision near i128 bounds.
+            if value >= i128::MAX as f64 {
+                return Ordering::Greater;
+            }
+            if value < i128::MIN as f64 {
+                return Ordering::Less;
+            }
+
+            let truncated = value as i128;
+            match truncated.cmp(&seconds) {
+                Ordering::Equal if value == truncated as f64 => Ordering::Equal,
+                Ordering::Equal if value.is_sign_negative() => Ordering::Less,
+                Ordering::Equal => Ordering::Greater,
+                ordering => ordering,
+            }
+        }
+    }
 }
 
 /// Extracts scope claim from CWT claims set.
@@ -77,14 +103,14 @@ mod test {
             claims.subject,
             Some("i2gam-uue3y-uxwyd-mzyhb-nirhd-hz3l4-2hw3f-4fzvw-lpvvc-dqdrg-7qe".to_string())
         );
-        assert_eq!(claims.audience, Some("tester".to_string()));
+        assert_eq!(claims.audience, Some("tester".into()));
         assert_eq!(get_scope(&claims).unwrap(), "Namespace.*:_");
     }
 
     #[test]
     fn cwt_rejects_invalid_time_windows_and_scope() {
         let expired = ClaimsSet {
-            expiration: Some(1_000),
+            expiration: Some(1_000_u64.into()),
             ..Default::default()
         }
         .to_vec()
@@ -92,7 +118,7 @@ mod test {
         assert_eq!(cwt_from(&expired, 2_000).unwrap_err(), "token expired");
 
         let not_yet_valid = ClaimsSet {
-            not_before: Some(2_000),
+            not_before: Some(2_000_u64.into()),
             ..Default::default()
         }
         .to_vec()
@@ -103,8 +129,8 @@ mod test {
         );
 
         let valid_exp = ClaimsSet {
-            expiration: Some(2_000),
-            not_before: Some(1_000),
+            expiration: Some(2_000_u64.into()),
+            not_before: Some(1_000_u64.into()),
             ..Default::default()
         }
         .to_vec()

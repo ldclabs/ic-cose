@@ -9,7 +9,9 @@ use ic_cose_types::{
 };
 use serde_bytes::ByteArray;
 
-use crate::{is_provisioner, management, store, MILLISECONDS};
+use crate::{
+    is_controller, is_controller_or_manager, is_provisioner, management, store, MILLISECONDS,
+};
 
 /// Claims one pre-created canister for `request_id`.
 ///
@@ -20,9 +22,12 @@ use crate::{is_provisioner, management, store, MILLISECONDS};
 /// only ever waste an unpaid pool canister.
 #[ic_cdk::update(guard = "is_provisioner")]
 fn reserve_canister(req: ReserveRequest) -> Result<ReservationReceipt, String> {
+    if store::provision::get_receipt(&req.request_id).is_none() {
+        store::state::ensure_memory_available()?;
+    }
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
     store::provision::validate_epoch(req.expires_at, now_ms)?;
-    store::provision::reserve(now_ms, &req)
+    store::provision::reserve(ic_cdk::api::msg_caller(), now_ms, &req)
 }
 
 /// Installs the template's approved module onto the reserved canister.
@@ -35,18 +40,43 @@ async fn ensure_install(req: InstallRequest) -> Result<ProvisionReceipt, String>
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
     store::provision::validate_epoch(req.expires_at, now_ms)?;
 
-    let (canister, wasm, artifact_hash, expected, controllers) =
-        match store::provision::begin_install(now_ms, &req)? {
-            store::provision::InstallPlan::AlreadyInstalled(receipt) => return Ok(*receipt),
+    let owner = ic_cdk::api::msg_caller();
+    let (attempt, canister, artifact_hash, expected, controllers) =
+        match store::provision::begin_install(owner, now_ms, &req)? {
+            store::provision::InstallPlan::AlreadyInstalled(receipt) => {
+                let receipt = *receipt;
+                let expected = receipt
+                    .module_hash
+                    .ok_or_else(|| "installed receipt is missing module_hash".to_string())?;
+                let lock_attempt = ic_cdk::api::time() / MILLISECONDS;
+                store::state::acquire_operation(
+                    receipt.canister,
+                    req.request_id,
+                    lock_attempt,
+                    lock_attempt,
+                )?;
+                let result = async {
+                    assert_module_hash(receipt.canister, expected).await?;
+                    store::provision::repair_installed_receipt(
+                        &receipt,
+                        &req.init_args,
+                        ic_cdk::api::time() / MILLISECONDS,
+                    )
+                }
+                .await;
+                store::state::release_operation(receipt.canister, &req.request_id, lock_attempt);
+                result?;
+                return Ok(receipt);
+            }
             store::provision::InstallPlan::Install {
+                attempt,
                 canister,
-                wasm,
                 artifact_hash,
                 expected_module_hash,
                 controllers,
             } => (
+                attempt,
                 canister,
-                wasm,
                 artifact_hash,
                 expected_module_hash,
                 controllers,
@@ -56,7 +86,6 @@ async fn ensure_install(req: InstallRequest) -> Result<ProvisionReceipt, String>
     match install_exact(
         canister,
         mgt::CanisterInstallMode::Install,
-        wasm,
         artifact_hash,
         &req.init_args,
         expected,
@@ -66,25 +95,21 @@ async fn ensure_install(req: InstallRequest) -> Result<ProvisionReceipt, String>
     {
         Ok(module_hash) => {
             let now_ms = ic_cdk::api::time() / MILLISECONDS;
-            let receipt = store::provision::finish_install(&req.request_id, module_hash, now_ms)?;
-            let artifact_hash = receipt.artifact_hash;
-            let log_id = store::wasm::add_log(store::DeployLog {
-                name: receipt.wasm_name.clone(),
-                deploy_at: now_ms,
-                canister,
-                prev_hash: Default::default(),
-                wasm_hash: artifact_hash,
-                args: req.init_args,
-                error: None,
-            })?;
-            store::state::with_mut(|s| {
-                s.deployed_list.insert(canister, (log_id, artifact_hash));
-            });
-            Ok(receipt)
+            let result = store::provision::commit_install_success(
+                &req.request_id,
+                attempt,
+                module_hash,
+                now_ms,
+                &req.init_args,
+            );
+            if let Err(err) = &result {
+                store::provision::fail_install(&req.request_id, attempt, err.clone(), now_ms);
+            }
+            result
         }
         Err(err) => {
             let now_ms = ic_cdk::api::time() / MILLISECONDS;
-            store::provision::fail_install(&req.request_id, err.clone(), now_ms);
+            store::provision::fail_install(&req.request_id, attempt, err.clone(), now_ms);
             Err(err)
         }
     }
@@ -101,6 +126,10 @@ async fn ensure_install(req: InstallRequest) -> Result<ProvisionReceipt, String>
 async fn ensure_deployment(req: DeploymentRequest) -> Result<ProvisionReceipt, String> {
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
     store::provision::validate_epoch(req.expires_at, now_ms)?;
+    ic_cose_types::validate_str(&req.wasm_name)?;
+    if store::provision::get_receipt(&req.request_id).is_none() {
+        store::state::ensure_memory_available()?;
+    }
     if req.args.len() > MAX_PROVISION_ARGS_BYTES as usize {
         return Err(format!(
             "args of {} bytes exceeds the limit {}",
@@ -112,21 +141,25 @@ async fn ensure_deployment(req: DeploymentRequest) -> Result<ProvisionReceipt, S
         return Err("args_hash does not match args".to_string());
     }
 
-    let wasm = store::wasm::get_wasm(&req.artifact_hash).ok_or_else(|| {
+    let metadata = store::wasm::get_metadata(&req.artifact_hash).map_err(|_| {
         format!(
             "NotFound: artifact {} not found",
             hex::encode(req.artifact_hash.as_ref())
         )
     })?;
-    if wasm.name != req.wasm_name {
+    if metadata.name != req.wasm_name {
         return Err(format!(
             "artifact belongs to wasm {}, not {}",
-            wasm.name, req.wasm_name
+            metadata.name, req.wasm_name
         ));
     }
-    store::provision::assert_upgradable(req.canister, &req.wasm_name)?;
+    if metadata.module_hash != req.expected_module_hash {
+        return Err("expected_module_hash does not match the stored artifact".to_string());
+    }
+    let owner = ic_cdk::api::msg_caller();
 
-    if let Some(receipt) = store::provision::begin_deployment(
+    let attempt = match store::provision::begin_deployment(
+        owner,
         now_ms,
         &req.request_id,
         req.canister,
@@ -135,32 +168,54 @@ async fn ensure_deployment(req: DeploymentRequest) -> Result<ProvisionReceipt, S
         req.expected_module_hash,
         req.expected_prev_module_hash,
         req.args_hash,
+        req.args.len() as u64,
+        req.expires_at,
     )? {
-        return Ok(receipt);
-    }
-
-    match upgrade_exact(&req, wasm).await {
+        store::provision::DeploymentPlan::AlreadyInstalled(receipt) => {
+            let receipt = *receipt;
+            let expected = receipt
+                .module_hash
+                .ok_or_else(|| "installed receipt is missing module_hash".to_string())?;
+            let lock_attempt = ic_cdk::api::time() / MILLISECONDS;
+            store::state::acquire_operation(
+                receipt.canister,
+                req.request_id,
+                lock_attempt,
+                lock_attempt,
+            )?;
+            let result = async {
+                assert_module_hash(receipt.canister, expected).await?;
+                store::provision::repair_installed_receipt(
+                    &receipt,
+                    &req.args,
+                    ic_cdk::api::time() / MILLISECONDS,
+                )
+            }
+            .await;
+            store::state::release_operation(receipt.canister, &req.request_id, lock_attempt);
+            result?;
+            return Ok(receipt);
+        }
+        store::provision::DeploymentPlan::Deploy { attempt } => attempt,
+    };
+    match upgrade_exact(&req).await {
         Ok(module_hash) => {
             let now_ms = ic_cdk::api::time() / MILLISECONDS;
-            let receipt = store::provision::finish_install(&req.request_id, module_hash, now_ms)?;
-            let log_id = store::wasm::add_log(store::DeployLog {
-                name: req.wasm_name,
-                deploy_at: now_ms,
-                canister: req.canister,
-                prev_hash: req.expected_prev_module_hash,
-                wasm_hash: req.artifact_hash,
-                args: req.args,
-                error: None,
-            })?;
-            store::state::with_mut(|s| {
-                s.deployed_list
-                    .insert(req.canister, (log_id, req.artifact_hash));
-            });
-            Ok(receipt)
+            let result = store::provision::commit_install_success(
+                &req.request_id,
+                attempt,
+                module_hash,
+                now_ms,
+                &req.args,
+            );
+            if let Err(err) = &result {
+                store::provision::fail_install(&req.request_id, attempt, err.clone(), now_ms);
+            }
+            result
         }
         Err(err) => {
             let now_ms = ic_cdk::api::time() / MILLISECONDS;
-            store::provision::fail_install(&req.request_id, err.clone(), now_ms);
+            store::provision::fail_install(&req.request_id, attempt, err.clone(), now_ms);
             Err(err)
         }
     }
@@ -176,22 +231,146 @@ async fn release_reservation(
     request_id: ByteArray<32>,
     canister: Principal,
 ) -> Result<ReleaseReceipt, String> {
-    let expected = store::provision::expected_controllers(&request_id)?;
-    let info = management::canister_info(canister).await?;
-    if info.module_hash.is_some() {
-        return Err("canister is not empty and cannot be released".to_string());
+    let owner = ic_cdk::api::msg_caller();
+    let receipt = store::provision::get_receipt(&request_id)
+        .ok_or_else(|| "NotFound: provision request not found".to_string())?;
+    if receipt.canister != canister {
+        return Err(format!(
+            "request is bound to canister {}, not {}",
+            receipt.canister.to_text(),
+            canister.to_text()
+        ));
     }
-    store::provision::assert_controllers(&info.controllers, &expected)?;
-
+    if receipt.stage == ic_cose_types::types::wasm::ProvisionStage::Released {
+        return store::provision::release(
+            owner,
+            ic_cdk::api::time() / MILLISECONDS,
+            &request_id,
+            canister,
+        );
+    }
+    let expected = store::provision::expected_controllers(owner, &request_id)?;
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
-    store::provision::release(now_ms, &request_id, canister)
+    store::state::acquire_operation(canister, request_id, now_ms, now_ms)?;
+    let result = async {
+        let info = management::canister_info(canister).await?;
+        if info.module_hash.is_some() {
+            return Err("canister is not empty and cannot be released".to_string());
+        }
+        store::provision::assert_controllers(&info.controllers, &expected)?;
+        store::provision::release(
+            owner,
+            ic_cdk::api::time() / MILLISECONDS,
+            &request_id,
+            canister,
+        )
+    }
+    .await;
+    store::state::release_operation(canister, &request_id, now_ms);
+    result
 }
 
 /// The durable outcome of a `request_id`, readable after any lost response.
-#[ic_cdk::query]
+#[ic_cdk::query(guard = "is_provisioner")]
 fn get_provision_receipt(request_id: ByteArray<32>) -> Result<ProvisionReceipt, String> {
-    store::provision::get_receipt(&request_id)
-        .ok_or_else(|| "NotFound: provision request not found".to_string())
+    let caller = ic_cdk::api::msg_caller();
+    let receipt = store::provision::get_receipt(&request_id)
+        .ok_or_else(|| "NotFound: provision request not found".to_string())?;
+    if receipt.owner != Principal::anonymous()
+        && receipt.owner != caller
+        && is_controller().is_err()
+    {
+        return Err("request id belongs to another provisioner".to_string());
+    }
+    Ok(receipt)
+}
+
+#[ic_cdk::query(guard = "is_controller_or_manager")]
+fn list_expired_reservations(
+    prev: Option<ByteArray<32>>,
+    take: Option<u32>,
+) -> Result<Vec<ProvisionReceipt>, String> {
+    Ok(store::provision::list_expired_reservations(
+        ic_cdk::api::time() / MILLISECONDS,
+        prev,
+        take.unwrap_or(100).clamp(1, 1_000) as usize,
+    ))
+}
+
+/// Resolves an interrupted install or upgrade, including after its request
+/// epoch expires. Only probes the target: this never installs or upgrades code.
+/// An empty reserved target becomes Failed and may then be released normally.
+#[ic_cdk::update(guard = "is_provisioner")]
+async fn reconcile_provision_request(
+    request_id: ByteArray<32>,
+) -> Result<ProvisionReceipt, String> {
+    let caller = ic_cdk::api::msg_caller();
+    let (canister, attempt) = store::provision::begin_reconcile(
+        caller,
+        is_controller().is_ok(),
+        &request_id,
+        ic_cdk::api::time() / MILLISECONDS,
+    )?;
+    let result = async {
+        let info = management::canister_info(canister).await?;
+        store::provision::finish_reconcile(
+            &request_id,
+            attempt,
+            info.module_hash,
+            &info.controllers,
+            ic_cdk::api::time() / MILLISECONDS,
+        )
+    }
+    .await;
+    if let Err(error) = &result {
+        store::provision::fail_install(
+            &request_id,
+            attempt,
+            error.clone(),
+            ic_cdk::api::time() / MILLISECONDS,
+        );
+    }
+    result
+}
+
+#[ic_cdk::update(guard = "is_controller")]
+async fn admin_release_expired_reservation(
+    request_id: ByteArray<32>,
+) -> Result<ReleaseReceipt, String> {
+    let receipt = store::provision::get_receipt(&request_id)
+        .ok_or_else(|| "NotFound: provision request not found".to_string())?;
+    let now_ms = ic_cdk::api::time() / MILLISECONDS;
+    if receipt.expires_at == 0 || receipt.expires_at > now_ms {
+        return Err("reservation has not expired".to_string());
+    }
+    if receipt.stage == ic_cose_types::types::wasm::ProvisionStage::Released {
+        return store::provision::release(receipt.owner, now_ms, &request_id, receipt.canister);
+    }
+    if !matches!(
+        receipt.stage,
+        ic_cose_types::types::wasm::ProvisionStage::Reserved
+            | ic_cose_types::types::wasm::ProvisionStage::Failed
+    ) {
+        return Err("only an unused reservation can be reclaimed".to_string());
+    }
+    let expected = store::provision::expected_controllers(receipt.owner, &request_id)?;
+    store::state::acquire_operation(receipt.canister, request_id, now_ms, now_ms)?;
+    let result = async {
+        let info = management::canister_info(receipt.canister).await?;
+        if info.module_hash.is_some() {
+            return Err("canister is not empty and cannot be released".to_string());
+        }
+        store::provision::assert_controllers(&info.controllers, &expected)?;
+        store::provision::release(
+            receipt.owner,
+            ic_cdk::api::time() / MILLISECONDS,
+            &request_id,
+            receipt.canister,
+        )
+    }
+    .await;
+    store::state::release_operation(receipt.canister, &request_id, now_ms);
+    result
 }
 
 // ----- helpers -----
@@ -203,7 +382,6 @@ fn get_provision_receipt(request_id: ByteArray<32>) -> Result<ProvisionReceipt, 
 async fn install_exact(
     canister: Principal,
     mode: mgt::CanisterInstallMode,
-    wasm: Box<store::Wasm>,
     artifact_hash: ByteArray<32>,
     arg: &[u8],
     expected: ByteArray<32>,
@@ -225,14 +403,11 @@ async fn install_exact(
         None => {}
     }
 
-    management::install_code(canister, mode, &wasm.wasm, artifact_hash, arg).await?;
+    management::install_stored_code(canister, mode, artifact_hash, arg).await?;
     assert_module_hash(canister, expected).await
 }
 
-async fn upgrade_exact(
-    req: &DeploymentRequest,
-    wasm: store::Wasm,
-) -> Result<ByteArray<32>, String> {
+async fn upgrade_exact(req: &DeploymentRequest) -> Result<ByteArray<32>, String> {
     let current = management::canister_info(req.canister).await?.module_hash;
     if current == Some(req.expected_module_hash) {
         // a retry after a lost response: the upgrade already landed
@@ -250,10 +425,9 @@ async fn upgrade_exact(
         None => return Err("canister has no module to upgrade".to_string()),
     }
 
-    management::install_code(
+    management::install_stored_code(
         req.canister,
         mgt::CanisterInstallMode::Upgrade(None),
-        &wasm.wasm,
         req.artifact_hash,
         &req.args,
     )

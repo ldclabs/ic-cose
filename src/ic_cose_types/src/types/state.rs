@@ -10,6 +10,7 @@ pub struct StateInfo {
     pub ecdsa_key_name: String,
     pub schnorr_key_name: String,
     pub vetkd_key_name: String,
+    pub vetkd_context_version: u8,
     pub managers: BTreeSet<Principal>, // managers can read and write namespaces, not settings
     // auditors can read and list namespaces and settings info even if it is private
     pub auditors: BTreeSet<Principal>,
@@ -21,6 +22,7 @@ pub struct StateInfo {
     pub schnorr_ed25519_public_key: Option<PublicKeyOutput>,
     pub schnorr_secp256k1_public_key: Option<PublicKeyOutput>,
     pub governance_canister: Option<Principal>,
+    pub low_wasm_memory: bool,
 }
 
 #[cfg(test)]
@@ -36,6 +38,7 @@ mod tests {
             ecdsa_key_name: "ecdsa".to_string(),
             schnorr_key_name: "schnorr".to_string(),
             vetkd_key_name: "vetkd".to_string(),
+            vetkd_context_version: 2,
             managers: BTreeSet::from([Principal::management_canister()]),
             auditors: BTreeSet::new(),
             allowed_apis: BTreeSet::from(["state_get_info".to_string()]),
@@ -49,6 +52,7 @@ mod tests {
             schnorr_ed25519_public_key: None,
             schnorr_secp256k1_public_key: None,
             governance_canister: Some(Principal::management_canister()),
+            low_wasm_memory: false,
         };
         assert_eq!(state.name, "ic_cose");
         assert_eq!(state.namespace_total, 1);

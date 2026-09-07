@@ -12,6 +12,9 @@ jobs:
     # - uses: dfinity/setup-dfx@main
     - name: Build canisters
       run: |
+        cargo fmt --all -- --check
+        cargo clippy --workspace --all-targets --all-features -- -D warnings
+        cargo test --workspace --all-features
         rustup target add wasm32-unknown-unknown
         cargo install ic-wasm --version 0.11.1 --locked
         BINARYEN_VERSION="version_131"
@@ -48,7 +51,7 @@ jobs:
             --inline-functions-with-loops \
             "$WASM" -o "$WASM.optimized"
           mv "$WASM.optimized" "$WASM"
-          gzip $WASM
+          gzip -n $WASM
           SHA256="$(sha256sum < "out/$CAN.wasm.gz" | sed 's/ .*$//g')"
           echo $SHA256 > "out/$CAN.wasm.gz.$SHA256.txt"
         done

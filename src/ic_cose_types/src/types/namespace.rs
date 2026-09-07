@@ -3,7 +3,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::validate_desc;
-use crate::{validate_principals, validate_principals_not_anonymous, validate_str};
+use crate::{
+    validate_principals, validate_principals_not_anonymous, validate_str,
+    MAX_PRINCIPALS_PER_REQUEST,
+};
 
 pub const MAX_PAYLOAD_SIZE: u64 = 2_000_000; // 2MB
 
@@ -45,6 +48,15 @@ fn validate_visibility(visibility: u8) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_optional_role(values: &BTreeSet<Principal>, label: &str) -> Result<(), String> {
+    if values.len() > MAX_PRINCIPALS_PER_REQUEST {
+        return Err(format!(
+            "{label} count exceeds the per-request limit {MAX_PRINCIPALS_PER_REQUEST}"
+        ));
+    }
+    validate_principals_not_anonymous(values)
+}
+
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct NamespaceInfo {
     pub name: String,
@@ -58,9 +70,13 @@ pub struct NamespaceInfo {
     pub managers: BTreeSet<Principal>, // managers can read and write all settings
     pub auditors: BTreeSet<Principal>, // auditors can read all settings
     pub users: BTreeSet<Principal>,    // users can read and write settings they created
-    pub gas_balance: u128,             // cycles
+    pub manager_count: u32,
+    pub auditor_count: u32,
+    pub user_count: u32,
+    pub fixed_delegator_count: u32,
+    pub gas_balance: u128,                                     // cycles
     pub fixed_id_names: BTreeMap<String, BTreeSet<Principal>>, // fixed identity names
-    pub session_expires_in_ms: u64,    // session expiration in milliseconds for fixed identity
+    pub session_expires_in_ms: u64, // session expiration in milliseconds for fixed identity
 }
 
 #[derive(CandidType, Clone, Debug, Default, Deserialize, Serialize)]
@@ -79,8 +95,8 @@ impl CreateNamespaceInput {
     pub fn validate(&self) -> Result<(), String> {
         validate_str(&self.name)?;
         validate_principals(&self.managers)?;
-        validate_principals_not_anonymous(&self.auditors)?;
-        validate_principals_not_anonymous(&self.users)?;
+        validate_optional_role(&self.auditors, "auditors")?;
+        validate_optional_role(&self.users, "users")?;
         if let Some(ref desc) = self.desc {
             validate_desc(desc)?;
         }
@@ -194,6 +210,15 @@ mod test {
             input.validate().unwrap_err(),
             "anonymous user is not allowed"
         );
+
+        let mut input = create_namespace_input();
+        input.auditors = (0u32..=MAX_PRINCIPALS_PER_REQUEST as u32)
+            .map(|value| Principal::from_slice(&value.to_be_bytes()))
+            .collect();
+        assert!(input
+            .validate()
+            .unwrap_err()
+            .contains("auditors count exceeds"));
 
         let mut input = create_namespace_input();
         input.visibility = 2;
@@ -338,6 +363,10 @@ mod test {
             managers: principal_set(),
             auditors: principal_set(),
             users: principal_set(),
+            manager_count: 1,
+            auditor_count: 1,
+            user_count: 1,
+            fixed_delegator_count: 1,
             gas_balance: 100,
             fixed_id_names: BTreeMap::from([("fixed".to_string(), principal_set())]),
             session_expires_in_ms: 1000,

@@ -3,7 +3,10 @@ export const idlFactory = ({ IDL }) => {
     'freezing_threshold' : IDL.Opt(IDL.Nat64),
     'governance_canister' : IDL.Opt(IDL.Principal),
     'name' : IDL.Opt(IDL.Text),
+    'vetkd_context_version' : IDL.Opt(IDL.Nat8),
     'subnet_size' : IDL.Opt(IDL.Nat64),
+    'clear_governance_canister' : IDL.Opt(IDL.Bool),
+    'migrate_legacy_namespaces' : IDL.Opt(IDL.Bool),
     'vetkd_key_name' : IDL.Opt(IDL.Text),
   });
   const InitArgs = IDL.Record({
@@ -11,6 +14,7 @@ export const idlFactory = ({ IDL }) => {
     'ecdsa_key_name' : IDL.Text,
     'governance_canister' : IDL.Opt(IDL.Principal),
     'name' : IDL.Text,
+    'vetkd_context_version' : IDL.Opt(IDL.Nat8),
     'schnorr_key_name' : IDL.Text,
     'allowed_apis' : IDL.Vec(IDL.Text),
     'subnet_size' : IDL.Nat64,
@@ -32,9 +36,11 @@ export const idlFactory = ({ IDL }) => {
     'visibility' : IDL.Nat8,
   });
   const NamespaceInfo = IDL.Record({
+    'user_count' : IDL.Nat32,
     'status' : IDL.Int8,
     'updated_at' : IDL.Nat64,
     'session_expires_in_ms' : IDL.Nat64,
+    'manager_count' : IDL.Nat32,
     'managers' : IDL.Vec(IDL.Principal),
     'payload_bytes_total' : IDL.Nat64,
     'desc' : IDL.Text,
@@ -44,14 +50,17 @@ export const idlFactory = ({ IDL }) => {
     'auditors' : IDL.Vec(IDL.Principal),
     'fixed_id_names' : IDL.Vec(IDL.Tuple(IDL.Text, IDL.Vec(IDL.Principal))),
     'users' : IDL.Vec(IDL.Principal),
+    'fixed_delegator_count' : IDL.Nat32,
     'visibility' : IDL.Nat8,
     'gas_balance' : IDL.Nat,
+    'auditor_count' : IDL.Nat32,
   });
   const Result_1 = IDL.Variant({ 'Ok' : NamespaceInfo, 'Err' : IDL.Text });
   const Result_2 = IDL.Variant({
     'Ok' : IDL.Vec(NamespaceInfo),
     'Err' : IDL.Text,
   });
+  const Result_3 = IDL.Variant({ 'Ok' : IDL.Nat64, 'Err' : IDL.Text });
   const SettingPath = IDL.Record({
     'ns' : IDL.Text,
     'key' : IDL.Vec(IDL.Nat8),
@@ -67,7 +76,7 @@ export const idlFactory = ({ IDL }) => {
     'public_key' : IDL.Vec(IDL.Nat8),
     'payload' : IDL.Vec(IDL.Nat8),
   });
-  const Result_3 = IDL.Variant({ 'Ok' : ECDHOutput, 'Err' : IDL.Text });
+  const Result_4 = IDL.Variant({ 'Ok' : ECDHOutput, 'Err' : IDL.Text });
   const PublicKeyInput = IDL.Record({
     'ns' : IDL.Text,
     'derivation_path' : IDL.Vec(IDL.Vec(IDL.Nat8)),
@@ -76,13 +85,13 @@ export const idlFactory = ({ IDL }) => {
     'public_key' : IDL.Vec(IDL.Nat8),
     'chain_code' : IDL.Vec(IDL.Nat8),
   });
-  const Result_4 = IDL.Variant({ 'Ok' : PublicKeyOutput, 'Err' : IDL.Text });
+  const Result_5 = IDL.Variant({ 'Ok' : PublicKeyOutput, 'Err' : IDL.Text });
   const SignInput = IDL.Record({
     'ns' : IDL.Text,
     'derivation_path' : IDL.Vec(IDL.Vec(IDL.Nat8)),
     'message' : IDL.Vec(IDL.Nat8),
   });
-  const Result_5 = IDL.Variant({ 'Ok' : IDL.Vec(IDL.Nat8), 'Err' : IDL.Text });
+  const Result_6 = IDL.Variant({ 'Ok' : IDL.Vec(IDL.Nat8), 'Err' : IDL.Text });
   const DelegationPermissions = IDL.Variant({
     'all' : IDL.Null,
     'queries' : IDL.Null,
@@ -97,19 +106,24 @@ export const idlFactory = ({ IDL }) => {
     'signature' : IDL.Vec(IDL.Nat8),
     'delegation' : Delegation,
   });
-  const Result_6 = IDL.Variant({ 'Ok' : SignedDelegation, 'Err' : IDL.Text });
+  const Result_7 = IDL.Variant({ 'Ok' : SignedDelegation, 'Err' : IDL.Text });
   const NamespaceDelegatorsInput = IDL.Record({
     'ns' : IDL.Text,
     'delegators' : IDL.Vec(IDL.Principal),
     'name' : IDL.Text,
   });
-  const Result_7 = IDL.Variant({
+  const Result_8 = IDL.Variant({
     'Ok' : IDL.Vec(IDL.Principal),
     'Err' : IDL.Text,
   });
-  const Result_8 = IDL.Variant({ 'Ok' : IDL.Principal, 'Err' : IDL.Text });
-  const Result_9 = IDL.Variant({ 'Ok' : IDL.Bool, 'Err' : IDL.Text });
-  const Result_10 = IDL.Variant({
+  const Result_9 = IDL.Variant({ 'Ok' : IDL.Principal, 'Err' : IDL.Text });
+  const Result_10 = IDL.Variant({ 'Ok' : IDL.Bool, 'Err' : IDL.Text });
+  const Result_11 = IDL.Variant({ 'Ok' : IDL.Vec(IDL.Text), 'Err' : IDL.Text });
+  const Result_12 = IDL.Variant({
+    'Ok' : IDL.Vec(IDL.Principal),
+    'Err' : IDL.Text,
+  });
+  const Result_13 = IDL.Variant({
     'Ok' : IDL.Vec(IDL.Tuple(IDL.Principal, IDL.Vec(IDL.Nat8))),
     'Err' : IDL.Text,
   });
@@ -124,8 +138,8 @@ export const idlFactory = ({ IDL }) => {
     'seed' : IDL.Vec(IDL.Nat8),
     'expiration' : IDL.Nat64,
   });
-  const Result_11 = IDL.Variant({ 'Ok' : SignInResponse, 'Err' : IDL.Text });
-  const Result_12 = IDL.Variant({ 'Ok' : IDL.Nat, 'Err' : IDL.Text });
+  const Result_14 = IDL.Variant({ 'Ok' : SignInResponse, 'Err' : IDL.Text });
+  const Result_15 = IDL.Variant({ 'Ok' : IDL.Nat, 'Err' : IDL.Text });
   const UpdateNamespaceInput = IDL.Record({
     'status' : IDL.Opt(IDL.Int8),
     'session_expires_in_ms' : IDL.Opt(IDL.Nat64),
@@ -154,7 +168,7 @@ export const idlFactory = ({ IDL }) => {
     'created_at' : IDL.Nat64,
     'version' : IDL.Nat32,
   });
-  const Result_13 = IDL.Variant({
+  const Result_16 = IDL.Variant({
     'Ok' : CreateSettingOutput,
     'Err' : IDL.Text,
   });
@@ -171,7 +185,7 @@ export const idlFactory = ({ IDL }) => {
     'version' : IDL.Nat32,
     'payload' : IDL.Opt(IDL.Vec(IDL.Nat8)),
   });
-  const Result_14 = IDL.Variant({ 'Ok' : SettingInfo, 'Err' : IDL.Text });
+  const Result_17 = IDL.Variant({ 'Ok' : SettingInfo, 'Err' : IDL.Text });
   const SettingArchivedPayload = IDL.Record({
     'dek' : IDL.Opt(IDL.Vec(IDL.Nat8)),
     'version' : IDL.Nat32,
@@ -179,7 +193,7 @@ export const idlFactory = ({ IDL }) => {
     'archived_at' : IDL.Nat64,
     'payload' : IDL.Opt(IDL.Vec(IDL.Nat8)),
   });
-  const Result_15 = IDL.Variant({
+  const Result_18 = IDL.Variant({
     'Ok' : SettingArchivedPayload,
     'Err' : IDL.Text,
   });
@@ -200,6 +214,8 @@ export const idlFactory = ({ IDL }) => {
     'managers' : IDL.Vec(IDL.Principal),
     'governance_canister' : IDL.Opt(IDL.Principal),
     'name' : IDL.Text,
+    'vetkd_context_version' : IDL.Nat8,
+    'low_wasm_memory' : IDL.Bool,
     'auditors' : IDL.Vec(IDL.Principal),
     'schnorr_secp256k1_public_key' : IDL.Opt(PublicKeyOutput),
     'ecdsa_public_key' : IDL.Opt(PublicKeyOutput),
@@ -210,35 +226,47 @@ export const idlFactory = ({ IDL }) => {
     'namespace_total' : IDL.Nat64,
     'vetkd_key_name' : IDL.Text,
   });
-  const Result_16 = IDL.Variant({ 'Ok' : StateInfo, 'Err' : IDL.Text });
-  const Result_17 = IDL.Variant({ 'Ok' : IDL.Text, 'Err' : IDL.Text });
+  const Result_19 = IDL.Variant({ 'Ok' : StateInfo, 'Err' : IDL.Text });
+  const Result_20 = IDL.Variant({ 'Ok' : IDL.Text, 'Err' : IDL.Text });
   return IDL.Service({
     'admin_add_allowed_apis' : IDL.Func([IDL.Vec(IDL.Text)], [Result], []),
     'admin_add_auditors' : IDL.Func([IDL.Vec(IDL.Principal)], [Result], []),
     'admin_add_managers' : IDL.Func([IDL.Vec(IDL.Principal)], [Result], []),
+    'admin_clear_low_wasm_memory' : IDL.Func([], [Result], []),
     'admin_create_namespace' : IDL.Func([CreateNamespaceInput], [Result_1], []),
     'admin_list_namespace' : IDL.Func(
         [IDL.Opt(IDL.Text), IDL.Opt(IDL.Nat32)],
         [Result_2],
         ['query'],
       ),
+    'admin_migrate_legacy_namespace_acls' : IDL.Func(
+        [IDL.Nat32],
+        [Result_3],
+        [],
+      ),
+    'admin_migrate_legacy_settings' : IDL.Func([IDL.Nat32], [Result_3], []),
+    'admin_recover_namespace_managers' : IDL.Func(
+        [IDL.Text, IDL.Vec(IDL.Principal)],
+        [Result],
+        [],
+      ),
     'admin_remove_allowed_apis' : IDL.Func([IDL.Vec(IDL.Text)], [Result], []),
     'admin_remove_auditors' : IDL.Func([IDL.Vec(IDL.Principal)], [Result], []),
     'admin_remove_managers' : IDL.Func([IDL.Vec(IDL.Principal)], [Result], []),
     'ecdh_cose_encrypted_key' : IDL.Func(
         [SettingPath, ECDHInput],
-        [Result_3],
+        [Result_4],
         [],
       ),
     'ecdsa_public_key' : IDL.Func(
         [IDL.Opt(PublicKeyInput)],
-        [Result_4],
+        [Result_5],
         ['query'],
       ),
-    'ecdsa_sign' : IDL.Func([SignInput], [Result_5], []),
+    'ecdsa_sign' : IDL.Func([SignInput], [Result_6], []),
     'get_delegation' : IDL.Func(
         [IDL.Vec(IDL.Nat8), IDL.Vec(IDL.Nat8), IDL.Nat64],
-        [Result_6],
+        [Result_7],
         ['query'],
       ),
     'namespace_add_auditors' : IDL.Func(
@@ -248,7 +276,7 @@ export const idlFactory = ({ IDL }) => {
       ),
     'namespace_add_delegator' : IDL.Func(
         [NamespaceDelegatorsInput],
-        [Result_7],
+        [Result_8],
         [],
       ),
     'namespace_add_managers' : IDL.Func(
@@ -264,25 +292,52 @@ export const idlFactory = ({ IDL }) => {
     'namespace_delete' : IDL.Func([IDL.Text], [Result], []),
     'namespace_get_delegators' : IDL.Func(
         [IDL.Text, IDL.Text],
-        [Result_7],
+        [Result_8],
         ['query'],
       ),
     'namespace_get_fixed_identity' : IDL.Func(
         [IDL.Text, IDL.Text],
-        [Result_8],
+        [Result_9],
         ['query'],
       ),
     'namespace_get_info' : IDL.Func([IDL.Text], [Result_1], ['query']),
+    'namespace_get_info_v2' : IDL.Func(
+        [IDL.Text, IDL.Bool],
+        [Result_1],
+        ['query'],
+      ),
     'namespace_is_member' : IDL.Func(
         [IDL.Text, IDL.Text, IDL.Principal],
-        [Result_9],
+        [Result_10],
+        ['query'],
+      ),
+    'namespace_list_fixed_identity_names' : IDL.Func(
+        [IDL.Text, IDL.Opt(IDL.Text), IDL.Opt(IDL.Nat32)],
+        [Result_11],
+        ['query'],
+      ),
+    'namespace_list_members' : IDL.Func(
+        [IDL.Text, IDL.Text, IDL.Opt(IDL.Principal), IDL.Opt(IDL.Nat32)],
+        [Result_12],
         ['query'],
       ),
     'namespace_list_setting_keys' : IDL.Func(
         [IDL.Text, IDL.Bool, IDL.Opt(IDL.Principal)],
-        [Result_10],
+        [Result_13],
         ['query'],
       ),
+    'namespace_list_setting_keys_v2' : IDL.Func(
+        [
+          IDL.Text,
+          IDL.Bool,
+          IDL.Opt(IDL.Principal),
+          IDL.Opt(IDL.Tuple(IDL.Principal, IDL.Vec(IDL.Nat8))),
+          IDL.Opt(IDL.Nat32),
+        ],
+        [Result_13],
+        ['query'],
+      ),
+    'namespace_rebuild_payload_bytes' : IDL.Func([IDL.Text], [Result_3], []),
     'namespace_remove_auditors' : IDL.Func(
         [IDL.Text, IDL.Vec(IDL.Principal)],
         [Result],
@@ -305,20 +360,20 @@ export const idlFactory = ({ IDL }) => {
       ),
     'namespace_sign_delegation' : IDL.Func(
         [SignDelegationInput],
-        [Result_11],
+        [Result_14],
         [],
       ),
-    'namespace_top_up' : IDL.Func([IDL.Text, IDL.Nat], [Result_12], []),
+    'namespace_top_up' : IDL.Func([IDL.Text, IDL.Nat], [Result_15], []),
     'namespace_update_info' : IDL.Func([UpdateNamespaceInput], [Result], []),
     'schnorr_public_key' : IDL.Func(
         [SchnorrAlgorithm, IDL.Opt(PublicKeyInput)],
-        [Result_4],
+        [Result_5],
         ['query'],
       ),
-    'schnorr_sign' : IDL.Func([SchnorrAlgorithm, SignInput], [Result_5], []),
+    'schnorr_sign' : IDL.Func([SchnorrAlgorithm, SignInput], [Result_6], []),
     'schnorr_sign_identity' : IDL.Func(
         [SchnorrAlgorithm, SignIdentityInput],
-        [Result_5],
+        [Result_6],
         [],
       ),
     'setting_add_readers' : IDL.Func(
@@ -328,17 +383,17 @@ export const idlFactory = ({ IDL }) => {
       ),
     'setting_create' : IDL.Func(
         [SettingPath, CreateSettingInput],
-        [Result_13],
+        [Result_16],
         [],
       ),
     'setting_delete' : IDL.Func([SettingPath], [Result], []),
-    'setting_get' : IDL.Func([SettingPath], [Result_14], ['query']),
+    'setting_get' : IDL.Func([SettingPath], [Result_17], ['query']),
     'setting_get_archived_payload' : IDL.Func(
         [SettingPath],
-        [Result_15],
+        [Result_18],
         ['query'],
       ),
-    'setting_get_info' : IDL.Func([SettingPath], [Result_14], ['query']),
+    'setting_get_info' : IDL.Func([SettingPath], [Result_17], ['query']),
     'setting_remove_readers' : IDL.Func(
         [SettingPath, IDL.Vec(IDL.Principal)],
         [Result],
@@ -346,43 +401,43 @@ export const idlFactory = ({ IDL }) => {
       ),
     'setting_update_info' : IDL.Func(
         [SettingPath, UpdateSettingInfoInput],
-        [Result_13],
+        [Result_16],
         [],
       ),
     'setting_update_payload' : IDL.Func(
         [SettingPath, UpdateSettingPayloadInput],
-        [Result_13],
+        [Result_16],
         [],
       ),
-    'state_get_info' : IDL.Func([], [Result_16], ['query']),
+    'state_get_info' : IDL.Func([], [Result_19], ['query']),
     'validate2_admin_add_allowed_apis' : IDL.Func(
         [IDL.Vec(IDL.Text)],
-        [Result_17],
+        [Result_20],
         [],
       ),
     'validate2_admin_add_auditors' : IDL.Func(
         [IDL.Vec(IDL.Principal)],
-        [Result_17],
+        [Result_20],
         [],
       ),
     'validate2_admin_add_managers' : IDL.Func(
         [IDL.Vec(IDL.Principal)],
-        [Result_17],
+        [Result_20],
         [],
       ),
     'validate2_admin_remove_allowed_apis' : IDL.Func(
         [IDL.Vec(IDL.Text)],
-        [Result_17],
+        [Result_20],
         [],
       ),
     'validate2_admin_remove_auditors' : IDL.Func(
         [IDL.Vec(IDL.Principal)],
-        [Result_17],
+        [Result_20],
         [],
       ),
     'validate2_admin_remove_managers' : IDL.Func(
         [IDL.Vec(IDL.Principal)],
-        [Result_17],
+        [Result_20],
         [],
       ),
     'validate_admin_add_allowed_apis' : IDL.Func(
@@ -417,10 +472,10 @@ export const idlFactory = ({ IDL }) => {
       ),
     'vetkd_encrypted_key' : IDL.Func(
         [SettingPath, IDL.Vec(IDL.Nat8)],
-        [Result_5],
+        [Result_6],
         [],
       ),
-    'vetkd_public_key' : IDL.Func([SettingPath], [Result_5], []),
+    'vetkd_public_key' : IDL.Func([SettingPath], [Result_6], []),
   });
 };
 export const init = ({ IDL }) => {
@@ -428,7 +483,10 @@ export const init = ({ IDL }) => {
     'freezing_threshold' : IDL.Opt(IDL.Nat64),
     'governance_canister' : IDL.Opt(IDL.Principal),
     'name' : IDL.Opt(IDL.Text),
+    'vetkd_context_version' : IDL.Opt(IDL.Nat8),
     'subnet_size' : IDL.Opt(IDL.Nat64),
+    'clear_governance_canister' : IDL.Opt(IDL.Bool),
+    'migrate_legacy_namespaces' : IDL.Opt(IDL.Bool),
     'vetkd_key_name' : IDL.Opt(IDL.Text),
   });
   const InitArgs = IDL.Record({
@@ -436,6 +494,7 @@ export const init = ({ IDL }) => {
     'ecdsa_key_name' : IDL.Text,
     'governance_canister' : IDL.Opt(IDL.Principal),
     'name' : IDL.Text,
+    'vetkd_context_version' : IDL.Opt(IDL.Nat8),
     'schnorr_key_name' : IDL.Text,
     'allowed_apis' : IDL.Vec(IDL.Text),
     'subnet_size' : IDL.Nat64,

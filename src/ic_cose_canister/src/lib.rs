@@ -13,6 +13,8 @@ mod api_identity;
 mod api_init;
 mod api_namespace;
 mod api_setting;
+#[path = "../../canister_memory.rs"]
+mod canister_memory;
 mod ecdsa;
 mod schnorr;
 mod store;
@@ -20,11 +22,34 @@ mod vetkd;
 
 use api_init::InstallArgs;
 
+// The upstream dummy backend only registers getrandom 0.2 on wasm32.
+// Canisters obtain entropy asynchronously from raw_rand, never the host OS.
+#[cfg(target_arch = "wasm64")]
+getrandom_02::register_custom_getrandom!(unsupported_getrandom);
+#[cfg(target_arch = "wasm64")]
+fn unsupported_getrandom(_: &mut [u8]) -> Result<(), getrandom_02::Error> {
+    Err(getrandom_02::Error::UNSUPPORTED)
+}
+
 #[inline]
 fn remove_set_items<T: Ord>(target: &mut BTreeSet<T>, items: BTreeSet<T>) {
     for item in items {
         target.remove(&item);
     }
+}
+
+fn extend_set_bounded<T: Ord>(
+    target: &mut BTreeSet<T>,
+    items: BTreeSet<T>,
+    limit: usize,
+    label: &str,
+) -> Result<(), String> {
+    let additions = items.iter().filter(|item| !target.contains(*item)).count();
+    if target.len().saturating_add(additions) > limit {
+        return Err(format!("{label} count exceeds the limit {limit}"));
+    }
+    target.extend(items);
+    Ok(())
 }
 
 fn is_controller() -> Result<(), String> {
@@ -62,6 +87,12 @@ async fn rand_bytes<const N: usize>() -> Result<[u8; N], String> {
         .map_err(format_error)?;
     data.truncate(N);
     data.try_into().map_err(format_error)
+}
+
+#[ic_cdk::on_low_wasm_memory]
+fn on_low_wasm_memory() {
+    store::state::set_low_wasm_memory(true);
+    ic_cdk::api::debug_print("ic_cose_canister entered low Wasm memory mode");
 }
 
 ic_cdk::export_candid!();

@@ -6,7 +6,6 @@ use ic_cose_types::{
         ECDHInput, ECDHOutput, PublicKeyInput, PublicKeyOutput, SchnorrAlgorithm, SettingPath,
         SignIdentityInput, SignInput,
     },
-    validate_str, MILLISECONDS,
 };
 use serde_bytes::{ByteArray, ByteBuf};
 
@@ -16,7 +15,10 @@ use crate::{is_authenticated, rand_bytes, store};
 fn ecdsa_public_key(input: Option<PublicKeyInput>) -> Result<PublicKeyOutput, String> {
     let caller = ic_cdk::api::msg_caller();
     match input {
-        Some(input) => store::ns::ecdsa_public_key(&caller, input.ns, input.derivation_path),
+        Some(input) => {
+            input.validate()?;
+            store::ns::ecdsa_public_key(&caller, input.ns, input.derivation_path)
+        }
         None => store::state::with(|s| {
             s.ecdsa_public_key
                 .as_ref()
@@ -29,6 +31,7 @@ fn ecdsa_public_key(input: Option<PublicKeyInput>) -> Result<PublicKeyOutput, St
 #[ic_cdk::update(guard = "is_authenticated")]
 async fn ecdsa_sign(input: SignInput) -> Result<ByteBuf, String> {
     store::state::allowed_api("ecdsa_sign")?;
+    input.validate()?;
 
     let caller = ic_cdk::api::msg_caller();
     store::ns::ecdsa_sign_with(&caller, input.ns, input.derivation_path, input.message).await
@@ -42,6 +45,7 @@ fn schnorr_public_key(
     let caller = ic_cdk::api::msg_caller();
     match input {
         Some(input) => {
+            input.validate()?;
             store::ns::schnorr_public_key(&caller, algorithm, input.ns, input.derivation_path)
         }
         None => store::state::with(|s| match algorithm {
@@ -62,6 +66,7 @@ fn schnorr_public_key(
 #[ic_cdk::update(guard = "is_authenticated")]
 async fn schnorr_sign(algorithm: SchnorrAlgorithm, input: SignInput) -> Result<ByteBuf, String> {
     store::state::allowed_api("schnorr_sign")?;
+    input.validate()?;
 
     let caller = ic_cdk::api::msg_caller();
     store::ns::schnorr_sign_with(
@@ -80,11 +85,10 @@ async fn schnorr_sign_identity(
     input: SignIdentityInput,
 ) -> Result<ByteBuf, String> {
     store::state::allowed_api("schnorr_sign_identity")?;
-    validate_str(&input.ns)?;
+    input.validate()?;
 
     let caller = ic_cdk::api::msg_caller();
-    let now_ms = ic_cdk::api::time() / MILLISECONDS;
-    store::ns::sign_identity(&caller, input.ns, input.audience, now_ms, algorithm).await
+    store::ns::sign_identity(&caller, input.ns, input.audience, algorithm).await
 }
 
 /// ecdh_encrypted_cose_key returns a permanent partial KEK encrypted with ECDH.
@@ -108,12 +112,18 @@ async fn ecdh_cose_encrypted_key(
         ))?;
     }
 
+    store::ns::charge_raw_rand(&spk.0)?;
+
+    let secret_key: [u8; 32] = rand_bytes().await?;
+    // `raw_rand` suspended this message, so authorization must be current
+    // before deriving and returning key material.
+    if !store::ns::has_kek_permission(&caller, &spk) {
+        return Err("ecdh_cose_encrypted_key: permission was revoked".to_string());
+    }
     let aad = spk.2.as_slice();
     let kek = store::ns::inner_derive_kek(&spk, &key_id)?;
     let kek = cose_aes256_key(kek, key_id.into_vec());
     let kek = kek.to_vec().map_err(format_error)?;
-
-    let secret_key: [u8; 32] = rand_bytes().await?;
     let secret_key = mac3_256(&secret_key, ecdh.nonce.as_ref());
     let (shared_secret, public_key) = try_ecdh_x25519(secret_key, *ecdh.public_key)?;
     let key = cose_encrypt0(&kek, shared_secret.as_bytes(), aad, &ecdh.nonce, None)?;
@@ -130,7 +140,7 @@ async fn vetkd_public_key(path: SettingPath) -> Result<ByteBuf, String> {
 
     let caller = ic_cdk::api::msg_caller();
     store::ns::with(&path.ns, |ns| {
-        if !ns.can_read_namespace(&caller) {
+        if !ns.can_read_namespace(&path.ns, &caller) {
             Err(format!(
                 "vetkd_public_key: {} has no permission for {}",
                 caller.to_text(),

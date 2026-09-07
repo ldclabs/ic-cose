@@ -744,6 +744,7 @@ mod tests {
             ecdsa_key_name: "ecdsa".to_string(),
             schnorr_key_name: "schnorr".to_string(),
             vetkd_key_name: "vetkd".to_string(),
+            vetkd_context_version: 2,
             managers: principals(),
             auditors: principals(),
             allowed_apis: strings(),
@@ -754,6 +755,7 @@ mod tests {
             schnorr_ed25519_public_key: Some(public_key_output()),
             schnorr_secp256k1_public_key: Some(public_key_output()),
             governance_canister: Some(Principal::management_canister()),
+            low_wasm_memory: false,
         }
     }
 
@@ -770,6 +772,10 @@ mod tests {
             managers: principals(),
             auditors: principals(),
             users: principals(),
+            manager_count: 1,
+            auditor_count: 1,
+            user_count: 1,
+            fixed_delegator_count: 1,
             gas_balance: 100,
             fixed_id_names: BTreeMap::from([("fixed".to_string(), principals())]),
             session_expires_in_ms: 86_400_000,

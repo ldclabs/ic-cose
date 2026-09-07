@@ -11,11 +11,11 @@ resolver = "2"
 debug = 'none'
 lto = true
 strip = true
-opt-level = 's'
+opt-level = 3
 codegen-units = 1
 
 [workspace.package]
-version = "0.10.6"
+version = "0.11.0"
 edition = "2021"
 repository = "https://github.com/ldclabs/ic-cose"
 keywords = ["config", "cbor", "canister", "icp", "encryption"]
@@ -26,8 +26,12 @@ license = "MIT OR Apache-2.0"
 async-trait = "0.1"
 candid = "0.10"
 cbor2 = "1"
-cose2 = "0.4"
+cose2 = "0.5"
 futures = "0.3"
+flate2 = { version = "1", default-features = false, features = [
+  "rust_backend",
+] }
+wasmparser = "0.240"
 serde = "1"
 serde_bytes = "0.11"
 k256 = { version = "0.14", features = ["ecdsa", "schnorr"] }

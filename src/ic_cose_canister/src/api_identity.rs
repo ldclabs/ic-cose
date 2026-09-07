@@ -10,7 +10,7 @@ use ic_cose_types::{
 use serde_bytes::ByteBuf;
 use std::collections::BTreeSet;
 
-use crate::{remove_set_items, store};
+use crate::{is_authenticated, store};
 
 fn fixed_identity_seed(namespace: &str, name: &str) -> Vec<u8> {
     let mut seed = Vec::with_capacity(namespace.len() + name.len() + 16);
@@ -23,6 +23,8 @@ fn namespace_get_fixed_identity(namespace: String, name: String) -> Result<Princ
     // the write paths store and sign under the lowercased name; normalizing here
     // too keeps this principal equal to the one namespace_sign_delegation issues.
     let name = name.to_ascii_lowercase();
+    validate_str(&namespace)?;
+    validate_str(&name)?;
     let seed = fixed_identity_seed(&namespace, &name);
     let user_key = CanisterSigPublicKey::new(ic_cdk::api::canister_self(), seed);
     Ok(Principal::self_authenticating(user_key.to_der().as_slice()))
@@ -35,75 +37,58 @@ fn namespace_get_delegators(
 ) -> Result<BTreeSet<Principal>, String> {
     let caller = ic_cdk::api::msg_caller();
     let name = name.to_ascii_lowercase();
-    store::ns::with(&namespace, |ns| {
-        if !ns.can_read_namespace(&caller) {
-            return Err("no permission".to_string());
-        }
-
-        ns.fixed_id_names.get(&name).map_or_else(
-            || Err("NotFound: name not found".to_string()),
-            |delegators| Ok(delegators.clone()),
-        )
-    })
+    validate_str(&namespace)?;
+    validate_str(&name)?;
+    store::ns::get_delegators(&namespace, &name, &caller)
 }
 
-#[ic_cdk::update]
+#[ic_cdk::update(guard = "is_authenticated")]
 fn namespace_add_delegator(input: NamespaceDelegatorsInput) -> Result<BTreeSet<Principal>, String> {
     store::state::allowed_api("namespace_add_delegator")?;
+    store::state::ensure_memory_available()?;
     input.validate()?;
 
     let caller = ic_cdk::api::msg_caller();
-    store::ns::with_mut(input.ns, |ns| {
-        if !ns.can_write_namespace(&caller) {
-            return Err("no permission".to_string());
-        }
-        let name = input.name.to_ascii_lowercase();
-        let delegators = ns.fixed_id_names.entry(name).or_default();
-        delegators.extend(input.delegators);
-        Ok(delegators.clone())
-    })
+    let now_ms = ic_cdk::api::time() / MILLISECONDS;
+    store::ns::mutate_delegators(
+        input.ns,
+        input.name.to_ascii_lowercase(),
+        &caller,
+        input.delegators,
+        true,
+        now_ms,
+    )
 }
 
-#[ic_cdk::update]
+#[ic_cdk::update(guard = "is_authenticated")]
 fn namespace_remove_delegator(input: NamespaceDelegatorsInput) -> Result<(), String> {
     store::state::allowed_api("namespace_remove_delegator")?;
     input.validate()?;
 
     let caller = ic_cdk::api::msg_caller();
-    store::ns::with_mut(input.ns, |ns| {
-        if !ns.can_write_namespace(&caller) {
-            return Err("no permission".to_string());
-        }
-        let name = input.name.to_ascii_lowercase();
-        if let Some(delegators) = ns.fixed_id_names.get_mut(&name) {
-            remove_set_items(delegators, input.delegators);
-            if delegators.is_empty() {
-                ns.fixed_id_names.remove(&name);
-            }
-        }
-        Ok(())
-    })
+    let now_ms = ic_cdk::api::time() / MILLISECONDS;
+    store::ns::mutate_delegators(
+        input.ns,
+        input.name.to_ascii_lowercase(),
+        &caller,
+        input.delegators,
+        false,
+        now_ms,
+    )
+    .map(|_| ())
 }
 
-#[ic_cdk::update]
+#[ic_cdk::update(guard = "is_authenticated")]
 fn namespace_sign_delegation(input: SignDelegationInput) -> Result<SignInResponse, String> {
     store::state::allowed_api("namespace_sign_delegation")?;
-    validate_str(&input.ns)?;
+    store::state::ensure_memory_available()?;
+    input.validate()?;
     let caller = ic_cdk::api::msg_caller();
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
     let name = input.name.to_ascii_lowercase();
-    validate_str(&name)?;
 
     // Reject unauthorized callers before parsing keys or verifying signatures.
-    let session_expires_in_ms = store::ns::with(&input.ns, |ns| {
-        if let Some(delegators) = ns.fixed_id_names.get(&name) {
-            if delegators.contains(&caller) {
-                return Ok(ns.session_expires_in_ms);
-            }
-            return Err(format!("caller {} is not a delegator", caller));
-        }
-        Err("NotFound: name not found".to_string())
-    })?;
+    let session_expires_in_ms = store::ns::delegation_session_expiry(&input.ns, &name, &caller)?;
     if session_expires_in_ms == 0 {
         return Err("delegation is disabled".to_string());
     }
@@ -123,7 +108,7 @@ fn namespace_sign_delegation(input: SignDelegationInput) -> Result<SignInRespons
     let seed = fixed_identity_seed(&input.ns, &name);
     let user_key = CanisterSigPublicKey::new(ic_cdk::api::canister_self(), seed);
     let delegation_hash = delegation_signature_msg(input.pubkey.as_slice(), expiration, None);
-    store::state::add_signature(user_key.seed.as_slice(), delegation_hash.as_slice());
+    store::state::add_signature(user_key.seed.as_slice(), delegation_hash.as_slice())?;
 
     Ok(SignInResponse {
         expiration,
@@ -138,6 +123,12 @@ fn get_delegation(
     pubkey: ByteBuf,
     expiration: u64,
 ) -> Result<SignedDelegation, String> {
+    if seed.len() > 256 {
+        return Err("seed length exceeds the limit 256".to_string());
+    }
+    if pubkey.len() > ic_cose_types::types::MAX_IDENTITY_CREDENTIAL_BYTES {
+        return Err("public key is too large".to_string());
+    }
     let delegation_hash = delegation_signature_msg(pubkey.as_slice(), expiration, None);
     let signature = store::state::get_signature(seed.as_slice(), delegation_hash.as_slice())?;
 
