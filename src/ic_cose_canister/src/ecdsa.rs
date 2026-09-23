@@ -1,102 +1,56 @@
-use ic_cdk_management_canister as mgt;
-use ic_cose_types::{format_error, types::PublicKeyOutput};
-use serde_bytes::ByteBuf;
+use ic_cose_chain_key::{self as chain_key, Operation, PublicKey};
+use ic_cose_types::types::PublicKeyOutput;
 
 pub fn sign_with_ecdsa_cost(
     key_name: &str,
-    derivation_path: &[Vec<u8>],
+    path: &[Vec<u8>],
     message_hash: &[u8],
 ) -> Result<u128, String> {
-    let args = mgt::SignWithEcdsaArgs {
-        message_hash: message_hash.to_vec(),
-        derivation_path: derivation_path.to_vec(),
-        key_id: mgt::EcdsaKeyId {
-            curve: mgt::EcdsaCurve::Secp256k1,
-            name: key_name.to_string(),
-        },
-    };
-    let payload_bytes = candid::encode_one(&args).map_err(format_error)?.len() as u64;
-    mgt::cost_sign_with_ecdsa(&args)
-        .map_err(format_error)?
-        .checked_add(ic_cdk::api::cost_call(
-            "sign_with_ecdsa".len() as u64,
-            payload_bytes,
-        ))
-        .ok_or_else(|| "ECDSA call cost overflowed".to_string())
-}
-
-/// Returns a valid extended BIP-32 derivation path from an Account (Principal + subaccount)
-pub fn derive_public_key(
-    ecdsa_public_key: &PublicKeyOutput,
-    derivation_path: Vec<Vec<u8>>,
-) -> Result<PublicKeyOutput, String> {
-    let path = ic_secp256k1::DerivationPath::new(
-        derivation_path
-            .into_iter()
-            .map(ic_secp256k1::DerivationIndex)
-            .collect(),
-    );
-
-    let chain_code: [u8; 32] = ecdsa_public_key
-        .chain_code
-        .as_ref()
+    let hash = message_hash
         .try_into()
-        .map_err(format_error)?;
-    let pk = ic_secp256k1::PublicKey::deserialize_sec1(&ecdsa_public_key.public_key)
-        .map_err(format_error)?;
-    let (derived_public_key, derived_chain_code) =
-        pk.derive_subkey_with_chain_code(&path, &chain_code);
-
-    Ok(PublicKeyOutput {
-        public_key: ByteBuf::from(derived_public_key.serialize_sec1(true)),
-        chain_code: ByteBuf::from(derived_chain_code),
+        .map_err(|_| "message must be 32 bytes")?;
+    Operation::ecdsa(key_name.into(), path.to_vec(), hash)
+        .cost()?
+        .total()
+}
+pub fn derive_public_key(
+    key: &PublicKeyOutput,
+    path: Vec<Vec<u8>>,
+) -> Result<PublicKeyOutput, String> {
+    chain_key::derive_ecdsa_public_key(
+        &PublicKey {
+            public_key: key.public_key.to_vec(),
+            chain_code: key.chain_code.to_vec(),
+        },
+        path,
+    )
+    .map(|p| PublicKeyOutput {
+        public_key: p.public_key.into(),
+        chain_code: p.chain_code.into(),
     })
 }
-
 pub async fn sign_with_ecdsa(
     key_name: String,
-    derivation_path: Vec<Vec<u8>>,
+    path: Vec<Vec<u8>>,
     message_hash: Vec<u8>,
 ) -> Result<Vec<u8>, String> {
-    if message_hash.len() != 32 {
-        return Err("message must be 32 bytes".to_string());
-    }
-
-    let args = mgt::SignWithEcdsaArgs {
-        message_hash,
-        derivation_path,
-        key_id: mgt::EcdsaKeyId {
-            curve: mgt::EcdsaCurve::Secp256k1,
-            name: key_name,
-        },
-    };
-
-    let rt = mgt::sign_with_ecdsa(&args)
+    let hash = message_hash
+        .as_slice()
+        .try_into()
+        .map_err(|_| "message must be 32 bytes")?;
+    Operation::ecdsa(key_name, path, hash)
+        .execute()
         .await
-        .map_err(|err| format!("sign_with_ecdsa failed {:?}", err))?;
-
-    Ok(rt.signature)
+        .map_err(|e| format!("sign_with_ecdsa failed: {e:?}"))
 }
-
 pub async fn ecdsa_public_key(
     key_name: String,
-    derivation_path: Vec<Vec<u8>>,
+    path: Vec<Vec<u8>>,
 ) -> Result<PublicKeyOutput, String> {
-    let args = mgt::EcdsaPublicKeyArgs {
-        canister_id: None,
-        derivation_path,
-        key_id: mgt::EcdsaKeyId {
-            curve: mgt::EcdsaCurve::Secp256k1,
-            name: key_name,
-        },
-    };
-
-    let rt = mgt::ecdsa_public_key(&args)
+    chain_key::ecdsa_public_key(key_name, path)
         .await
-        .map_err(|err| format!("ecdsa_public_key failed {:?}", err))?;
-
-    Ok(PublicKeyOutput {
-        public_key: ByteBuf::from(rt.public_key),
-        chain_code: ByteBuf::from(rt.chain_code),
-    })
+        .map(|p| PublicKeyOutput {
+            public_key: p.public_key.into(),
+            chain_code: p.chain_code.into(),
+        })
 }

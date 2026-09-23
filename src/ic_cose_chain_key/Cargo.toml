@@ -1,0 +1,17 @@
+[package]
+name = "ic_cose_chain_key"
+version = { workspace = true }
+edition = { workspace = true }
+description = "Shared ICP chain-key calls, cost estimates and public-key derivation for IC COSE canisters"
+license = { workspace = true }
+repository = { workspace = true }
+
+[dependencies]
+candid = { workspace = true }
+ic-cdk = { workspace = true }
+ic-dummy-getrandom-for-wasm = { workspace = true }
+ic-cdk-management-canister = { workspace = true }
+ic-ed25519 = { workspace = true }
+ic-secp256k1 = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_bytes = { workspace = true }

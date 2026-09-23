@@ -1927,15 +1927,28 @@ dependencies = [
  "ic-cdk-timers",
  "ic-certification",
  "ic-dummy-getrandom-for-wasm",
- "ic-ed25519",
- "ic-secp256k1",
  "ic-stable-structures",
  "ic_auth_types",
  "ic_auth_verifier",
+ "ic_cose_chain_key",
  "ic_cose_types",
  "serde",
  "serde_bytes",
  "sha3 0.12.0",
+]
+
+[[package]]
+name = "ic_cose_chain_key"
+version = "0.11.0"
+dependencies = [
+ "candid",
+ "ic-cdk",
+ "ic-cdk-management-canister",
+ "ic-dummy-getrandom-for-wasm",
+ "ic-ed25519",
+ "ic-secp256k1",
+ "serde",
+ "serde_bytes",
 ]
 
 [[package]]

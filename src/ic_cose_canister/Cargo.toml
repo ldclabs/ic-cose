@@ -15,6 +15,7 @@ license.workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
+ic_cose_chain_key = { path = "../ic_cose_chain_key", version = "0.11" }
 ic_cose_types = { path = "../ic_cose_types", version = "0.11" }
 candid.workspace = true
 cbor2 = { workspace = true }
@@ -26,8 +27,6 @@ serde_bytes = { workspace = true }
 sha3 = { workspace = true }
 ic-cdk-timers = { workspace = true }
 ic-stable-structures = { workspace = true }
-ic-secp256k1 = { workspace = true }
-ic-ed25519 = { workspace = true }
 ic-canister-sig-creation = { workspace = true }
 ic-certification = { workspace = true }
 ic_auth_types = { workspace = true }

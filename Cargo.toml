@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "src/ic_cose_chain_key",
   "src/ic_cose_canister",
   "src/ic_cose",
   "src/ic_cose_types",

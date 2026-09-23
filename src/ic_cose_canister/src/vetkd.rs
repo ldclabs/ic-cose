@@ -1,90 +1,55 @@
-use ic_cdk_management_canister as mgt;
-use ic_cose_types::format_error;
+use ic_cose_chain_key::{self as chain_key, Operation};
 use sha3::Digest;
 
 pub fn vetkd_derive_key_cost(
     key_name: &str,
     context_version: u8,
-    derivation_path: &[&[u8]],
+    path: &[&[u8]],
     input: &[u8],
-    transport_public_key: &[u8],
+    transport: &[u8],
 ) -> Result<u128, String> {
-    let args = mgt::VetKDDeriveKeyArgs {
-        input: input.to_vec(),
-        context: derivation_path_to_context(context_version, derivation_path)?,
-        transport_public_key: transport_public_key.to_vec(),
-        key_id: mgt::VetKDKeyId {
-            curve: mgt::VetKDCurve::Bls12_381_G2,
-            name: key_name.to_string(),
-        },
-    };
-    let payload_bytes = candid::encode_one(&args).map_err(format_error)?.len() as u64;
-    mgt::cost_vetkd_derive_key(&args)
-        .map_err(format_error)?
-        .checked_add(ic_cdk::api::cost_call(
-            "vetkd_derive_key".len() as u64,
-            payload_bytes,
-        ))
-        .ok_or_else(|| "vetKD call cost overflowed".to_string())
+    Operation::vetkd(
+        key_name.into(),
+        derivation_path_to_context(context_version, path)?,
+        input.to_vec(),
+        transport.to_vec(),
+    )
+    .cost()?
+    .total()
 }
-
 pub fn vetkd_public_key_cost(
     key_name: &str,
     context_version: u8,
-    derivation_path: &[&[u8]],
+    path: &[&[u8]],
 ) -> Result<u128, String> {
-    let args = mgt::VetKDPublicKeyArgs {
-        canister_id: None,
-        context: derivation_path_to_context(context_version, derivation_path)?,
-        key_id: mgt::VetKDKeyId {
-            curve: mgt::VetKDCurve::Bls12_381_G2,
-            name: key_name.to_string(),
-        },
-    };
-    let payload_bytes = candid::encode_one(&args).map_err(format_error)?.len() as u64;
-    Ok(ic_cdk::api::cost_call(
-        "vetkd_public_key".len() as u64,
-        payload_bytes,
-    ))
+    chain_key::vetkd_public_key_cost(
+        key_name,
+        &derivation_path_to_context(context_version, path)?,
+    )
 }
-
 pub async fn vetkd_public_key(
     key_name: String,
     context_version: u8,
-    derivation_path: &[&[u8]],
+    path: &[&[u8]],
 ) -> Result<Vec<u8>, String> {
-    let args = mgt::VetKDPublicKeyArgs {
-        canister_id: None,
-        context: derivation_path_to_context(context_version, derivation_path)?,
-        key_id: mgt::VetKDKeyId {
-            curve: mgt::VetKDCurve::Bls12_381_G2,
-            name: key_name,
-        },
-    };
-    let res = mgt::vetkd_public_key(&args).await.map_err(format_error)?;
-    Ok(res.public_key)
+    chain_key::vetkd_public_key(key_name, derivation_path_to_context(context_version, path)?).await
 }
-
 pub async fn vetkd_encrypted_key(
     key_name: String,
     context_version: u8,
-    derivation_path: &[&[u8]],
+    path: &[&[u8]],
     input: Vec<u8>,
-    transport_public_key: Vec<u8>,
+    transport: Vec<u8>,
 ) -> Result<Vec<u8>, String> {
-    let args = mgt::VetKDDeriveKeyArgs {
+    Operation::vetkd(
+        key_name,
+        derivation_path_to_context(context_version, path)?,
         input,
-        context: derivation_path_to_context(context_version, derivation_path)?,
-        transport_public_key,
-        key_id: mgt::VetKDKeyId {
-            curve: mgt::VetKDCurve::Bls12_381_G2,
-            name: key_name,
-        },
-    };
-
-    let res = mgt::vetkd_derive_key(&args).await.map_err(format_error)?;
-
-    Ok(res.encrypted_key)
+        transport,
+    )
+    .execute()
+    .await
+    .map_err(|e| format!("vetkd_derive_key failed: {e:?}"))
 }
 
 fn derivation_path_to_context(version: u8, derivation_path: &[&[u8]]) -> Result<Vec<u8>, String> {
