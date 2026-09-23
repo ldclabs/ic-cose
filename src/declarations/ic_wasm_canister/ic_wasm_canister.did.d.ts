@@ -18,11 +18,11 @@ export interface BatchCallResult {
 }
 /**
  * # Canister Settings
- * 
+ *
  * For arguments of [`create_canister`](https://internetcomputer.org/docs/current/references/ic-interface-spec/#ic-create_canister),
  * [`update_settings`](https://internetcomputer.org/docs/current/references/ic-interface-spec/#ic-update_settings) and
  * [`provisional_create_canister_with_cycles`](https://internetcomputer.org/docs/current/references/ic-interface-spec/#ic-provisional_create_canister_with_cycles).
- * 
+ *
  * All fields are `Option` types, allowing selective settings/updates.
  */
 export interface CanisterSettings {
@@ -30,97 +30,97 @@ export interface CanisterSettings {
    * Indicates a length of time in seconds.
    * A canister is considered frozen whenever the IC estimates that the canister would be depleted of cycles
    * before `freezing_threshold` seconds pass, given the canister's current size and the IC's current cost for storage.
-   * 
+   *
    * Must be a number between 0 and 2<sup>64</sup>-1, inclusively.
-   * 
+   *
    * Default value: `2_592_000` (approximately 30 days).
    */
   'freezing_threshold' : [] | [bigint],
   /**
    * Indicates the threshold on the remaining wasm memory size of the canister in bytes.
-   * 
+   *
    * If the remaining wasm memory size of the canister is below the threshold, execution of the "on low wasm memory" hook is scheduled.
-   * 
+   *
    * Must be a number between 0 and 2<sup>64</sup>-1, inclusively.
-   * 
+   *
    * Default value: `0` (i.e., the "on low wasm memory" hook is never scheduled).
    */
   'wasm_memory_threshold' : [] | [bigint],
   /**
    * A list of environment variables.
-   * 
+   *
    * These variables are accessible to the canister during execution
    * and can be used to configure canister behavior without code changes.
    * Each key must be unique.
-   * 
+   *
    * Default value: `null` (i.e., no environment variables provided).
    */
   'environment_variables' : [] | [Array<EnvironmentVariable>],
   /**
    * A list of at most 10 principals.
-   * 
+   *
    * The principals in this list become the *controllers* of the canister.
-   * 
+   *
    * Default value: A list containing only the caller of the `create_canister` call.
    */
   'controllers' : [] | [Array<Principal>],
   /**
    * Indicates the upper limit on [`CanisterStatusResult::reserved_cycles`] of the canister.
-   * 
+   *
    * Must be a number between 0 and 2<sup>128</sup>-1, inclusively.
-   * 
+   *
    * Default value: `5_000_000_000_000` (5 trillion cycles).
    */
   'reserved_cycles_limit' : [] | [bigint],
   /**
    * Defines who is allowed to read the canister's logs.
-   * 
+   *
    * Default value: [`LogVisibility::Controllers`].
    */
   'log_visibility' : [] | [LogVisibility],
   /**
    * Indicates the upper limit on the memory used for canister logs (bytes).
-   * 
+   *
    * Default value: `4096`.
    */
   'log_memory_limit' : [] | [bigint],
   /**
    * Indicates the upper limit on the WASM heap memory (bytes) consumption of the canister.
-   * 
+   *
    * Must be a number between 0 and 2<sup>48</sup>-1 (i.e 256TB), inclusively.
-   * 
+   *
    * Default value: `3_221_225_472` (3 GiB).
    */
   'wasm_memory_limit' : [] | [bigint],
   /**
    * Indicates how much memory (bytes) the canister is allowed to use in total.
-   * 
+   *
    * If the IC cannot provide the requested allocation,
    * for example because it is oversubscribed, the call will be **rejected**.
-   * 
+   *
    * If set to 0, then memory growth of the canister will be best-effort and subject to the available memory on the IC.
-   * 
+   *
    * Must be a number between 0 and 2<sup>48</sup> (i.e 256TB), inclusively.
-   * 
+   *
    * Default value: `0`
    */
   'memory_allocation' : [] | [bigint],
   /**
    * Indicates how much compute power should be guaranteed to this canister,
    * expressed as a percentage of the maximum compute power that a single canister can allocate.
-   * 
+   *
    * If the IC cannot provide the requested allocation,
    * for example because it is oversubscribed, the call will be **rejected**.
-   * 
+   *
    * Must be a number between 0 and 100, inclusively.
-   * 
+   *
    * Default value: `0`
    */
   'compute_allocation' : [] | [bigint],
 }
 /**
  * # Canister Status Result
- * 
+ *
  * Result type of [`canister_status`](https://internetcomputer.org/docs/current/references/ic-interface-spec/#ic-canister_status).
  */
 export interface CanisterStatusResult {
@@ -167,7 +167,7 @@ export interface CanisterStatusResult {
   'module_hash' : [] | [Uint8Array | number[]],
   /**
    * The reserved cycles balance of the canister.
-   * 
+   *
    * These are cycles that are reserved by the resource reservation mechanism on storage allocation.
    * See also the [`CanisterSettings::reserved_cycles_limit`] parameter in canister settings.
    */
@@ -175,9 +175,9 @@ export interface CanisterStatusResult {
 }
 /**
  * # Canister Status Type
- * 
+ *
  * Status of a canister.
- * 
+ *
  * See [`CanisterStatusResult::status`].
  */
 export type CanisterStatusType = {
@@ -202,7 +202,7 @@ export type ChainArgs = { 'Upgrade' : UpgradeArgs } |
   { 'Init' : InitArgs };
 /**
  * Assembles a wasm artifact from chunks staged with `admin_add_wasm_chunk`.
- * 
+ *
  * Lets a module larger than the 2 MiB ingress limit be published, which a
  * single `admin_add_wasm` call cannot do.
  */
@@ -221,9 +221,9 @@ export interface CommitWasmChunksInput {
 }
 /**
  * # Definite Canister Settings
- * 
+ *
  * Represents the actual settings in effect.
- * 
+ *
  * For return of [`canister_status`](https://internetcomputer.org/docs/current/references/ic-interface-spec/#ic-canister_status).
  */
 export interface DefiniteCanisterSettings {
@@ -378,9 +378,9 @@ export type LogVisibility = {
   };
 /**
  * # Memory Metrics
- * 
+ *
  * Memory metrics of a canister.
- * 
+ *
  * See [`CanisterStatusResult::memory_metrics`].
  */
 export interface MemoryMetrics {
@@ -503,7 +503,7 @@ export interface ProvisionReceipt {
 }
 /**
  * Canister settings applied to every canister provisioned from a template.
- * 
+ *
  * Held immutably inside the template so a provisioner can never submit its own
  * controllers, allocations or limits.
  */
@@ -526,7 +526,7 @@ export type ProvisionStage = { 'Failed' : null } |
   { 'Installed' : null };
 /**
  * A governance-approved, immutable provisioning template.
- * 
+ *
  * A provisioner may only name an approved template by `id` and `hash`; every
  * other provisioning parameter is loaded from here, so approving a template is
  * the governance act that fixes which module, settings, controllers, subnet and
@@ -578,9 +578,9 @@ export interface ProvisionTemplateInfo {
 }
 /**
  * # Query Stats
- * 
+ *
  * Query statistics.
- * 
+ *
  * See [`CanisterStatusResult::query_stats`].
  */
 export interface QueryStats {
@@ -639,52 +639,72 @@ export type Result = { 'Ok' : null } |
   { 'Err' : string };
 export type Result_1 = { 'Ok' : ProvisionTemplateInfo } |
   { 'Err' : string };
-export type Result_10 = { 'Ok' : ReleaseReceipt } |
+export type Result_10 = { 'Ok' : boolean } |
   { 'Err' : string };
-export type Result_11 = { 'Ok' : Array<DeploymentInfo> } |
+export type Result_11 = { 'Ok' : ReleaseReceipt } |
   { 'Err' : string };
-export type Result_12 = { 'Ok' : ProvisionReceipt } |
+export type Result_12 = { 'Ok' : Array<DeploymentInfo> } |
   { 'Err' : string };
-export type Result_13 = { 'Ok' : CanisterStatusResult } |
+export type Result_13 = { 'Ok' : ProvisionReceipt } |
   { 'Err' : string };
-export type Result_14 = { 'Ok' : Array<Principal> } |
+export type Result_14 = { 'Ok' : CanisterStatusResult } |
   { 'Err' : string };
-export type Result_15 = { 'Ok' : WasmMetadata } |
+export type Result_15 = { 'Ok' : Array<Principal> } |
   { 'Err' : string };
-export type Result_16 = { 'Ok' : StateInfo } |
+export type Result_16 = { 'Ok' : WasmMetadata } |
   { 'Err' : string };
-export type Result_17 = { 'Ok' : WasmInfo } |
+export type Result_17 = { 'Ok' : StateInfo } |
   { 'Err' : string };
-export type Result_18 = { 'Ok' : Uint8Array | number[] } |
+export type Result_18 = { 'Ok' : WasmInfo } |
   { 'Err' : string };
-export type Result_19 = { 'Ok' : Array<ProvisionReceipt> } |
+export type Result_19 = { 'Ok' : Uint8Array | number[] } |
   { 'Err' : string };
 export type Result_2 = { 'Ok' : Uint8Array | number[] } |
   { 'Err' : string };
-export type Result_20 = { 'Ok' : Array<[string, Uint8Array | number[]]> } |
+export type Result_20 = { 'Ok' : Array<ProvisionReceipt> } |
   { 'Err' : string };
-export type Result_21 = { 'Ok' : Array<PoolCanisterInfo> } |
+export type Result_21 = { 'Ok' : ScanPage_1 } |
   { 'Err' : string };
-export type Result_22 = { 'Ok' : Array<ProvisionTemplateInfo> } |
+export type Result_22 = { 'Ok' : Array<[string, Uint8Array | number[]]> } |
   { 'Err' : string };
-export type Result_23 = { 'Ok' : ReservationReceipt } |
+export type Result_23 = { 'Ok' : Array<PoolCanisterInfo> } |
   { 'Err' : string };
-export type Result_24 = { 'Ok' : string } |
+export type Result_24 = { 'Ok' : Array<ProvisionTemplateInfo> } |
+  { 'Err' : string };
+export type Result_25 = { 'Ok' : ReservationReceipt } |
+  { 'Err' : string };
+export type Result_26 = { 'Ok' : string } |
   { 'Err' : string };
 export type Result_3 = { 'Ok' : bigint } |
   { 'Err' : string };
-export type Result_4 = { 'Ok' : Array<Uint8Array | number[]> } |
+export type Result_4 = { 'Ok' : ScanPage } |
   { 'Err' : string };
-export type Result_5 = { 'Ok' : Array<BatchCallResult> } |
+export type Result_5 = { 'Ok' : Array<Uint8Array | number[]> } |
   { 'Err' : string };
-export type Result_6 = { 'Ok' : bigint } |
+export type Result_6 = { 'Ok' : Array<BatchCallResult> } |
   { 'Err' : string };
-export type Result_7 = { 'Ok' : Array<TopupResult> } |
+export type Result_7 = { 'Ok' : bigint } |
   { 'Err' : string };
-export type Result_8 = { 'Ok' : Principal } |
+export type Result_8 = { 'Ok' : Array<TopupResult> } |
   { 'Err' : string };
-export type Result_9 = { 'Ok' : boolean } |
+export type Result_9 = { 'Ok' : Principal } |
   { 'Err' : string };
+/**
+ * A bounded scan page. Continue while `next_cursor` is present, even when no
+ * matching items were returned. The cursor denotes the last scanned record.
+ */
+export interface ScanPage {
+  'next_cursor' : [] | [Uint8Array | number[]],
+  'items' : Array<Uint8Array | number[]>,
+}
+/**
+ * A bounded scan page. Continue while `next_cursor` is present, even when no
+ * matching items were returned. The cursor denotes the last scanned record.
+ */
+export interface ScanPage_1 {
+  'next_cursor' : [] | [Uint8Array | number[]],
+  'items' : Array<ProvisionReceipt>,
+}
 export interface StateInfo {
   'provisioners' : Array<Principal>,
   'managers' : Array<Principal>,
@@ -709,11 +729,11 @@ export interface TopupResult {
 }
 /**
  * Argument type of [`update_settings`]
- * 
+ *
  * # Note
- * 
+ *
  * This type is a reduced version of [`ic_management_canister_types::UpdateSettingsArgs`].
- * 
+ *
  * The `sender_canister_version` field is removed as it is set automatically in [`update_settings`].
  */
 export interface UpdateSettingsArgs {
@@ -736,7 +756,7 @@ export interface UpgradeArgs {
 }
 /**
  * How the stored wasm artifact bytes are encoded.
- * 
+ *
  * The distinction matters because `artifact_hash` covers the bytes this
  * canister stores and transfers, while `module_hash` covers what the management
  * canister reports as installed. For [`WasmEncoding::Gzip`] the two must never
@@ -777,7 +797,7 @@ export interface _SERVICE {
   'admin_add_managers' : ActorMethod<[Array<Principal>], Result>,
   /**
    * Approves an immutable provisioning template.
-   * 
+   *
    * This is the governance act that fixes which module, settings, controllers,
    * subnet and creation budget a provisioned canister gets: a provisioner can
    * afterwards only name the template by id and hash.
@@ -785,7 +805,7 @@ export interface _SERVICE {
   'admin_add_provision_template' : ActorMethod<[ProvisionTemplate], Result_1>,
   /**
    * Grants the least-privilege provisioning role.
-   * 
+   *
    * A provisioner may only reserve, install and release canisters from approved
    * templates; it cannot manage roles, publish modules or deploy an arbitrary
    * wasm, so this can be granted to another canister without handing over the
@@ -798,7 +818,7 @@ export interface _SERVICE {
   >,
   /**
    * Stages one chunk of a wasm artifact for the caller.
-   * 
+   *
    * Publishing a module larger than the 2 MiB ingress limit is impossible in a
    * single `admin_add_wasm` call; chunks are staged here and assembled by
    * `admin_commit_wasm_chunks`.
@@ -809,20 +829,27 @@ export interface _SERVICE {
    * tombstones. Callers should retain receipts externally before archiving.
    */
   'admin_archive_completed_requests' : ActorMethod<[bigint, number], Result_3>,
-  'admin_batch_call' : ActorMethod<
-    [Array<Principal>, string, [] | [Uint8Array | number[]]],
+  /**
+   * Archives matching requests from a bounded scan, returning the last scanned cursor.
+   */
+  'admin_archive_completed_requests_page' : ActorMethod<
+    [bigint, [] | [Uint8Array | number[]], number],
     Result_4
   >,
-  'admin_batch_call_v2' : ActorMethod<
+  'admin_batch_call' : ActorMethod<
     [Array<Principal>, string, [] | [Uint8Array | number[]]],
     Result_5
   >,
-  'admin_batch_topup' : ActorMethod<[], Result_6>,
+  'admin_batch_call_v2' : ActorMethod<
+    [Array<Principal>, string, [] | [Uint8Array | number[]]],
+    Result_6
+  >,
+  'admin_batch_topup' : ActorMethod<[], Result_7>,
   'admin_batch_topup_page' : ActorMethod<
     [[] | [Principal], [] | [number]],
-    Result_7
+    Result_8
   >,
-  'admin_batch_topup_v2' : ActorMethod<[], Result_7>,
+  'admin_batch_topup_v2' : ActorMethod<[], Result_8>,
   'admin_clear_low_wasm_memory' : ActorMethod<[], Result>,
   /**
    * Drops the caller's staged chunks, e.g. after an abandoned upload.
@@ -838,17 +865,17 @@ export interface _SERVICE {
   >,
   'admin_create_canister' : ActorMethod<
     [string, [] | [CanisterSettings], [] | [Uint8Array | number[]]],
-    Result_8
+    Result_9
   >,
   'admin_create_on' : ActorMethod<
     [Principal, string, [] | [CanisterSettings], [] | [Uint8Array | number[]]],
-    Result_8
+    Result_9
   >,
   'admin_deploy' : ActorMethod<
     [DeployWasmInput, [] | [Uint8Array | number[]]],
     Result
   >,
-  'admin_forget_deployment' : ActorMethod<[Principal], Result_9>,
+  'admin_forget_deployment' : ActorMethod<[Principal], Result_10>,
   /**
    * Explicitly transfers target control away from this canister and removes the
    * target from the managed deployment index after the settings call succeeds.
@@ -859,7 +886,7 @@ export interface _SERVICE {
    */
   'admin_migrate_legacy_wasm_artifact' : ActorMethod<
     [Uint8Array | number[]],
-    Result_9
+    Result_10
   >,
   /**
    * Incrementally builds the per-wasm deployment-log index for records written
@@ -878,21 +905,21 @@ export interface _SERVICE {
   /**
    * Clears a `CreateUnknown` breaker after governance has looked for the canister
    * a lost create may have produced.
-   * 
+   *
    * `found` adopts that canister into the pool; `None` records the create as lost.
    */
   'admin_reconcile_pool' : ActorMethod<[string, [] | [Principal]], Result>,
   /**
    * Creates one more canister for a template's pool.
-   * 
+   *
    * Deliberately separate from any paid flow: creation is the one step whose
    * response loss cannot be recovered, so it may only ever waste an unpaid pool
    * canister. An unknown outcome circuit-breaks further refills.
    */
-  'admin_refill_pool' : ActorMethod<[string], Result_8>,
+  'admin_refill_pool' : ActorMethod<[string], Result_9>,
   'admin_release_expired_reservation' : ActorMethod<
     [Uint8Array | number[]],
-    Result_10
+    Result_11
   >,
   'admin_remove_committers' : ActorMethod<[Array<Principal>], Result>,
   'admin_remove_managers' : ActorMethod<[Array<Principal>], Result>,
@@ -902,83 +929,90 @@ export interface _SERVICE {
   'admin_update_canister_settings' : ActorMethod<[UpdateSettingsArgs], Result>,
   'deployment_logs' : ActorMethod<
     [string, [] | [bigint], [] | [bigint]],
-    Result_11
+    Result_12
   >,
   /**
    * Upgrades an already deployed canister to an exact module.
-   * 
+   *
    * Restricted to canisters this canister deployed, and to the wasm name they
    * already run: a provisioner must not be able to push an arbitrary module onto
    * an arbitrary canister. Compare-and-swaps on `expected_prev_module_hash`, so a
    * stale request can never overwrite a module the caller did not expect to be
    * running, and the result is verified against `expected_module_hash`.
    */
-  'ensure_deployment' : ActorMethod<[DeploymentRequest], Result_12>,
+  'ensure_deployment' : ActorMethod<[DeploymentRequest], Result_13>,
   /**
    * Installs the template's approved module onto the reserved canister.
-   * 
+   *
    * Idempotent by `request_id`: a retry after a lost response converges on the
    * already-installed module instead of failing, and the module hash reported by
    * the management canister is verified against the hash the template pins.
    */
-  'ensure_install' : ActorMethod<[InstallRequest], Result_12>,
-  'get_canister_status' : ActorMethod<[[] | [Principal]], Result_13>,
-  'get_deployed_canisters' : ActorMethod<[], Result_14>,
-  'get_deployed_canisters_info' : ActorMethod<[], Result_11>,
+  'ensure_install' : ActorMethod<[InstallRequest], Result_13>,
+  'get_canister_status' : ActorMethod<[[] | [Principal]], Result_14>,
+  'get_deployed_canisters' : ActorMethod<[], Result_15>,
+  'get_deployed_canisters_info' : ActorMethod<[], Result_12>,
   'get_deployed_canisters_info_v2' : ActorMethod<
     [[] | [Principal], [] | [number]],
-    Result_11
+    Result_12
   >,
   'get_deployed_canisters_v2' : ActorMethod<
     [[] | [Principal], [] | [number]],
-    Result_14
+    Result_15
   >,
   'get_next_wasm_version' : ActorMethod<
     [string, Uint8Array | number[]],
-    Result_15
+    Result_16
   >,
   /**
    * The durable outcome of a `request_id`, readable after any lost response.
    */
-  'get_provision_receipt' : ActorMethod<[Uint8Array | number[]], Result_12>,
+  'get_provision_receipt' : ActorMethod<[Uint8Array | number[]], Result_13>,
   /**
    * The approved template a provisioner must name by id and hash.
    */
   'get_provision_template' : ActorMethod<[string], Result_1>,
-  'get_state' : ActorMethod<[], Result_16>,
-  'get_wasm' : ActorMethod<[Uint8Array | number[]], Result_17>,
+  'get_state' : ActorMethod<[], Result_17>,
+  'get_wasm' : ActorMethod<[Uint8Array | number[]], Result_18>,
   'get_wasm_chunk' : ActorMethod<
     [Uint8Array | number[], bigint, number],
-    Result_18
+    Result_19
   >,
-  'get_wasm_metadata' : ActorMethod<[Uint8Array | number[]], Result_15>,
+  'get_wasm_metadata' : ActorMethod<[Uint8Array | number[]], Result_16>,
   'list_expired_reservations' : ActorMethod<
     [[] | [Uint8Array | number[]], [] | [number]],
-    Result_19
+    Result_20
+  >,
+  /**
+   * Bounds scanned records, including non-matching requests. Follow next_cursor even on empty pages.
+   */
+  'list_expired_reservations_page' : ActorMethod<
+    [[] | [Uint8Array | number[]], number],
+    Result_21
   >,
   'list_latest_wasm_versions' : ActorMethod<
     [[] | [string], [] | [number]],
-    Result_20
+    Result_22
   >,
   'list_legacy_wasm_artifacts' : ActorMethod<
     [[] | [Uint8Array | number[]], [] | [number]],
-    Result_4
+    Result_5
   >,
   /**
    * Recorded pool inventory of a template.
-   * 
+   *
    * Governance watches this against the reservation churn: a pool that keeps
    * draining is the signal to rate-limit callers, not to raise the pool size.
    */
-  'list_provision_pool' : ActorMethod<[string], Result_21>,
+  'list_provision_pool' : ActorMethod<[string], Result_23>,
   'list_provision_pool_v2' : ActorMethod<
     [string, [] | [Principal], [] | [number]],
-    Result_21
+    Result_23
   >,
-  'list_provision_templates' : ActorMethod<[], Result_22>,
+  'list_provision_templates' : ActorMethod<[], Result_24>,
   'list_provision_templates_v2' : ActorMethod<
     [[] | [string], [] | [number]],
-    Result_22
+    Result_24
   >,
   /**
    * Resolves an interrupted install or upgrade, including after its request
@@ -987,81 +1021,81 @@ export interface _SERVICE {
    */
   'reconcile_provision_request' : ActorMethod<
     [Uint8Array | number[]],
-    Result_12
+    Result_13
   >,
   /**
    * Returns a reserved canister to the pool.
-   * 
+   *
    * Only valid while the reservation never installed anything; the canister must
    * still be empty and still carry the template's controllers, so a released
    * canister cannot come back polluted.
    */
   'release_reservation' : ActorMethod<
     [Uint8Array | number[], Principal],
-    Result_10
+    Result_11
   >,
   /**
    * Claims one pre-created canister for `request_id`.
-   * 
+   *
    * Idempotent and fully synchronous: the `request_id -> canister` binding is
    * committed together with the reply, so a caller that never sees the response
    * recovers the same canister by replaying the call or reading the receipt. It
    * never creates a canister, which is why a lost management-canister create can
    * only ever waste an unpaid pool canister.
    */
-  'reserve_canister' : ActorMethod<[ReserveRequest], Result_23>,
-  'validate_admin_add_committers' : ActorMethod<[Array<Principal>], Result_24>,
-  'validate_admin_add_managers' : ActorMethod<[Array<Principal>], Result_24>,
+  'reserve_canister' : ActorMethod<[ReserveRequest], Result_25>,
+  'validate_admin_add_committers' : ActorMethod<[Array<Principal>], Result_26>,
+  'validate_admin_add_managers' : ActorMethod<[Array<Principal>], Result_26>,
   'validate_admin_add_provision_template' : ActorMethod<
     [ProvisionTemplate],
-    Result_24
+    Result_26
   >,
   'validate_admin_add_provisioners' : ActorMethod<
     [Array<Principal>],
-    Result_24
+    Result_26
   >,
   'validate_admin_add_wasm' : ActorMethod<
     [AddWasmInput, [] | [Uint8Array | number[]]],
-    Result_24
+    Result_26
   >,
   'validate_admin_batch_call' : ActorMethod<
     [Array<Principal>, string, [] | [Uint8Array | number[]]],
-    Result_24
+    Result_26
   >,
-  'validate_admin_batch_topup' : ActorMethod<[], Result_24>,
+  'validate_admin_batch_topup' : ActorMethod<[], Result_26>,
   'validate_admin_create_canister' : ActorMethod<
     [string, [] | [CanisterSettings], [] | [Uint8Array | number[]]],
-    Result_24
+    Result_26
   >,
   'validate_admin_create_on' : ActorMethod<
     [Principal, string, [] | [CanisterSettings], [] | [Uint8Array | number[]]],
-    Result_24
+    Result_26
   >,
   'validate_admin_deploy' : ActorMethod<
     [DeployWasmInput, [] | [Uint8Array | number[]]],
-    Result_24
+    Result_26
   >,
   'validate_admin_reconcile_pool' : ActorMethod<
     [string, [] | [Principal]],
-    Result_24
+    Result_26
   >,
   'validate_admin_remove_committers' : ActorMethod<
     [Array<Principal>],
-    Result_24
+    Result_26
   >,
-  'validate_admin_remove_managers' : ActorMethod<[Array<Principal>], Result_24>,
-  'validate_admin_remove_provision_template' : ActorMethod<[string], Result_24>,
+  'validate_admin_remove_managers' : ActorMethod<[Array<Principal>], Result_26>,
+  'validate_admin_remove_provision_template' : ActorMethod<[string], Result_26>,
   'validate_admin_remove_provisioners' : ActorMethod<
     [Array<Principal>],
-    Result_24
+    Result_26
   >,
   'validate_admin_remove_wasm' : ActorMethod<
     [Uint8Array | number[]],
-    Result_24
+    Result_26
   >,
   'validate_admin_update_canister_settings' : ActorMethod<
     [UpdateSettingsArgs],
-    Result_24
+    Result_26
   >,
 }
 export declare const idlFactory: IDL.InterfaceFactory;

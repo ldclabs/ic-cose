@@ -135,8 +135,29 @@ fn admin_migrate_legacy_settings(take: u32) -> Result<u64, String> {
 #[ic_cdk::update(guard = "is_controller")]
 fn admin_migrate_legacy_namespace_acls(take: u32) -> Result<u64, String> {
     store::state::ensure_memory_available()?;
+    if store::ns::namespace_count() > 1_000 {
+        return Err(
+            "more than 1000 namespaces; use admin_migrate_legacy_namespace_acls_page".into(),
+        );
+    }
     Ok(store::ns::migrate_legacy_namespace_acls(
         take.clamp(1, 100) as usize
+    ))
+}
+
+/// Scans at most `scan_limit` namespaces. Continue with next_cursor even when items is empty.
+#[ic_cdk::update(guard = "is_controller")]
+fn admin_migrate_legacy_namespace_acls_page(
+    prev: Option<String>,
+    scan_limit: u32,
+) -> Result<ic_cose_types::types::ScanPage<String, String>, String> {
+    store::state::ensure_memory_available()?;
+    if let Some(cursor) = &prev {
+        ic_cose_types::validate_str(cursor)?;
+    }
+    Ok(store::ns::migrate_legacy_namespace_acls_page(
+        prev,
+        scan_limit.clamp(1, 100) as usize,
     ))
 }
 

@@ -35,6 +35,8 @@ getrandom_02 = { package = "getrandom", version = "0.2", features = ["custom"] }
 
 [dev-dependencies]
 pocket-ic = "16"
+wat = "1"
+ic-vetkeys.workspace = true
 ic_auth_types.workspace = true
 ic_auth_verifier = { workspace = true, features = ["envelope"] }
 ic-canister-sig-creation.workspace = true

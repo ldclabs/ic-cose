@@ -4,7 +4,7 @@
 
 `ic_wasm_canister` 是 Internet Computer 上的 WASM 制品仓库与 canister 部署管理服务。它提供模块发布、版本路径、创建与升级、批量调用及 cycles 补充，并支持基于不可变模板和预创建池的 provisioning 流程。
 
-本文面向前端、后端、治理及业务 canister 开发者，描述当前仓库实现。准确类型以 [Candid 定义](ic_wasm_canister.did) 为准，行为依据 [API](src/api.rs)、[管理接口](src/api_admin.rs)、[provisioning 接口](src/api_provision.rs) 和 [存储实现](src/store.rs)。部署实例可能运行其他版本，应先核对接口。
+本文面向前端、后端、治理及业务 canister 开发者，描述当前仓库实现。准确类型以 [Candid 定义](ic_wasm_canister.did) 为准，行为依据 [API](src/api.rs)、[管理接口](src/api_admin.rs)、[provisioning 接口](src/api_provision.rs) 和 [存储实现](src/store/mod.rs)。部署实例可能运行其他版本，应先核对接口。
 
 ## 目录
 
@@ -51,7 +51,7 @@
 | 资源                                            | 用途                                                                         |
 | ----------------------------------------------- | ---------------------------------------------------------------------------- |
 | [ic_wasm_canister.did](ic_wasm_canister.did)    | 全部服务方法、请求、返回和 query 标记                                        |
-| [生成绑定](../declarations/ic_wasm_canister)    | JavaScript IDL 与 TypeScript 类型，可用 `dfx generate ic_wasm_canister` 更新 |
+| [生成绑定](../declarations/ic_wasm_canister)    | JavaScript IDL 与 TypeScript 类型，可用 `make bindings` 更新 |
 | [Rust 类型](../ic_cose_types/src/types/wasm.rs) | 模板、哈希辅助方法、请求与回执结构                                           |
 | [management.rs](src/management.rs)              | 创建、状态检查、直接安装与分块安装实现                                       |
 | [dfx.json](../../dfx.json)                      | 仓库构建和本地部署配置                                                       |
@@ -486,7 +486,7 @@ Released 记录按模板保留 tombstone：过期阈值 **24 小时**、数量�
 
 ### 10.1 TypeScript：分块发布
 
-使用与生成绑定匹配的 `@dfinity/agent`、身份和 IDL。以下 helper 适用于 Node.js，actor 应已带有 controller / manager / committer 身份；不要把所有输入文件直接塞入一次 Candid ingress。
+使用与生成绑定匹配的 `@icp-sdk/core/agent`、身份和 IDL。以下 helper 适用于 Node.js，actor 应已带有 controller / manager / committer 身份；不要把所有输入文件直接塞入一次 Candid ingress。
 
 ```typescript
 import { createHash } from 'node:crypto';
@@ -530,7 +530,7 @@ export async function publish(
 Actor 初始化方式：
 
 ```typescript
-import { Actor, HttpAgent, type Identity } from '@dfinity/agent';
+import { Actor, HttpAgent, type Identity } from '@icp-sdk/core/agent';
 import { idlFactory } from '../declarations/ic_wasm_canister/ic_wasm_canister.did.js';
 import type { _SERVICE } from '../declarations/ic_wasm_canister/ic_wasm_canister.did';
 
@@ -676,7 +676,7 @@ WASM metadata/块、版本路径、latest、部署索引、日志索引、模板
 
 `admin_handoff_canister` 与 `admin_forget_deployment` 会持久化退出管理标记，普通回执重试及恢复不会撤销该标记。只有 controller 通过成功的 `admin_deploy`、`admin_reconcile_deployment` 或接纳空目标的 `admin_reconcile_pool` 核验并显式重新接管后，才会恢复管理。
 
-运行跨升级回归测试：先 `make build-wasm`，再设置 `POCKET_IC_BIN` 为本地 PocketIC 13 server 路径，执行 `cargo test -p ic_wasm_canister --test canister_runtime -- --ignored`。`CANISTER_WASM_DIR` 可改为 wasm64 release 目录，使用相同测试验证 wasm64 的签名认证和 stable memory 持久化。运行时测试默认 ignored，普通单元测试不依赖 PocketIC server。
+运行跨升级回归测试：先 `make build-wasm`，再设置 `POCKET_IC_BIN` 为本地 PocketIC 16 server 路径，执行 `cargo test -p ic_wasm_canister --test canister_runtime -- --ignored`。`CANISTER_WASM_DIR` 可改为 wasm64 release 目录，使用相同测试验证 wasm64 的签名认证和 stable memory 持久化。运行时测试默认 ignored，普通单元测试不依赖 PocketIC server。
 
 ## 12. 错误处理与对接限制
 
@@ -713,6 +713,17 @@ WASM metadata/块、版本路径、latest、部署索引、日志索引、模板
 - 成功请求至少保留 30 天后可由 controller 压缩为永久 request-id tombstone；部署日志保留，需规划 stable memory 和运维成本。
 - 触发 low-Wasm-memory 后，发布、建池、角色/模板扩容等新增写入会保护性拒绝；释放、清理和显式 controller 恢复接口仍可用。
 - 直接发布、分块提交和模板批准均不等于目标部署成功；业务交付应检查 ensure 回执以及应用自身需要的初始化结果。
+
+### 有界请求维护
+
+`list_expired_reservations_page(prev, scan_limit)` 与 `admin_archive_completed_requests_page(before_ms, prev, scan_limit)` 返回 `{ items; next_cursor }`。每次最多扫描 1000 条记录，包括不匹配项；即使 items 为空也应继续使用 next_cursor，直到其为空。归档接口的 items 是本次归档的请求 ID，30 天保留要求不变。旧扫描接口在请求总数超过 1000 时要求使用分页版本。
+
+运行 `make build-did` 可提取接口，并统一生成主目录和示例的绑定。Actor 工厂保留调用方 agent 的 root key；本地环境由调用方显式 `await agent.fetchRootKey()` 后再创建 actor。
+
+
+### 存储 cycles 测量
+
+`storage_operations_report_cycle_costs` 测试输出 256 KiB / 1 MiB 配置创建、更新、删除，以及 100 / 3999 成员集合中单成员增删的 cycles。执行 `POCKET_IC_BIN=/path/to/pocket-ic-16 cargo test -p ic_wasm_canister --test canister_runtime storage_operations_report_cycle_costs -- --ignored --nocapture`；将 `CANISTER_WASM_DIR` 指向单独构建的旧版本，可以对比相同负载。
 
 ## License
 

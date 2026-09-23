@@ -1,6 +1,6 @@
 use candid::Principal;
 use ic_agent::{identity::BasicIdentity, Identity};
-use ic_cose::agent::build_agent;
+use ic_cose::agent::{build_agent, build_local_agent};
 use ic_cose::client::{Client, CoseSDK};
 use ic_cose::rand_bytes;
 use ic_cose::vetkeys::{IbeCiphertext, IbeIdentity, IbeSeed};
@@ -25,7 +25,12 @@ async fn main() {
     } else {
         "https://icp-api.io"
     };
-    let agent = build_agent(host, Arc::new(id)).await.unwrap();
+    let agent = if IS_LOCAL {
+        build_local_agent(host, Arc::new(id)).await
+    } else {
+        build_agent(host, Arc::new(id)).await
+    }
+    .unwrap();
     let cli = Client::new(Arc::new(agent), canister);
 
     let key = vec![0u8, 1, 2, 3].into();

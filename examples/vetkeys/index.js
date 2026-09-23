@@ -1,6 +1,6 @@
 import { createActor } from "./declarations/ic_cose_canister/index.js"
-import { Ed25519KeyIdentity } from '@dfinity/identity'
-import { createAgent } from '@dfinity/utils'
+import { Ed25519KeyIdentity } from '@icp-sdk/core/identity'
+import { HttpAgent } from '@icp-sdk/core/agent'
 import assert from 'assert'
 import { EncryptedVetKey, DerivedPublicKey, TransportSecretKey, IbeCiphertext, IbeIdentity, IbeSeed } from '@dfinity/vetkeys'
 import { randomBytes } from 'node:crypto'
@@ -18,12 +18,11 @@ const idJSON =
 
 async function main() {
   const identity = Ed25519KeyIdentity.fromJSON(idJSON)
-  const agent = await createAgent({
+  const agent = new HttpAgent({
     identity,
-    fetchRootKey: IS_LOCAL,
     host: apiHost,
-    verifyQuerySignatures: false
   })
+  if (IS_LOCAL) await agent.fetchRootKey()
   const actor = createActor(canisterId, {
     agent,
   })

@@ -1222,9 +1222,28 @@ fn admin_archive_completed_requests(before_ms: u64, take: u32) -> Result<u64, St
     if before_ms > now_ms.saturating_sub(30 * 24 * 3600 * 1000) {
         return Err("completed requests must be retained for at least 30 days".to_string());
     }
+    store::provision::ensure_legacy_request_scan_bounded()?;
     Ok(store::provision::archive_completed_requests(
         before_ms,
         take.clamp(1, 1_000) as usize,
+    ))
+}
+
+/// Archives matching requests from a bounded scan, returning the last scanned cursor.
+#[ic_cdk::update(guard = "is_controller")]
+fn admin_archive_completed_requests_page(
+    before_ms: u64,
+    prev: Option<ByteArray<32>>,
+    scan_limit: u32,
+) -> Result<ic_cose_types::types::ScanPage<ByteArray<32>, ByteArray<32>>, String> {
+    let now_ms = ic_cdk::api::time() / MILLISECONDS;
+    if before_ms > now_ms.saturating_sub(30 * 24 * 3600 * 1000) {
+        return Err("completed requests must be retained for at least 30 days".to_string());
+    }
+    Ok(store::provision::archive_completed_requests_page(
+        before_ms,
+        prev,
+        scan_limit.clamp(1, 1_000) as usize,
     ))
 }
 

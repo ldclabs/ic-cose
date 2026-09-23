@@ -352,6 +352,70 @@ pub trait CoseSDK: CanisterCaller + Sized {
             .map_err(format_error)?
     }
 
+    async fn namespace_get_info_v2(
+        &self,
+        namespace: &str,
+        with_members: bool,
+    ) -> Result<NamespaceInfo, String> {
+        self.canister_query(
+            self.canister(),
+            "namespace_get_info_v2",
+            (namespace, with_members),
+        )
+        .await
+        .map_err(format_error)?
+    }
+
+    async fn namespace_list_members(
+        &self,
+        namespace: &str,
+        kind: &str,
+        prev: Option<Principal>,
+        take: Option<u32>,
+    ) -> Result<Vec<Principal>, String> {
+        self.canister_query(
+            self.canister(),
+            "namespace_list_members",
+            (namespace, kind, prev, take),
+        )
+        .await
+        .map_err(format_error)?
+    }
+
+    async fn namespace_list_fixed_identity_names(
+        &self,
+        namespace: &str,
+        prev: Option<&str>,
+        take: Option<u32>,
+    ) -> Result<Vec<String>, String> {
+        self.canister_query(
+            self.canister(),
+            "namespace_list_fixed_identity_names",
+            (namespace, prev, take),
+        )
+        .await
+        .map_err(format_error)?
+    }
+
+    /// Lists a page after the exclusive `(subject, key)` cursor. Keep the same
+    /// namespace, ownership and subject filter while walking subsequent pages.
+    async fn namespace_list_setting_keys_v2(
+        &self,
+        namespace: &str,
+        user_owned: bool,
+        subject: Option<Principal>,
+        prev: Option<(Principal, ByteBuf)>,
+        take: Option<u32>,
+    ) -> Result<Vec<(Principal, ByteBuf)>, String> {
+        self.canister_query(
+            self.canister(),
+            "namespace_list_setting_keys_v2",
+            (namespace, user_owned, subject, prev, take),
+        )
+        .await
+        .map_err(format_error)?
+    }
+
     /// Lists the `(subject, key)` pairs of a namespace's settings.
     async fn namespace_list_setting_keys(
         &self,
@@ -484,6 +548,13 @@ pub trait CoseSDK: CanisterCaller + Sized {
 
     async fn setting_get(&self, path: &SettingPath) -> Result<SettingInfo, String> {
         self.canister_query(self.canister(), "setting_get", (path,))
+            .await
+            .map_err(format_error)?
+    }
+
+    /// Reads a setting through replicated execution and a certified update reply.
+    async fn setting_get_consensus(&self, path: &SettingPath) -> Result<SettingInfo, String> {
+        self.canister_update(self.canister(), "setting_get", (path,))
             .await
             .map_err(format_error)?
     }
@@ -936,6 +1007,121 @@ mod tests {
                 .build()
                 .unwrap(),
         )
+    }
+
+    #[tokio::test]
+    async fn default_agent_rejects_uncertified_query_responses() {
+        let reply = QueryResponse::Replied {
+            reply: ReplyResponse {
+                arg: encode_one(123u32).unwrap(),
+            },
+            signatures: vec![],
+        };
+        let encoded = cbor2::to_vec(&reply).unwrap();
+        let service = StaticHttpService::new(StatusCode::OK, "application/cbor", encoded.clone());
+        // The fake endpoint cannot provide a certificate for its node keys.
+        service.responses.lock().unwrap().push_back((
+            StatusCode::OK,
+            "application/cbor",
+            vec![0xa0],
+        ));
+        let agent = crate::agent::agent_builder(
+            "http://127.0.0.1",
+            Arc::new(ic_agent::identity::AnonymousIdentity),
+        )
+        .with_arc_http_middleware(service)
+        .build()
+        .unwrap();
+        let client = Client::new(Arc::new(agent), Principal::management_canister());
+        assert!(client
+            .canister_query::<_, u32>(client.canister(), "get", ())
+            .await
+            .is_err());
+        // The same unsigned reply is well-formed and would be accepted if verification were disabled.
+        let client = Client::new(
+            agent_with_response(StatusCode::OK, "application/cbor", encoded),
+            Principal::management_canister(),
+        );
+        assert_eq!(
+            client
+                .canister_query::<_, u32>(client.canister(), "get", ())
+                .await
+                .unwrap(),
+            123
+        );
+    }
+
+    #[tokio::test]
+    async fn paginated_sdk_preserves_cursors_and_consensus_read_mode() {
+        let sdk = MockCose::new();
+        let subject = Principal::from_slice(&[7]);
+        let values: Vec<_> = (0u32..1_001)
+            .map(|i| (subject, ByteBuf::from(i.to_be_bytes().to_vec())))
+            .collect();
+        sdk.respond(values[..1_000].to_vec());
+        let mut page = sdk
+            .namespace_list_setting_keys_v2("namespace_1", true, Some(subject), None, Some(1_000))
+            .await
+            .unwrap();
+        let cursor = page.last().cloned();
+        sdk.respond(values[1_000..].to_vec());
+        page.extend(
+            sdk.namespace_list_setting_keys_v2(
+                "namespace_1",
+                true,
+                Some(subject),
+                cursor.clone(),
+                Some(1_000),
+            )
+            .await
+            .unwrap(),
+        );
+        assert_eq!(page, values);
+        {
+            let calls = sdk.calls();
+            assert_eq!(calls[1].method, "namespace_list_setting_keys_v2");
+            type KeyPageArgs = (
+                String,
+                bool,
+                Option<Principal>,
+                Option<(Principal, ByteBuf)>,
+                Option<u32>,
+            );
+            let args: KeyPageArgs = decode_args(&calls[1].args).unwrap();
+            assert_eq!(
+                args,
+                (
+                    "namespace_1".into(),
+                    true,
+                    Some(subject),
+                    cursor,
+                    Some(1_000)
+                )
+            );
+        }
+        sdk.respond(namespace_info());
+        sdk.namespace_get_info_v2("namespace_1", false)
+            .await
+            .unwrap();
+        sdk.respond(vec![subject]);
+        assert_eq!(
+            sdk.namespace_list_members("namespace_1", "user", None, Some(10))
+                .await
+                .unwrap(),
+            vec![subject]
+        );
+        sdk.respond(vec!["identity".to_string()]);
+        assert_eq!(
+            sdk.namespace_list_fixed_identity_names("namespace_1", None, Some(10))
+                .await
+                .unwrap(),
+            vec!["identity"]
+        );
+        sdk.respond(setting_info());
+        sdk.setting_get_consensus(&setting_path()).await.unwrap();
+        let calls = sdk.calls();
+        assert_eq!(calls.last().unwrap().kind, CallKind::Update);
+        assert_eq!(calls.last().unwrap().method, "setting_get");
     }
 
     #[tokio::test]

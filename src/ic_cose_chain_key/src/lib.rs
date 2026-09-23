@@ -265,27 +265,7 @@ pub fn derive_schnorr_public_key(
 ) -> Result<PublicKey, String> {
     match alg {
         mgmt::SchnorrAlgorithm::Bip340secp256k1 => {
-            let path = ic_secp256k1::DerivationPath::new(
-                derivation_path
-                    .into_iter()
-                    .map(ic_secp256k1::DerivationIndex)
-                    .collect(),
-            );
-
-            let chain_code: [u8; 32] = public_key
-                .chain_code
-                .as_slice()
-                .try_into()
-                .map_err(format_error)?;
-            let pk = ic_secp256k1::PublicKey::deserialize_sec1(&public_key.public_key)
-                .map_err(format_error)?;
-            let (derived_public_key, derived_chain_code) =
-                pk.derive_subkey_with_chain_code(&path, &chain_code);
-
-            Ok(PublicKey {
-                public_key: derived_public_key.serialize_sec1(true),
-                chain_code: Vec::from(derived_chain_code),
-            })
+            derive_ecdsa_public_key(public_key, derivation_path)
         }
 
         mgmt::SchnorrAlgorithm::Ed25519 => {
@@ -317,6 +297,33 @@ pub fn derive_schnorr_public_key(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn offline_secp256k1_derivation_composes_for_ecdsa_and_schnorr() {
+        let key =
+            ic_secp256k1::PrivateKey::generate_from_seed(b"chain-key regression").public_key();
+        let root = PublicKey {
+            public_key: key.serialize_sec1(true),
+            chain_code: vec![7; 32],
+        };
+        let path = vec![b"domain".to_vec(), vec![], b"child".to_vec()];
+        let direct = derive_ecdsa_public_key(&root, path.clone()).unwrap();
+        let parent = derive_ecdsa_public_key(&root, path[..2].to_vec()).unwrap();
+        assert_eq!(
+            derive_ecdsa_public_key(&parent, path[2..].to_vec()).unwrap(),
+            direct
+        );
+        assert_eq!(
+            derive_schnorr_public_key(mgmt::SchnorrAlgorithm::Bip340secp256k1, &root, path)
+                .unwrap(),
+            direct
+        );
+        let invalid = PublicKey {
+            chain_code: vec![7; 31],
+            ..root
+        };
+        assert!(derive_ecdsa_public_key(&invalid, vec![]).is_err());
+    }
+
     #[test]
     fn ambiguous_rejections_never_become_retryable_failures() {
         for code in [

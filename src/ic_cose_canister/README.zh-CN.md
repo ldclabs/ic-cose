@@ -4,7 +4,7 @@
 
 `ic_cose_canister` 是部署在 Internet Computer 上的配置、签名与加密服务。业务以命名空间隔离配置和权限，可以保存明文或客户端加密的配置、调用 Threshold ECDSA / Schnorr 签名、获取加密传输的密钥材料，以及签发固定身份的 IC delegation。
 
-本文面向前端、后端和 canister 开发者，描述当前仓库实现。接口的准确类型以 [Candid 定义](ic_cose_canister.did) 为准，权限和状态行为以 [store.rs](src/store.rs) 为准。部署实例可能运行不同版本，接入前应核对其 Candid。
+本文面向前端、后端和 canister 开发者，描述当前仓库实现。接口的准确类型以 [Candid 定义](ic_cose_canister.did) 为准，权限和状态行为以 [store 模块](src/store/mod.rs) 为准。部署实例可能运行不同版本，接入前应核对其 Candid。
 
 ## 目录
 
@@ -43,7 +43,7 @@
 | 资源                         | 位置 / 用途                                                                               |
 | ---------------------------- | ----------------------------------------------------------------------------------------- |
 | Canister Candid              | [ic_cose_canister.did](ic_cose_canister.did)，包含全部请求、响应和 query 标记             |
-| JavaScript / TypeScript 绑定 | [生成目录](../declarations/ic_cose_canister)，用 `dfx generate ic_cose_canister` 重新生成 |
+| JavaScript / TypeScript 绑定 | [生成目录](../declarations/ic_cose_canister)，用 `make bindings` 重新生成 |
 | Rust SDK                     | [ic_cose](../ic_cose)，核心接口为 `client::CoseSDK`，实现为 `client::Client`              |
 | Rust 数据类型与 COSE 工具    | [ic_cose_types](../ic_cose_types)                                                         |
 | VetKeys 示例                 | [Rust 示例](../ic_cose/examples/vetkeys.rs)、[前端示例](../../examples/vetkeys)           |
@@ -240,7 +240,7 @@ Namespace 和 setting 的状态都可由相应管理者恢复；状态门槛保�
 - 私有且未归档：manager、auditor、subject 或 setting readers 可读配置；不要求 subject / readers 同时属于 users。
 - 私有且归档：只有 manager / auditor 可读；公开 namespace 的读取规则优先于归档状态。
 - KEK 权限：namespace 归档时先拒绝非 manager；随后允许 subject、namespace auditor、服务端配置的 namespace manager，或当前 setting 的 reader。个人配置 manager 没有隐含 KEK 权限。
-- KEK 获取不要求 setting 已存在：subject 等满足前述条件者可先取密钥再创建配置。它也不按 setting 状态或版本撤销权限。
+- Namespace 成员可预取自身路径的 KEK；非成员 subject / reader 需要已经存在的 setting 授权。VetKD 公钥也向获得该路径密钥授权的 caller 开放。Setting 状态或版本不自动撤销密钥权限。
 - 普通签名允许 manager / user；归档时仅 manager。`schnorr_sign_identity` 和固定身份委托有各自的角色检查，并不使用相同的状态门槛。
 
 ## 4. 命名空间接口
@@ -502,10 +502,10 @@ wasm32 与 wasm64 均使用真实 IC stable memory；wasm64 显式适配稳定�
 
 ### 10.1 TypeScript Actor
 
-以下是可放入应用的 helper，依赖 `@dfinity/agent` 和生成的 IDL。`identity` 由调用方提供，须具备目标 namespace 的权限；使用与生成绑定配套的 SDK 版本。
+以下是可放入应用的 helper，依赖 `@icp-sdk/core/agent` 和生成的 IDL。`identity` 由调用方提供，须具备目标 namespace 的权限；使用与生成绑定配套的 SDK 版本。
 
 ```typescript
-import { Actor, HttpAgent, type Identity } from '@dfinity/agent';
+import { Actor, HttpAgent, type Identity } from '@icp-sdk/core/agent';
 import { idlFactory } from '../declarations/ic_cose_canister/ic_cose_canister.did.js';
 import type { _SERVICE } from '../declarations/ic_cose_canister/ic_cose_canister.did';
 
@@ -600,12 +600,21 @@ pub async fn update_plaintext(cli: &Client, mut path: SettingPath) -> Result<u32
 
 - `namespace_top_up` 接收的 cycles 参数必须 **大于等于 1,000,000,000,000**，并且不超过该消息附带的 cycles。普通用户 ingress 只传数字不会附带 cycles；需要支持附带 cycles 的 canister / wallet 调用。
 - 任何非匿名 caller 都可为已存在 namespace 充值，不要求 namespace 成员身份。返回实际接收数量并累加 gas_balance。
-- ECDSA、Schnorr、VetKD 和 ECDH 所触发的管理调用会在 `await` 前从 namespace gas 原子扣除动态签名费和调用费；余额不足或 canister liquid balance 无法覆盖应用保留阈值时拒绝。多步身份签名按实际发生的 raw-rand 与 Schnorr 两阶段分别计费。
+- ECDSA、Schnorr、VetKD 和 ECDH 的管理调用会在 `await` 前从 namespace gas 原子预扣请求费和 `cost_call` 预算上限；余额不足时拒绝。明确未发出的调用全额退回；已发出调用收到的附带 cycles 退款记回 namespace。调用部分保守保留最大响应/回调预算，不代表实际消耗。多步身份签名分别结算 raw-rand 与 Schnorr。
 - `subnet_size` 作为兼容字段保留；动态管理调用费用不再依赖手工配置的子网节点数。`freezing_threshold` 是额外的应用层 cycles 保留值，不是 IC canister settings 中按秒计的同名字段。
 - `payload_bytes_total` 统计当前及历史 payload/dek 字节；更新增加新版本实际存储量，删除会扣减全部版本。历史异常计数可用 `namespace_rebuild_payload_bytes` 修复；它仍不包含元数据和索引开销。
 - 兼容的 `namespace_list_setting_keys` 最多返回 1000 项；大集合使用 v2 游标分页。历史 payload 仍没有独立批量清理接口，持续更新需规划 stable memory。
 - 触发 low-Wasm-memory 后，新增/扩容类写入会被保护性拒绝；先删除或迁移数据并确认内存恢复，再由 controller 清除标志。
 - Query 没有通用配置内容认证证明；需要共识读取时使用 update。固定身份 delegation 的证书验证应交由支持 IC canister signature 的客户端完成。
+
+公开可见性不授予消耗 namespace gas 的权限；VetKD 公钥调用仍要求 namespace 角色或现有 setting 授权。
+
+### 有界 ACL 迁移与 Rust 客户端
+
+`admin_migrate_legacy_namespace_acls_page(prev, scan_limit)` 每次最多扫描 100 个 namespace，返回 `{ items; next_cursor }`；items 是本次迁移的名称。即使 items 为空，也要继续使用 next_cursor，直到其为空。旧迁移接口在总 namespace 数超过 1000 时要求使用分页版本。
+
+Rust `build_agent` 默认保留 IC root key 并验证 query 签名，包括 HTTP host。仅本地 replica 使用显式 `build_local_agent`。`setting_get_consensus` 用 update 读取配置；常规查询保留 query 速度。SDK 还提供 `namespace_get_info_v2`、成员/固定身份分页和 `namespace_list_setting_keys_v2`。
+
 
 ## License
 

@@ -20,10 +20,26 @@ type CreateSettingOutput = record {
   created_at : nat64;
   version : nat32;
 };
+// A delegation from one key to another.
+//
+// If key A signs a delegation containing key B, then key B may be used to
+// authenticate as key A's corresponding principal(s).
 type Delegation = record {
+  // The kinds of requests this delegation permits.
+  permissions : opt DelegationPermissions;
+  // The delegated-to key.
   pubkey : blob;
+  // If present, this delegation only applies to requests sent to one of these canisters.
   targets : opt vec principal;
+  // A nanosecond timestamp after which this delegation is no longer valid.
   expiration : nat64;
+};
+// The kinds of requests a [`Delegation`] permits.
+type DelegationPermissions = variant {
+  // All request types are permitted.
+  all;
+  // Only query calls and `read_state` requests are permitted.
+  queries;
 };
 type ECDHInput = record { public_key : blob; nonce : blob };
 type ECDHOutput = record { public_key : blob; payload : blob };
@@ -32,6 +48,7 @@ type InitArgs = record {
   ecdsa_key_name : text;
   governance_canister : opt principal;
   name : text;
+  vetkd_context_version : opt nat8;
   schnorr_key_name : text;
   allowed_apis : vec text;
   subnet_size : nat64;
@@ -44,9 +61,11 @@ type NamespaceDelegatorsInput = record {
   name : text;
 };
 type NamespaceInfo = record {
+  user_count : nat32;
   status : int8;
   updated_at : nat64;
   session_expires_in_ms : nat64;
+  manager_count : nat32;
   managers : vec principal;
   payload_bytes_total : nat64;
   desc : text;
@@ -56,30 +75,47 @@ type NamespaceInfo = record {
   auditors : vec principal;
   fixed_id_names : vec record { text; vec principal };
   users : vec principal;
+  fixed_delegator_count : nat32;
   visibility : nat8;
   gas_balance : nat;
+  auditor_count : nat32;
 };
 type PublicKeyInput = record { ns : text; derivation_path : vec blob };
 type PublicKeyOutput = record { public_key : blob; chain_code : blob };
 type Result = variant { Ok; Err : text };
 type Result_1 = variant { Ok : NamespaceInfo; Err : text };
-type Result_10 = variant { Ok : vec record { principal; blob }; Err : text };
-type Result_11 = variant { Ok : SignInResponse; Err : text };
-type Result_12 = variant { Ok : nat; Err : text };
-type Result_13 = variant { Ok : CreateSettingOutput; Err : text };
-type Result_14 = variant { Ok : SettingInfo; Err : text };
-type Result_15 = variant { Ok : SettingArchivedPayload; Err : text };
-type Result_16 = variant { Ok : StateInfo; Err : text };
-type Result_17 = variant { Ok : text; Err : text };
+type Result_10 = variant { Ok : principal; Err : text };
+type Result_11 = variant { Ok : bool; Err : text };
+type Result_12 = variant { Ok : vec text; Err : text };
+type Result_13 = variant { Ok : vec principal; Err : text };
+type Result_14 = variant { Ok : vec record { principal; blob }; Err : text };
+type Result_15 = variant { Ok : SignInResponse; Err : text };
+type Result_16 = variant { Ok : nat; Err : text };
+type Result_17 = variant { Ok : CreateSettingOutput; Err : text };
+type Result_18 = variant { Ok : SettingInfo; Err : text };
+type Result_19 = variant { Ok : SettingArchivedPayload; Err : text };
 type Result_2 = variant { Ok : vec NamespaceInfo; Err : text };
-type Result_3 = variant { Ok : ECDHOutput; Err : text };
-type Result_4 = variant { Ok : PublicKeyOutput; Err : text };
-type Result_5 = variant { Ok : blob; Err : text };
-type Result_6 = variant { Ok : SignedDelegation; Err : text };
-type Result_7 = variant { Ok : vec principal; Err : text };
-type Result_8 = variant { Ok : principal; Err : text };
-type Result_9 = variant { Ok : bool; Err : text };
-type SchnorrAlgorithm = variant { ed25519; bip340secp256k1 };
+type Result_20 = variant { Ok : StateInfo; Err : text };
+type Result_21 = variant { Ok : text; Err : text };
+type Result_3 = variant { Ok : nat64; Err : text };
+type Result_4 = variant { Ok : ScanPage; Err : text };
+type Result_5 = variant { Ok : ECDHOutput; Err : text };
+type Result_6 = variant { Ok : PublicKeyOutput; Err : text };
+type Result_7 = variant { Ok : blob; Err : text };
+type Result_8 = variant { Ok : SignedDelegation; Err : text };
+type Result_9 = variant { Ok : vec principal; Err : text };
+// A bounded scan page. Continue while `next_cursor` is present, even when no
+// matching items were returned. The cursor denotes the last scanned record.
+type ScanPage = record { next_cursor : opt text; items : vec text };
+// # Schnorr Algorithm.
+//
+// See [`SchnorrKeyId::algorithm`].
+type SchnorrAlgorithm = variant {
+  // ed25519.
+  ed25519;
+  // BIP-340 secp256k1.
+  bip340secp256k1;
+};
 type SettingArchivedPayload = record {
   dek : opt blob;
   version : nat32;
@@ -115,8 +151,12 @@ type SignDelegationInput = record {
 };
 type SignIdentityInput = record { ns : text; audience : text };
 type SignInResponse = record {
+  // The user canister public key. This key is used to derive the user principal.
   user_key : blob;
+  // The seed component used to derive the user key.
   seed : blob;
+  // The session expiration time in nanoseconds since the UNIX epoch. This is the time at which
+  // the delegation will no longer be valid.
   expiration : nat64;
 };
 type SignInput = record {
@@ -124,13 +164,21 @@ type SignInput = record {
   derivation_path : vec blob;
   message : blob;
 };
-type SignedDelegation = record { signature : blob; delegation : Delegation };
+// SignedDelegation is a [`Delegation`] that has been signed by an [`Identity`](https://docs.rs/ic-agent/latest/ic_agent/trait.Identity.html).
+type SignedDelegation = record {
+  // The signature for the delegation.
+  signature : blob;
+  // The signed delegation.
+  delegation : Delegation;
+};
 type StateInfo = record {
   freezing_threshold : nat64;
   ecdsa_key_name : text;
   managers : vec principal;
   governance_canister : opt principal;
   name : text;
+  vetkd_context_version : nat8;
+  low_wasm_memory : bool;
   auditors : vec principal;
   schnorr_secp256k1_public_key : opt PublicKeyOutput;
   ecdsa_public_key : opt PublicKeyOutput;
@@ -164,69 +212,100 @@ type UpgradeArgs = record {
   freezing_threshold : opt nat64;
   governance_canister : opt principal;
   name : opt text;
+  vetkd_context_version : opt nat8;
   subnet_size : opt nat64;
+  clear_governance_canister : opt bool;
+  // Explicit opt-in for deployments upgrading directly from the legacy
+  // monolithic namespace store. Current deployments must leave this false.
+  migrate_legacy_namespaces : opt bool;
+  vetkd_key_name : opt text;
 };
 service : (opt InstallArgs) -> {
   admin_add_allowed_apis : (vec text) -> (Result);
   admin_add_auditors : (vec principal) -> (Result);
   admin_add_managers : (vec principal) -> (Result);
+  admin_clear_low_wasm_memory : () -> (Result);
   admin_create_namespace : (CreateNamespaceInput) -> (Result_1);
   admin_list_namespace : (opt text, opt nat32) -> (Result_2) query;
+  admin_migrate_legacy_namespace_acls : (nat32) -> (Result_3);
+  // Scans at most `scan_limit` namespaces. Continue with next_cursor even when items is empty.
+  admin_migrate_legacy_namespace_acls_page : (opt text, nat32) -> (Result_4);
+  // Incrementally moves legacy monolithic setting records into split metadata
+  // and payload stable maps. Re-run until it returns zero.
+  admin_migrate_legacy_settings : (nat32) -> (Result_3);
+  admin_recover_namespace_managers : (text, vec principal) -> (Result);
   admin_remove_allowed_apis : (vec text) -> (Result);
   admin_remove_auditors : (vec principal) -> (Result);
   admin_remove_managers : (vec principal) -> (Result);
-  ecdh_cose_encrypted_key : (SettingPath, ECDHInput) -> (Result_3);
-  ecdsa_public_key : (opt PublicKeyInput) -> (Result_4) query;
-  ecdsa_sign : (SignInput) -> (Result_5);
-  get_delegation : (blob, blob, nat64) -> (Result_6) query;
+  // ecdh_encrypted_cose_key returns a permanent partial KEK encrypted with ECDH.
+  // It should be used with a local partial key to derive a full KEK.
+  ecdh_cose_encrypted_key : (SettingPath, ECDHInput) -> (Result_5);
+  ecdsa_public_key : (opt PublicKeyInput) -> (Result_6) query;
+  ecdsa_sign : (SignInput) -> (Result_7);
+  get_delegation : (blob, blob, nat64) -> (Result_8) query;
   namespace_add_auditors : (text, vec principal) -> (Result);
-  namespace_add_delegator : (NamespaceDelegatorsInput) -> (Result_7);
+  namespace_add_delegator : (NamespaceDelegatorsInput) -> (Result_9);
   namespace_add_managers : (text, vec principal) -> (Result);
   namespace_add_users : (text, vec principal) -> (Result);
   namespace_delete : (text) -> (Result);
-  namespace_get_delegators : (text, text) -> (Result_7) query;
-  namespace_get_fixed_identity : (text, text) -> (Result_8) query;
+  namespace_get_delegators : (text, text) -> (Result_9) query;
+  namespace_get_fixed_identity : (text, text) -> (Result_10) query;
   namespace_get_info : (text) -> (Result_1) query;
-  namespace_is_member : (text, text, principal) -> (Result_9) query;
-  namespace_list_setting_keys : (text, bool, opt principal) -> (
-      Result_10,
+  namespace_get_info_v2 : (text, bool) -> (Result_1) query;
+  namespace_is_member : (text, text, principal) -> (Result_11) query;
+  namespace_list_fixed_identity_names : (text, opt text, opt nat32) -> (
+      Result_12,
     ) query;
+  namespace_list_members : (text, text, opt principal, opt nat32) -> (
+      Result_13,
+    ) query;
+  namespace_list_setting_keys : (text, bool, opt principal) -> (
+      Result_14,
+    ) query;
+  namespace_list_setting_keys_v2 : (
+      text,
+      bool,
+      opt principal,
+      opt record { principal; blob },
+      opt nat32,
+    ) -> (Result_14) query;
+  namespace_rebuild_payload_bytes : (text) -> (Result_3);
   namespace_remove_auditors : (text, vec principal) -> (Result);
   namespace_remove_delegator : (NamespaceDelegatorsInput) -> (Result);
   namespace_remove_managers : (text, vec principal) -> (Result);
   namespace_remove_users : (text, vec principal) -> (Result);
-  namespace_sign_delegation : (SignDelegationInput) -> (Result_11);
-  namespace_top_up : (text, nat) -> (Result_12);
+  namespace_sign_delegation : (SignDelegationInput) -> (Result_15);
+  namespace_top_up : (text, nat) -> (Result_16);
   namespace_update_info : (UpdateNamespaceInput) -> (Result);
   schnorr_public_key : (SchnorrAlgorithm, opt PublicKeyInput) -> (
-      Result_4,
+      Result_6,
     ) query;
-  schnorr_sign : (SchnorrAlgorithm, SignInput) -> (Result_5);
-  schnorr_sign_identity : (SchnorrAlgorithm, SignIdentityInput) -> (Result_5);
+  schnorr_sign : (SchnorrAlgorithm, SignInput) -> (Result_7);
+  schnorr_sign_identity : (SchnorrAlgorithm, SignIdentityInput) -> (Result_7);
   setting_add_readers : (SettingPath, vec principal) -> (Result);
-  setting_create : (SettingPath, CreateSettingInput) -> (Result_13);
+  setting_create : (SettingPath, CreateSettingInput) -> (Result_17);
   setting_delete : (SettingPath) -> (Result);
-  setting_get : (SettingPath) -> (Result_14) query;
-  setting_get_archived_payload : (SettingPath) -> (Result_15) query;
-  setting_get_info : (SettingPath) -> (Result_14) query;
+  setting_get : (SettingPath) -> (Result_18) query;
+  setting_get_archived_payload : (SettingPath) -> (Result_19) query;
+  setting_get_info : (SettingPath) -> (Result_18) query;
   setting_remove_readers : (SettingPath, vec principal) -> (Result);
-  setting_update_info : (SettingPath, UpdateSettingInfoInput) -> (Result_13);
+  setting_update_info : (SettingPath, UpdateSettingInfoInput) -> (Result_17);
   setting_update_payload : (SettingPath, UpdateSettingPayloadInput) -> (
-      Result_13,
+      Result_17,
     );
-  state_get_info : () -> (Result_16) query;
-  validate2_admin_add_allowed_apis : (vec text) -> (Result_17);
-  validate2_admin_add_auditors : (vec principal) -> (Result_17);
-  validate2_admin_add_managers : (vec principal) -> (Result_17);
-  validate2_admin_remove_allowed_apis : (vec text) -> (Result_17);
-  validate2_admin_remove_auditors : (vec principal) -> (Result_17);
-  validate2_admin_remove_managers : (vec principal) -> (Result_17);
+  state_get_info : () -> (Result_20) query;
+  validate2_admin_add_allowed_apis : (vec text) -> (Result_21);
+  validate2_admin_add_auditors : (vec principal) -> (Result_21);
+  validate2_admin_add_managers : (vec principal) -> (Result_21);
+  validate2_admin_remove_allowed_apis : (vec text) -> (Result_21);
+  validate2_admin_remove_auditors : (vec principal) -> (Result_21);
+  validate2_admin_remove_managers : (vec principal) -> (Result_21);
   validate_admin_add_allowed_apis : (vec text) -> (Result);
   validate_admin_add_auditors : (vec principal) -> (Result);
   validate_admin_add_managers : (vec principal) -> (Result);
   validate_admin_remove_allowed_apis : (vec text) -> (Result);
   validate_admin_remove_auditors : (vec principal) -> (Result);
   validate_admin_remove_managers : (vec principal) -> (Result);
-  vetkd_encrypted_key : (SettingPath, blob) -> (Result_5);
-  vetkd_public_key : (SettingPath) -> (Result_5);
+  vetkd_encrypted_key : (SettingPath, blob) -> (Result_7);
+  vetkd_public_key : (SettingPath) -> (Result_7);
 }

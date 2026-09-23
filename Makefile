@@ -6,7 +6,7 @@ BUILD_ENV := rust
 # .github/workflows/release.yml.
 WASM_RUSTFLAGS := --cfg=getrandom_backend="custom"
 
-.PHONY: lint fix test build-wasm build-wasm64 build-did
+.PHONY: lint fix test build-wasm build-wasm64 build-did bindings
 
 lint:
 	@cargo fmt --all -- --check
@@ -20,10 +20,10 @@ test:
 
 # cargo install ic-wasm
 build-wasm:
-	@RUSTFLAGS='$(WASM_RUSTFLAGS)' cargo build --release --target wasm32-unknown-unknown -p ic_cose_canister -p ic_wasm_canister
+	@RUSTFLAGS='$(WASM_RUSTFLAGS)' cargo build --locked --release --target wasm32-unknown-unknown -p ic_cose_canister -p ic_wasm_canister
 
 build-wasm64:
-	@RUSTFLAGS='$(WASM_RUSTFLAGS)' cargo +nightly build -Z build-std=std,panic_abort --target wasm64-unknown-unknown --release -p ic_cose_canister -p ic_wasm_canister
+	@RUSTFLAGS='$(WASM_RUSTFLAGS)' cargo +nightly build --locked -Z build-std=std,panic_abort --target wasm64-unknown-unknown --release -p ic_cose_canister -p ic_wasm_canister
 
 # cargo install candid-extractor
 # Depends on build-wasm: the .did is extracted from the built modules, so
@@ -31,4 +31,7 @@ build-wasm64:
 build-did: build-wasm
 	candid-extractor target/wasm32-unknown-unknown/release/ic_cose_canister.wasm > src/ic_cose_canister/ic_cose_canister.did
 	candid-extractor target/wasm32-unknown-unknown/release/ic_wasm_canister.wasm > src/ic_wasm_canister/ic_wasm_canister.did
-	dfx generate
+	python3 scripts/generate-bindings.py
+
+bindings:
+	python3 scripts/generate-bindings.py

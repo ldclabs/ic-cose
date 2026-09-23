@@ -89,8 +89,7 @@ Deploy the canister using the commands outlined in the respective component docu
 Regenerate bindings after deployment as needed:
 
 ```bash
-dfx generate ic_cose_canister
-dfx generate ic_wasm_canister
+make bindings
 ```
 
 Identities and keys used in examples are intended solely for local experimentation. Production clients must persist actual business paths, request IDs, and approved template hashes, while validating the Candid interface version of deployed canisters.

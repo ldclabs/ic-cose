@@ -29,7 +29,6 @@ fn unsupported_getrandom(_: &mut [u8]) -> Result<(), getrandom_02::Error> {
     Err(getrandom_02::Error::UNSUPPORTED)
 }
 
-static ANONYMOUS: Principal = Principal::anonymous();
 // NNS Cycles Minting Canister: "rkp4c-7iaaa-aaaaa-aaaca-cai"
 static CMC_PRINCIPAL: Principal = Principal::from_slice(&[0, 0, 0, 0, 0, 0, 0, 4, 1, 1]);
 const MILLISECONDS: u64 = 1_000_000;
@@ -85,21 +84,7 @@ fn is_provisioner() -> Result<(), String> {
     }
 }
 
-pub fn validate_principals(principals: &BTreeSet<Principal>) -> Result<(), String> {
-    if principals.is_empty() {
-        return Err("principals cannot be empty".to_string());
-    }
-    if principals.contains(&ANONYMOUS) {
-        return Err("anonymous user is not allowed".to_string());
-    }
-    if principals.len() > ic_cose_types::MAX_PRINCIPALS_PER_REQUEST {
-        return Err(format!(
-            "principals count exceeds the per-request limit {}",
-            ic_cose_types::MAX_PRINCIPALS_PER_REQUEST
-        ));
-    }
-    Ok(())
-}
+pub use ic_cose_types::validate_principals;
 
 fn extend_role_set(
     target: &mut BTreeSet<Principal>,

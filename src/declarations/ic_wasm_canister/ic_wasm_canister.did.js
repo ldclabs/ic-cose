@@ -66,7 +66,12 @@ export const idlFactory = ({ IDL }) => {
   });
   const Result_2 = IDL.Variant({ 'Ok' : IDL.Vec(IDL.Nat8), 'Err' : IDL.Text });
   const Result_3 = IDL.Variant({ 'Ok' : IDL.Nat64, 'Err' : IDL.Text });
-  const Result_4 = IDL.Variant({
+  const ScanPage = IDL.Record({
+    'next_cursor' : IDL.Opt(IDL.Vec(IDL.Nat8)),
+    'items' : IDL.Vec(IDL.Vec(IDL.Nat8)),
+  });
+  const Result_4 = IDL.Variant({ 'Ok' : ScanPage, 'Err' : IDL.Text });
+  const Result_5 = IDL.Variant({
     'Ok' : IDL.Vec(IDL.Vec(IDL.Nat8)),
     'Err' : IDL.Text,
   });
@@ -75,18 +80,18 @@ export const idlFactory = ({ IDL }) => {
     'canister' : IDL.Principal,
     'reply' : IDL.Opt(IDL.Vec(IDL.Nat8)),
   });
-  const Result_5 = IDL.Variant({
+  const Result_6 = IDL.Variant({
     'Ok' : IDL.Vec(BatchCallResult),
     'Err' : IDL.Text,
   });
-  const Result_6 = IDL.Variant({ 'Ok' : IDL.Nat, 'Err' : IDL.Text });
+  const Result_7 = IDL.Variant({ 'Ok' : IDL.Nat, 'Err' : IDL.Text });
   const TopupResult = IDL.Record({
     'deposited' : IDL.Nat,
     'balance_before' : IDL.Opt(IDL.Nat),
     'error' : IDL.Opt(IDL.Text),
     'canister' : IDL.Principal,
   });
-  const Result_7 = IDL.Variant({
+  const Result_8 = IDL.Variant({
     'Ok' : IDL.Vec(TopupResult),
     'Err' : IDL.Text,
   });
@@ -118,13 +123,13 @@ export const idlFactory = ({ IDL }) => {
     'memory_allocation' : IDL.Opt(IDL.Nat),
     'compute_allocation' : IDL.Opt(IDL.Nat),
   });
-  const Result_8 = IDL.Variant({ 'Ok' : IDL.Principal, 'Err' : IDL.Text });
+  const Result_9 = IDL.Variant({ 'Ok' : IDL.Principal, 'Err' : IDL.Text });
   const DeployWasmInput = IDL.Record({
     'args' : IDL.Opt(IDL.Vec(IDL.Nat8)),
     'name' : IDL.Text,
     'canister' : IDL.Principal,
   });
-  const Result_9 = IDL.Variant({ 'Ok' : IDL.Bool, 'Err' : IDL.Text });
+  const Result_10 = IDL.Variant({ 'Ok' : IDL.Bool, 'Err' : IDL.Text });
   const UpdateSettingsArgs = IDL.Record({
     'canister_id' : IDL.Principal,
     'settings' : CanisterSettings,
@@ -134,7 +139,7 @@ export const idlFactory = ({ IDL }) => {
     'canister' : IDL.Principal,
     'released_at' : IDL.Nat64,
   });
-  const Result_10 = IDL.Variant({ 'Ok' : ReleaseReceipt, 'Err' : IDL.Text });
+  const Result_11 = IDL.Variant({ 'Ok' : ReleaseReceipt, 'Err' : IDL.Text });
   const DeploymentInfo = IDL.Record({
     'args_hash' : IDL.Opt(IDL.Vec(IDL.Nat8)),
     'args_size' : IDL.Nat64,
@@ -148,7 +153,7 @@ export const idlFactory = ({ IDL }) => {
     'module_hash' : IDL.Opt(IDL.Vec(IDL.Nat8)),
     'wasm_hash' : IDL.Vec(IDL.Nat8),
   });
-  const Result_11 = IDL.Variant({
+  const Result_12 = IDL.Variant({
     'Ok' : IDL.Vec(DeploymentInfo),
     'Err' : IDL.Text,
   });
@@ -188,7 +193,7 @@ export const idlFactory = ({ IDL }) => {
     'expires_at' : IDL.Nat64,
     'wasm_name' : IDL.Text,
   });
-  const Result_12 = IDL.Variant({ 'Ok' : ProvisionReceipt, 'Err' : IDL.Text });
+  const Result_13 = IDL.Variant({ 'Ok' : ProvisionReceipt, 'Err' : IDL.Text });
   const InstallRequest = IDL.Record({
     'request_id' : IDL.Vec(IDL.Nat8),
     'provision_spec_hash' : IDL.Vec(IDL.Nat8),
@@ -247,11 +252,11 @@ export const idlFactory = ({ IDL }) => {
     'module_hash' : IDL.Opt(IDL.Vec(IDL.Nat8)),
     'reserved_cycles' : IDL.Nat,
   });
-  const Result_13 = IDL.Variant({
+  const Result_14 = IDL.Variant({
     'Ok' : CanisterStatusResult,
     'Err' : IDL.Text,
   });
-  const Result_14 = IDL.Variant({
+  const Result_15 = IDL.Variant({
     'Ok' : IDL.Vec(IDL.Principal),
     'Err' : IDL.Text,
   });
@@ -265,7 +270,7 @@ export const idlFactory = ({ IDL }) => {
     'module_hash' : IDL.Vec(IDL.Nat8),
     'wasm_size' : IDL.Nat64,
   });
-  const Result_15 = IDL.Variant({ 'Ok' : WasmMetadata, 'Err' : IDL.Text });
+  const Result_16 = IDL.Variant({ 'Ok' : WasmMetadata, 'Err' : IDL.Text });
   const StateInfo = IDL.Record({
     'provisioners' : IDL.Vec(IDL.Principal),
     'managers' : IDL.Vec(IDL.Principal),
@@ -282,7 +287,7 @@ export const idlFactory = ({ IDL }) => {
     'latest_version' : IDL.Vec(IDL.Tuple(IDL.Text, IDL.Vec(IDL.Nat8))),
     'committers' : IDL.Vec(IDL.Principal),
   });
-  const Result_16 = IDL.Variant({ 'Ok' : StateInfo, 'Err' : IDL.Text });
+  const Result_17 = IDL.Variant({ 'Ok' : StateInfo, 'Err' : IDL.Text });
   const WasmInfo = IDL.Record({
     'encoding' : WasmEncoding,
     'hash' : IDL.Vec(IDL.Nat8),
@@ -294,13 +299,18 @@ export const idlFactory = ({ IDL }) => {
     'module_hash' : IDL.Vec(IDL.Nat8),
     'wasm_size' : IDL.Nat64,
   });
-  const Result_17 = IDL.Variant({ 'Ok' : WasmInfo, 'Err' : IDL.Text });
-  const Result_18 = IDL.Variant({ 'Ok' : IDL.Vec(IDL.Nat8), 'Err' : IDL.Text });
-  const Result_19 = IDL.Variant({
+  const Result_18 = IDL.Variant({ 'Ok' : WasmInfo, 'Err' : IDL.Text });
+  const Result_19 = IDL.Variant({ 'Ok' : IDL.Vec(IDL.Nat8), 'Err' : IDL.Text });
+  const Result_20 = IDL.Variant({
     'Ok' : IDL.Vec(ProvisionReceipt),
     'Err' : IDL.Text,
   });
-  const Result_20 = IDL.Variant({
+  const ScanPage_1 = IDL.Record({
+    'next_cursor' : IDL.Opt(IDL.Vec(IDL.Nat8)),
+    'items' : IDL.Vec(ProvisionReceipt),
+  });
+  const Result_21 = IDL.Variant({ 'Ok' : ScanPage_1, 'Err' : IDL.Text });
+  const Result_22 = IDL.Variant({
     'Ok' : IDL.Vec(IDL.Tuple(IDL.Text, IDL.Vec(IDL.Nat8))),
     'Err' : IDL.Text,
   });
@@ -315,11 +325,11 @@ export const idlFactory = ({ IDL }) => {
     'state' : PoolCanisterState,
     'canister' : IDL.Principal,
   });
-  const Result_21 = IDL.Variant({
+  const Result_23 = IDL.Variant({
     'Ok' : IDL.Vec(PoolCanisterInfo),
     'Err' : IDL.Text,
   });
-  const Result_22 = IDL.Variant({
+  const Result_24 = IDL.Variant({
     'Ok' : IDL.Vec(ProvisionTemplateInfo),
     'Err' : IDL.Text,
   });
@@ -342,11 +352,11 @@ export const idlFactory = ({ IDL }) => {
     'subnet_policy_hash' : IDL.Vec(IDL.Nat8),
     'expires_at' : IDL.Nat64,
   });
-  const Result_23 = IDL.Variant({
+  const Result_25 = IDL.Variant({
     'Ok' : ReservationReceipt,
     'Err' : IDL.Text,
   });
-  const Result_24 = IDL.Variant({ 'Ok' : IDL.Text, 'Err' : IDL.Text });
+  const Result_26 = IDL.Variant({ 'Ok' : IDL.Text, 'Err' : IDL.Text });
   return IDL.Service({
     'admin_add_committers' : IDL.Func([IDL.Vec(IDL.Principal)], [Result], []),
     'admin_add_managers' : IDL.Func([IDL.Vec(IDL.Principal)], [Result], []),
@@ -367,23 +377,28 @@ export const idlFactory = ({ IDL }) => {
         [Result_3],
         [],
       ),
-    'admin_batch_call' : IDL.Func(
-        [IDL.Vec(IDL.Principal), IDL.Text, IDL.Opt(IDL.Vec(IDL.Nat8))],
+    'admin_archive_completed_requests_page' : IDL.Func(
+        [IDL.Nat64, IDL.Opt(IDL.Vec(IDL.Nat8)), IDL.Nat32],
         [Result_4],
         [],
       ),
-    'admin_batch_call_v2' : IDL.Func(
+    'admin_batch_call' : IDL.Func(
         [IDL.Vec(IDL.Principal), IDL.Text, IDL.Opt(IDL.Vec(IDL.Nat8))],
         [Result_5],
         [],
       ),
-    'admin_batch_topup' : IDL.Func([], [Result_6], []),
-    'admin_batch_topup_page' : IDL.Func(
-        [IDL.Opt(IDL.Principal), IDL.Opt(IDL.Nat32)],
-        [Result_7],
+    'admin_batch_call_v2' : IDL.Func(
+        [IDL.Vec(IDL.Principal), IDL.Text, IDL.Opt(IDL.Vec(IDL.Nat8))],
+        [Result_6],
         [],
       ),
-    'admin_batch_topup_v2' : IDL.Func([], [Result_7], []),
+    'admin_batch_topup' : IDL.Func([], [Result_7], []),
+    'admin_batch_topup_page' : IDL.Func(
+        [IDL.Opt(IDL.Principal), IDL.Opt(IDL.Nat32)],
+        [Result_8],
+        [],
+      ),
+    'admin_batch_topup_v2' : IDL.Func([], [Result_8], []),
     'admin_clear_low_wasm_memory' : IDL.Func([], [Result], []),
     'admin_clear_wasm_chunks' : IDL.Func([], [Result_3], []),
     'admin_clear_wasm_chunks_for' : IDL.Func([IDL.Principal], [Result_3], []),
@@ -394,7 +409,7 @@ export const idlFactory = ({ IDL }) => {
       ),
     'admin_create_canister' : IDL.Func(
         [IDL.Text, IDL.Opt(CanisterSettings), IDL.Opt(IDL.Vec(IDL.Nat8))],
-        [Result_8],
+        [Result_9],
         [],
       ),
     'admin_create_on' : IDL.Func(
@@ -404,7 +419,7 @@ export const idlFactory = ({ IDL }) => {
           IDL.Opt(CanisterSettings),
           IDL.Opt(IDL.Vec(IDL.Nat8)),
         ],
-        [Result_8],
+        [Result_9],
         [],
       ),
     'admin_deploy' : IDL.Func(
@@ -412,11 +427,11 @@ export const idlFactory = ({ IDL }) => {
         [Result],
         [],
       ),
-    'admin_forget_deployment' : IDL.Func([IDL.Principal], [Result_9], []),
+    'admin_forget_deployment' : IDL.Func([IDL.Principal], [Result_10], []),
     'admin_handoff_canister' : IDL.Func([UpdateSettingsArgs], [Result], []),
     'admin_migrate_legacy_wasm_artifact' : IDL.Func(
         [IDL.Vec(IDL.Nat8)],
-        [Result_9],
+        [Result_10],
         [],
       ),
     'admin_rebuild_log_index' : IDL.Func(
@@ -434,10 +449,10 @@ export const idlFactory = ({ IDL }) => {
         [Result],
         [],
       ),
-    'admin_refill_pool' : IDL.Func([IDL.Text], [Result_8], []),
+    'admin_refill_pool' : IDL.Func([IDL.Text], [Result_9], []),
     'admin_release_expired_reservation' : IDL.Func(
         [IDL.Vec(IDL.Nat8)],
-        [Result_10],
+        [Result_11],
         [],
       ),
     'admin_remove_committers' : IDL.Func(
@@ -460,115 +475,120 @@ export const idlFactory = ({ IDL }) => {
       ),
     'deployment_logs' : IDL.Func(
         [IDL.Text, IDL.Opt(IDL.Nat), IDL.Opt(IDL.Nat)],
-        [Result_11],
+        [Result_12],
         ['query'],
       ),
-    'ensure_deployment' : IDL.Func([DeploymentRequest], [Result_12], []),
-    'ensure_install' : IDL.Func([InstallRequest], [Result_12], []),
-    'get_canister_status' : IDL.Func([IDL.Opt(IDL.Principal)], [Result_13], []),
-    'get_deployed_canisters' : IDL.Func([], [Result_14], ['query']),
-    'get_deployed_canisters_info' : IDL.Func([], [Result_11], ['query']),
+    'ensure_deployment' : IDL.Func([DeploymentRequest], [Result_13], []),
+    'ensure_install' : IDL.Func([InstallRequest], [Result_13], []),
+    'get_canister_status' : IDL.Func([IDL.Opt(IDL.Principal)], [Result_14], []),
+    'get_deployed_canisters' : IDL.Func([], [Result_15], ['query']),
+    'get_deployed_canisters_info' : IDL.Func([], [Result_12], ['query']),
     'get_deployed_canisters_info_v2' : IDL.Func(
         [IDL.Opt(IDL.Principal), IDL.Opt(IDL.Nat32)],
-        [Result_11],
+        [Result_12],
         ['query'],
       ),
     'get_deployed_canisters_v2' : IDL.Func(
         [IDL.Opt(IDL.Principal), IDL.Opt(IDL.Nat32)],
-        [Result_14],
+        [Result_15],
         ['query'],
       ),
     'get_next_wasm_version' : IDL.Func(
         [IDL.Text, IDL.Vec(IDL.Nat8)],
-        [Result_15],
+        [Result_16],
         ['query'],
       ),
     'get_provision_receipt' : IDL.Func(
         [IDL.Vec(IDL.Nat8)],
-        [Result_12],
+        [Result_13],
         ['query'],
       ),
     'get_provision_template' : IDL.Func([IDL.Text], [Result_1], ['query']),
-    'get_state' : IDL.Func([], [Result_16], ['query']),
-    'get_wasm' : IDL.Func([IDL.Vec(IDL.Nat8)], [Result_17], ['query']),
+    'get_state' : IDL.Func([], [Result_17], ['query']),
+    'get_wasm' : IDL.Func([IDL.Vec(IDL.Nat8)], [Result_18], ['query']),
     'get_wasm_chunk' : IDL.Func(
         [IDL.Vec(IDL.Nat8), IDL.Nat64, IDL.Nat32],
-        [Result_18],
+        [Result_19],
         ['query'],
       ),
-    'get_wasm_metadata' : IDL.Func([IDL.Vec(IDL.Nat8)], [Result_15], ['query']),
+    'get_wasm_metadata' : IDL.Func([IDL.Vec(IDL.Nat8)], [Result_16], ['query']),
     'list_expired_reservations' : IDL.Func(
         [IDL.Opt(IDL.Vec(IDL.Nat8)), IDL.Opt(IDL.Nat32)],
-        [Result_19],
+        [Result_20],
+        ['query'],
+      ),
+    'list_expired_reservations_page' : IDL.Func(
+        [IDL.Opt(IDL.Vec(IDL.Nat8)), IDL.Nat32],
+        [Result_21],
         ['query'],
       ),
     'list_latest_wasm_versions' : IDL.Func(
         [IDL.Opt(IDL.Text), IDL.Opt(IDL.Nat32)],
-        [Result_20],
+        [Result_22],
         ['query'],
       ),
     'list_legacy_wasm_artifacts' : IDL.Func(
         [IDL.Opt(IDL.Vec(IDL.Nat8)), IDL.Opt(IDL.Nat32)],
-        [Result_4],
+        [Result_5],
         ['query'],
       ),
-    'list_provision_pool' : IDL.Func([IDL.Text], [Result_21], ['query']),
+    'list_provision_pool' : IDL.Func([IDL.Text], [Result_23], ['query']),
     'list_provision_pool_v2' : IDL.Func(
         [IDL.Text, IDL.Opt(IDL.Principal), IDL.Opt(IDL.Nat32)],
-        [Result_21],
+        [Result_23],
         ['query'],
       ),
-    'list_provision_templates' : IDL.Func([], [Result_22], ['query']),
+    'list_provision_templates' : IDL.Func([], [Result_24], ['query']),
     'list_provision_templates_v2' : IDL.Func(
         [IDL.Opt(IDL.Text), IDL.Opt(IDL.Nat32)],
-        [Result_22],
+        [Result_24],
         ['query'],
       ),
     'reconcile_provision_request' : IDL.Func(
         [IDL.Vec(IDL.Nat8)],
-        [Result_12],
+        [Result_13],
         [],
       ),
     'release_reservation' : IDL.Func(
         [IDL.Vec(IDL.Nat8), IDL.Principal],
-        [Result_10],
+        [Result_11],
         [],
       ),
-    'reserve_canister' : IDL.Func([ReserveRequest], [Result_23], []),
+    'reserve_canister' : IDL.Func([ReserveRequest], [Result_25], []),
     'validate_admin_add_committers' : IDL.Func(
         [IDL.Vec(IDL.Principal)],
-        [Result_24],
+        [Result_26],
         [],
       ),
     'validate_admin_add_managers' : IDL.Func(
         [IDL.Vec(IDL.Principal)],
-        [Result_24],
+        [Result_26],
         [],
       ),
     'validate_admin_add_provision_template' : IDL.Func(
         [ProvisionTemplate],
-        [Result_24],
+        [Result_26],
         [],
       ),
     'validate_admin_add_provisioners' : IDL.Func(
         [IDL.Vec(IDL.Principal)],
-        [Result_24],
+        [Result_26],
         [],
       ),
     'validate_admin_add_wasm' : IDL.Func(
         [AddWasmInput, IDL.Opt(IDL.Vec(IDL.Nat8))],
-        [Result_24],
+        [Result_26],
         [],
       ),
     'validate_admin_batch_call' : IDL.Func(
         [IDL.Vec(IDL.Principal), IDL.Text, IDL.Opt(IDL.Vec(IDL.Nat8))],
-        [Result_24],
+        [Result_26],
         [],
       ),
-    'validate_admin_batch_topup' : IDL.Func([], [Result_24], []),
+    'validate_admin_batch_topup' : IDL.Func([], [Result_26], []),
     'validate_admin_create_canister' : IDL.Func(
         [IDL.Text, IDL.Opt(CanisterSettings), IDL.Opt(IDL.Vec(IDL.Nat8))],
-        [Result_24],
+        [Result_26],
         [],
       ),
     'validate_admin_create_on' : IDL.Func(
@@ -578,47 +598,47 @@ export const idlFactory = ({ IDL }) => {
           IDL.Opt(CanisterSettings),
           IDL.Opt(IDL.Vec(IDL.Nat8)),
         ],
-        [Result_24],
+        [Result_26],
         [],
       ),
     'validate_admin_deploy' : IDL.Func(
         [DeployWasmInput, IDL.Opt(IDL.Vec(IDL.Nat8))],
-        [Result_24],
+        [Result_26],
         [],
       ),
     'validate_admin_reconcile_pool' : IDL.Func(
         [IDL.Text, IDL.Opt(IDL.Principal)],
-        [Result_24],
+        [Result_26],
         [],
       ),
     'validate_admin_remove_committers' : IDL.Func(
         [IDL.Vec(IDL.Principal)],
-        [Result_24],
+        [Result_26],
         [],
       ),
     'validate_admin_remove_managers' : IDL.Func(
         [IDL.Vec(IDL.Principal)],
-        [Result_24],
+        [Result_26],
         [],
       ),
     'validate_admin_remove_provision_template' : IDL.Func(
         [IDL.Text],
-        [Result_24],
+        [Result_26],
         [],
       ),
     'validate_admin_remove_provisioners' : IDL.Func(
         [IDL.Vec(IDL.Principal)],
-        [Result_24],
+        [Result_26],
         [],
       ),
     'validate_admin_remove_wasm' : IDL.Func(
         [IDL.Vec(IDL.Nat8)],
-        [Result_24],
+        [Result_26],
         [],
       ),
     'validate_admin_update_canister_settings' : IDL.Func(
         [UpdateSettingsArgs],
-        [Result_24],
+        [Result_26],
         [],
       ),
   });

@@ -4,7 +4,7 @@
 
 `ic_wasm_canister` is a WASM artifact repository and canister deployment management service on the Internet Computer. It provides module publishing, version lineage tracking, canister creation and upgrades, batch calls, and cycles replenishment, supporting crash-resilient provisioning workflows backed by immutable templates and pre-created canister pools.
 
-This document serves as a technical reference for frontend, backend, governance, and canister developers integrating against the current implementation in this repository. Definitive Candid interfaces are defined in [ic_wasm_canister.did](ic_wasm_canister.did), and runtime behaviors follow [src/api.rs](src/api.rs), [src/api_admin.rs](src/api_admin.rs), [src/api_provision.rs](src/api_provision.rs), and [src/store.rs](src/store.rs). Deployed instances may run different versions; always verify the target canister's Candid interface before integrating.
+This document serves as a technical reference for frontend, backend, governance, and canister developers integrating against the current implementation in this repository. Definitive Candid interfaces are defined in [ic_wasm_canister.did](ic_wasm_canister.did), and runtime behaviors follow [src/api.rs](src/api.rs), [src/api_admin.rs](src/api_admin.rs), [src/api_provision.rs](src/api_provision.rs), and [src/store/mod.rs](src/store/mod.rs). Deployed instances may run different versions; always verify the target canister's Candid interface before integrating.
 
 ## Table of Contents
 
@@ -51,7 +51,7 @@ This document serves as a technical reference for frontend, backend, governance,
 | Resource                                                              | Purpose                                                                             |
 | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | [ic_wasm_canister.did](ic_wasm_canister.did)                          | Complete method signatures, record types, and query annotations                     |
-| [src/declarations/ic_wasm_canister](../declarations/ic_wasm_canister) | JavaScript IDL and TypeScript types; regenerate via `dfx generate ic_wasm_canister` |
+| [src/declarations/ic_wasm_canister](../declarations/ic_wasm_canister) | JavaScript IDL and TypeScript types; regenerate via `make bindings` |
 | [Rust Types](../ic_cose_types/src/types/wasm.rs)                      | Template structures, hashing helpers, requests, and receipt types                   |
 | [src/management.rs](src/management.rs)                                | Canister creation, status inspection, and direct / chunked code installation        |
 | [dfx.json](../../dfx.json)                                            | Workspace build and local deployment configuration                                  |
@@ -487,7 +487,7 @@ Idempotency checks evaluate whether the target runs `expected_module_hash`. The 
 
 ### 10.1 TypeScript: Chunked Upload
 
-The following helper uploads artifacts in 1 MiB slices using `@dfinity/agent`. The actor must be authenticated with controller, manager, or committer privileges.
+The following helper uploads artifacts in 1 MiB slices using `@icp-sdk/core/agent`. The actor must be authenticated with controller, manager, or committer privileges.
 
 ```typescript
 import { createHash } from 'node:crypto';
@@ -535,7 +535,7 @@ If a commit response is lost, query the artifact hash before retrying; staged ch
 Actor Connection Pattern:
 
 ```typescript
-import { Actor, HttpAgent, type Identity } from '@dfinity/agent';
+import { Actor, HttpAgent, type Identity } from '@icp-sdk/core/agent';
 import { idlFactory } from '../declarations/ic_wasm_canister/ic_wasm_canister.did.js';
 import type { _SERVICE } from '../declarations/ic_wasm_canister/ic_wasm_canister.did';
 
@@ -684,7 +684,7 @@ Artifact metadata, chunks, version lineage, deployment indexes, log indexes, tem
 
 `admin_handoff_canister` and `admin_forget_deployment` persist unmanaged markers; receipt retries cannot re-adopt unmanaged targets. Retaking control requires explicit controller re-adoption via `admin_deploy`, `admin_reconcile_deployment`, or `admin_reconcile_pool`.
 
-Run PocketIC regression tests across upgrades: execute `make build-wasm`, export `POCKET_IC_BIN` to local PocketIC 13 server binary, and run `cargo test -p ic_wasm_canister --test canister_runtime -- --ignored`. Set `CANISTER_WASM_DIR` to test wasm64 release builds.
+Run PocketIC regression tests across upgrades: execute `make build-wasm`, export `POCKET_IC_BIN` to local PocketIC 16 server binary, and run `cargo test -p ic_wasm_canister --test canister_runtime -- --ignored`. Set `CANISTER_WASM_DIR` to test wasm64 release builds.
 
 ## 12. Error Handling and Integration Constraints
 
@@ -720,6 +720,17 @@ Integration constraints:
 - Successful requests can be compacted into request-id tombstones after 30 days; deployment logs are retained permanently.
 - When low memory triggers, creation and publishing endpoints reject calls; release, cleanup, and administrative recovery endpoints remain operational.
 - Direct publishing, chunk commits, and template approvals do not guarantee target deployment success; verify ensure receipts and application-level health endpoints.
+
+### Bounded request maintenance
+
+`list_expired_reservations_page(prev, scan_limit)` and `admin_archive_completed_requests_page(before_ms, prev, scan_limit)` return `{ items; next_cursor }`. Each call scans at most 1000 records, including non-matches. Continue until next_cursor is empty, even if items is empty; an archive page returns the archived request IDs. The 30-day retention rule is unchanged. Legacy scan endpoints require the paginated methods above 1000 requests.
+
+Run `make build-did` to extract interfaces and regenerate both canonical and example bindings with the maintained actor factory. Actor creation preserves a supplied agent's root key; local development must explicitly await `agent.fetchRootKey()` first.
+
+
+### Storage cycle measurements
+
+The ignored `storage_operations_report_cycle_costs` test reports cycles for 256 KiB / 1 MiB setting creation, update and deletion, and single-member ACL changes at 100 / 3999 members. Run it with `POCKET_IC_BIN=/path/to/pocket-ic-16 cargo test -p ic_wasm_canister --test canister_runtime storage_operations_report_cycle_costs -- --ignored --nocapture`. Set `CANISTER_WASM_DIR` to a separately built baseline to compare the same workload.
 
 ## License
 

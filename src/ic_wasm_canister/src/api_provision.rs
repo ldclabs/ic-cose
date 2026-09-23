@@ -290,10 +290,24 @@ fn list_expired_reservations(
     prev: Option<ByteArray<32>>,
     take: Option<u32>,
 ) -> Result<Vec<ProvisionReceipt>, String> {
+    store::provision::ensure_legacy_request_scan_bounded()?;
     Ok(store::provision::list_expired_reservations(
         ic_cdk::api::time() / MILLISECONDS,
         prev,
         take.unwrap_or(100).clamp(1, 1_000) as usize,
+    ))
+}
+
+/// Bounds scanned records, including non-matching requests. Follow next_cursor even on empty pages.
+#[ic_cdk::query(guard = "is_controller_or_manager")]
+fn list_expired_reservations_page(
+    prev: Option<ByteArray<32>>,
+    scan_limit: u32,
+) -> Result<ic_cose_types::types::ScanPage<ProvisionReceipt, ByteArray<32>>, String> {
+    Ok(store::provision::list_expired_reservations_page(
+        ic_cdk::api::time() / MILLISECONDS,
+        prev,
+        scan_limit.clamp(1, 1_000) as usize,
     ))
 }
 

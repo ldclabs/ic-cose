@@ -2,26 +2,18 @@ use ic_agent::{Agent, Identity};
 use ic_cose_types::format_error;
 use std::sync::Arc;
 
-/// Builds an [`Agent`] for the given host.
-///
-/// # Security
-///
-/// Query signature verification is **disabled**, so query responses are not
-/// authenticated: whoever serves the request can return arbitrary data for any
-/// query call. That matters for the query endpoints whose answers are trusted
-/// downstream — `ecdsa_public_key` and `schnorr_public_key` are used to verify
-/// signatures, and `namespace_get_fixed_identity` returns a principal used for
-/// authorization. Update calls (`ecdh_cose_encrypted_key`, `vetkd_*`, every
-/// write) go through consensus and are unaffected.
-///
-/// If your deployment needs verified queries, construct the [`Agent`] yourself
-/// without `with_verify_query_signatures(false)` and pass it to
-/// [`crate::client::Client::new`].
+pub(crate) fn agent_builder(
+    host: &str,
+    identity: Arc<dyn Identity>,
+) -> ic_agent::agent::AgentBuilder {
+    Agent::builder().with_url(host).with_arc_identity(identity)
+}
+
+/// Builds an agent with query signature verification and the pinned IC root key.
+/// Use [`build_local_agent`] explicitly for a local replica. Query signatures
+/// authenticate a replica's reply; use update calls when consensus is required.
 pub async fn build_agent(host: &str, identity: Arc<dyn Identity>) -> Result<Agent, String> {
-    let agent = Agent::builder()
-        .with_url(host)
-        .with_arc_identity(identity)
-        .with_verify_query_signatures(false);
+    let agent = agent_builder(host, identity);
 
     let agent = if host.starts_with("https://") {
         agent
@@ -32,10 +24,16 @@ pub async fn build_agent(host: &str, identity: Arc<dyn Identity>) -> Result<Agen
         agent.build().map_err(format_error)?
     };
 
-    if host.starts_with("http://") {
-        agent.fetch_root_key().await.map_err(format_error)?;
-    }
+    Ok(agent)
+}
 
+/// Builds an agent for a trusted local replica, fetching its development root key.
+/// Do not use this helper for mainnet or an untrusted endpoint.
+pub async fn build_local_agent(host: &str, identity: Arc<dyn Identity>) -> Result<Agent, String> {
+    let agent = agent_builder(host, identity)
+        .build()
+        .map_err(format_error)?;
+    agent.fetch_root_key().await.map_err(format_error)?;
     Ok(agent)
 }
 
@@ -53,8 +51,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn build_agent_reports_http_root_key_fetch_errors() {
-        let err = build_agent("http://127.0.0.1:9", Arc::new(AnonymousIdentity))
+    async fn build_agent_preserves_root_key_even_for_http() {
+        let agent = build_agent("http://127.0.0.1:9", Arc::new(AnonymousIdentity))
+            .await
+            .unwrap();
+        let default_agent = Agent::builder()
+            .with_url("http://127.0.0.1:9")
+            .build()
+            .unwrap();
+        assert_eq!(agent.read_root_key(), default_agent.read_root_key());
+    }
+
+    #[tokio::test]
+    async fn build_local_agent_reports_root_key_fetch_errors() {
+        let err = build_local_agent("http://127.0.0.1:9", Arc::new(AnonymousIdentity))
             .await
             .unwrap_err();
         assert!(!err.is_empty());

@@ -47,6 +47,9 @@ pub fn cose_sign1_from(
 ) -> Result<CoseSign1, String> {
     let cs1 = CoseSign1::from_slice(sign1_bytes)
         .map_err(|err| format!("invalid COSE sign1 token: {}", err))?;
+    cs1.protected
+        .ensure_crit_understood(&[])
+        .map_err(|err| format!("invalid COSE sign1 token: {err}"))?;
     let payload = cs1
         .payload
         .as_deref()
@@ -126,6 +129,23 @@ mod test {
         ecdsa.set_signature(vec![0; 64]).unwrap();
         let encoded = ecdsa.to_vec().unwrap();
         assert!(cose_sign1_from(&encoded, &[], &[verifying_key], &[]).is_err());
+    }
+
+    #[test]
+    fn sign1_rejects_unknown_critical_headers_with_valid_signatures() {
+        for label in [Label::Int(1000), Label::Text("application_rule".into())] {
+            let private = [7u8; 32];
+            let key = ed25519::SigningKey::from_bytes(&private).verifying_key();
+            let mut message = cose_sign1(b"payload".to_vec(), EdDSA, None).unwrap();
+            message.protected.set_crit(vec![label.clone()]);
+            message.protected.insert(label, true);
+            let bytes = message.prepare_signature(None, None, Some(b"aad")).unwrap();
+            message
+                .set_signature(ed25519::ed25519_sign(&private, &bytes).to_bytes())
+                .unwrap();
+            let encoded = message.to_vec().unwrap();
+            assert!(cose_sign1_from(&encoded, b"aad", &[], &[key]).is_err());
+        }
     }
 
     #[test]

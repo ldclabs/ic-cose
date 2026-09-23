@@ -9,9 +9,45 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dfinity/setup-dfx@main
+      - uses: Swatinem/rust-cache@v2
       - name: Run tests
         run: |
           cargo fmt --all -- --check
-          cargo clippy --verbose --workspace --all-targets --all-features -- -D warnings
-          cargo test --verbose --workspace --all-features -- --nocapture
+          cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+          cargo test --locked --workspace --all-features
+  runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - uses: dfinity/setup-dfx@main
+        with:
+          dfx-version: '0.32.0'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '11.7.0'
+      - name: Build canisters and verify generated interfaces
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo install candid-extractor --version 0.1.6 --locked
+          make build-did
+          git diff --exit-code -- src/ic_cose_canister/ic_cose_canister.did src/ic_wasm_canister/ic_wasm_canister.did src/declarations examples/vetkeys/declarations
+      - name: Install pinned PocketIC server
+        run: |
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/pocket-ic.gz" https://github.com/dfinity/pocketic/releases/download/16.0.0/pocket-ic-x86_64-linux.gz
+          echo "268ba79ec7fe9a563a575adf4983c69627093cce2711d142e476cdc7ad04249e  $RUNNER_TEMP/pocket-ic.gz" | sha256sum --check --strict
+          gzip -d "$RUNNER_TEMP/pocket-ic.gz"
+          chmod +x "$RUNNER_TEMP/pocket-ic"
+      - name: Run canister runtime regressions
+        env:
+          POCKET_IC_BIN: ${{ runner.temp }}/pocket-ic
+        run: cargo test --locked -p ic_wasm_canister --test canister_runtime -- --ignored
+      - name: Verify client factories and example bindings
+        working-directory: examples/vetkeys
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          node --test test/*.test.js

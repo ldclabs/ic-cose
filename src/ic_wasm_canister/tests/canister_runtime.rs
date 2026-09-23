@@ -1,5 +1,5 @@
 //! Run explicitly after building both canisters:
-//! POCKET_IC_BIN=/path/to/pocket-ic-13 cargo test -p ic_wasm_canister
+//! POCKET_IC_BIN=/path/to/pocket-ic-16 cargo test -p ic_wasm_canister
 //!   --test canister_runtime -- --ignored
 //! CANISTER_WASM_DIR selects a wasm64 release directory for the same tests.
 use candid::{utils::ArgumentEncoder, CandidType, Principal};
@@ -28,7 +28,7 @@ fn wasm(name: &str) -> Vec<u8> {
 fn replica() -> PocketIc {
     assert!(
         std::env::var_os("POCKET_IC_BIN").is_some(),
-        "set POCKET_IC_BIN to a PocketIC 13 server; tests do not download servers"
+        "set POCKET_IC_BIN to a PocketIC 16 server; tests do not download servers"
     );
     PocketIcBuilder::new()
         .with_nns_subnet()
@@ -88,7 +88,7 @@ struct WasmInit {
 }
 
 #[test]
-#[ignore = "requires built Wasm files and a local PocketIC 13 server"]
+#[ignore = "requires built Wasm files and a local PocketIC 16 server"]
 fn delegation_certification_and_stable_state_survive_upgrade() {
     let pic = replica();
     let caller = Principal::from_slice(&[1, 2, 3]);
@@ -213,7 +213,7 @@ fn delegation_certification_and_stable_state_survive_upgrade() {
 }
 
 #[test]
-#[ignore = "requires built Wasm files and a local PocketIC 13 server"]
+#[ignore = "requires built Wasm files and a local PocketIC 16 server"]
 fn provisioning_handoff_stays_forgotten_after_upgrade_and_owner_retry() {
     let pic = replica();
     let controller = Principal::from_slice(&[1, 2, 3]);
@@ -341,4 +341,351 @@ fn provisioning_handoff_stays_forgotten_after_upgrade_and_owner_retry() {
     assert!(deployed.is_empty());
     let metadata: WasmMetadata = query(&pic, id, controller, "get_wasm_metadata", (hash,)).unwrap();
     assert_eq!(metadata.module_hash, hash);
+}
+
+// Minimal local wallet fixture: forwards the top-up arguments with attached cycles.
+fn fund_namespace(pic: &PocketIc, target: Principal, caller: Principal, namespace: &str) {
+    let target_bytes = target
+        .as_slice()
+        .iter()
+        .map(|b| format!("\\{b:02x}"))
+        .collect::<String>();
+    let module = wat::parse_str(format!(
+        r#"(module
+      (import "ic0" "msg_arg_data_size" (func $size (result i32)))
+      (import "ic0" "msg_arg_data_copy" (func $copy (param i32 i32 i32)))
+      (import "ic0" "msg_reply_data_append" (func $append (param i32 i32)))
+      (import "ic0" "msg_reply" (func $reply))
+      (import "ic0" "call_new" (func $new (param i32 i32 i32 i32 i32 i32 i32 i32)))
+      (import "ic0" "call_data_append" (func $args (param i32 i32)))
+      (import "ic0" "call_cycles_add128" (func $cycles (param i64 i64)))
+      (import "ic0" "call_perform" (func $perform (result i32)))
+      (memory (export "memory") 1)
+      (table 2 funcref)
+      (elem (i32.const 0) $done $failed)
+      (data (i32.const 0) "{target_bytes}")
+      (data (i32.const 64) "namespace_top_up")
+      (func $done (param i32)
+        (call $copy (i32.const 128) (i32.const 0) (call $size))
+        (call $append (i32.const 128) (call $size)) (call $reply))
+      (func $failed (param i32) unreachable)
+      (func (export "canister_update fund")
+        (call $copy (i32.const 128) (i32.const 0) (call $size))
+        (call $new (i32.const 0) (i32.const {target_len}) (i32.const 64) (i32.const 16)
+          (i32.const 0) (i32.const 0) (i32.const 1) (i32.const 0))
+        (call $args (i32.const 128) (call $size))
+        (call $cycles (i64.const 0) (i64.const 10000000000000))
+        (if (call $perform) (then unreachable))))"#,
+        target_len = target.as_slice().len()
+    ))
+    .unwrap();
+    let wallet = pic.create_canister_with_settings(Some(caller), None);
+    pic.add_cycles(wallet, 100_000_000_000_000);
+    pic.install_canister(wallet, module, vec![], Some(caller));
+    let received: u128 = update(
+        pic,
+        wallet,
+        caller,
+        "fund",
+        (namespace, 10_000_000_000_000u128),
+    )
+    .unwrap();
+    assert_eq!(received, 10_000_000_000_000);
+}
+
+#[test]
+#[ignore = "requires built Wasm files and a local PocketIC 16 server"]
+fn key_permissions_and_billing_work_for_external_setting_readers() {
+    use ic_cose_types::types::{setting::*, ECDHInput};
+    use ic_vetkeys::{DerivedPublicKey, EncryptedVetKey, TransportSecretKey};
+    let pic = PocketIcBuilder::new()
+        .with_application_subnet()
+        .with_test_threshold_keys_subnet()
+        .build();
+    let manager = Principal::from_slice(&[9, 1]);
+    let outsider = Principal::from_slice(&[9, 2]);
+    let reader = Principal::from_slice(&[9, 3]);
+    let id = pic.create_canister_with_settings(Some(manager), None);
+    pic.add_cycles(id, 100_000_000_000_000);
+    pic.install_canister(
+        id,
+        wasm("ic_cose_canister"),
+        candid::encode_one(Some(Init::Init(CoseInit {
+            name: "keys".into(),
+            ecdsa_key_name: "test_key_1".into(),
+            schnorr_key_name: "test_key_1".into(),
+            vetkd_key_name: "test_key_1".into(),
+            allowed_apis: BTreeSet::new(),
+            subnet_size: 0,
+            freezing_threshold: 0,
+            governance_canister: Some(manager),
+        })))
+        .unwrap(),
+        Some(manager),
+    );
+    let _: NamespaceInfo = update(
+        &pic,
+        id,
+        manager,
+        "admin_create_namespace",
+        (CreateNamespaceInput {
+            name: "keys".into(),
+            managers: BTreeSet::from([manager]),
+            ..Default::default()
+        },),
+    )
+    .unwrap();
+    fund_namespace(&pic, id, manager, "keys");
+    let balance = || -> u128 {
+        let info: NamespaceInfo =
+            query(&pic, id, manager, "namespace_get_info", ("keys",)).unwrap();
+        info.gas_balance
+    };
+    let before = balance();
+    let mut path = SettingPath {
+        ns: "keys".into(),
+        subject: Some(outsider),
+        key: vec![1].into(),
+        ..Default::default()
+    };
+    let transport = TransportSecretKey::from_seed([7u8; 32].into()).unwrap();
+    let transport_public: ByteBuf = transport.public_key().into();
+    for owned in [false, true] {
+        path.user_owned = owned;
+        let denied: Result<ByteBuf, _> = update(
+            &pic,
+            id,
+            outsider,
+            "vetkd_encrypted_key",
+            (&path, &transport_public),
+        );
+        assert!(denied.unwrap_err().contains("no permission"));
+        let denied: Result<ic_cose_types::types::ECDHOutput<ByteBuf>, _> = update(
+            &pic,
+            id,
+            outsider,
+            "ecdh_cose_encrypted_key",
+            (
+                &path,
+                ECDHInput {
+                    public_key: [1; 32].into(),
+                    nonce: [2; 12].into(),
+                },
+            ),
+        );
+        assert!(denied.unwrap_err().contains("no permission"));
+        assert_eq!(balance(), before);
+    }
+    path.user_owned = false;
+    let created: CreateSettingOutput = update(
+        &pic,
+        id,
+        manager,
+        "setting_create",
+        (&path, CreateSettingInput::default()),
+    )
+    .unwrap();
+    path.version = created.version;
+    let _: () = update(
+        &pic,
+        id,
+        manager,
+        "setting_add_readers",
+        (&path, BTreeSet::from([reader])),
+    )
+    .unwrap();
+    let public: ByteBuf = update(&pic, id, reader, "vetkd_public_key", (&path,)).unwrap();
+    let before_key = balance();
+    let encrypted: ByteBuf = update(
+        &pic,
+        id,
+        reader,
+        "vetkd_encrypted_key",
+        (&path, &transport_public),
+    )
+    .unwrap();
+    let successful_charge = before_key - balance();
+    let public = DerivedPublicKey::deserialize(&public).unwrap();
+    let encrypted = EncryptedVetKey::deserialize(&encrypted).unwrap();
+    encrypted
+        .decrypt_and_verify(&transport, &public, &path.key)
+        .unwrap();
+    assert!(balance() < before);
+    // A management rejection must remain a normal Result, including the refund callback.
+    let before_rejection = balance();
+    let invalid: Result<ByteBuf, _> = update(
+        &pic,
+        id,
+        reader,
+        "vetkd_encrypted_key",
+        (&path, ByteArray::from([0; 48])),
+    );
+    assert!(invalid.is_err());
+    assert!(
+        before_rejection - balance() < successful_charge,
+        "refunded request cycles must be credited back to the namespace"
+    );
+    let _: () = update(
+        &pic,
+        id,
+        manager,
+        "setting_remove_readers",
+        (&path, BTreeSet::from([reader])),
+    )
+    .unwrap();
+    let before = balance();
+    let denied: Result<ByteBuf, _> = update(&pic, id, reader, "vetkd_public_key", (&path,));
+    assert!(denied.unwrap_err().contains("no permission"));
+    assert_eq!(balance(), before);
+}
+
+#[test]
+#[ignore = "requires built Wasm files and a local PocketIC 16 server"]
+fn storage_operations_report_cycle_costs() {
+    use ic_cose_types::types::setting::*;
+    let pic = replica();
+    let manager = Principal::from_slice(&[8, 9]);
+    let id = pic.create_canister_with_settings(Some(manager), None);
+    pic.add_cycles(id, 100_000_000_000_000);
+    pic.install_canister(
+        id,
+        wasm("ic_cose_canister"),
+        candid::encode_one(Some(Init::Init(CoseInit {
+            name: "storage_benchmark".into(),
+            ecdsa_key_name: "test_key_1".into(),
+            schnorr_key_name: "test_key_1".into(),
+            vetkd_key_name: "test_key_1".into(),
+            allowed_apis: BTreeSet::new(),
+            subnet_size: 0,
+            freezing_threshold: 0,
+            governance_canister: Some(manager),
+        })))
+        .unwrap(),
+        Some(manager),
+    );
+    for _ in 0..20 {
+        pic.tick();
+    }
+    for size in [256 * 1024, 1024 * 1024] {
+        let namespace = format!("payload_{size}");
+        let _: NamespaceInfo = update(
+            &pic,
+            id,
+            manager,
+            "admin_create_namespace",
+            (CreateNamespaceInput {
+                name: namespace.clone(),
+                managers: BTreeSet::from([manager]),
+                ..Default::default()
+            },),
+        )
+        .unwrap();
+        let mut path = SettingPath {
+            ns: namespace.clone(),
+            subject: Some(manager),
+            key: vec![1].into(),
+            ..Default::default()
+        };
+        let before = pic.cycle_balance(id);
+        let created: CreateSettingOutput = update(
+            &pic,
+            id,
+            manager,
+            "setting_create",
+            (
+                &path,
+                CreateSettingInput {
+                    payload: Some(vec![1; size].into()),
+                    ..Default::default()
+                },
+            ),
+        )
+        .unwrap();
+        println!("CYCLES create_{size} {}", before - pic.cycle_balance(id));
+        path.version = created.version;
+        let before = pic.cycle_balance(id);
+        let updated: UpdateSettingOutput = update(
+            &pic,
+            id,
+            manager,
+            "setting_update_payload",
+            (
+                &path,
+                UpdateSettingPayloadInput {
+                    payload: Some(vec![2; size].into()),
+                    ..Default::default()
+                },
+            ),
+        )
+        .unwrap();
+        println!("CYCLES update_{size} {}", before - pic.cycle_balance(id));
+        path.version = updated.version;
+        let before = pic.cycle_balance(id);
+        let _: () = update(&pic, id, manager, "setting_delete", (&path,)).unwrap();
+        println!("CYCLES delete_{size} {}", before - pic.cycle_balance(id));
+        let info: NamespaceInfo =
+            query(&pic, id, manager, "namespace_get_info", (&namespace,)).unwrap();
+        assert_eq!(info.payload_bytes_total, 0);
+    }
+    for count in [100u32, 3_999] {
+        let namespace = format!("members_{count}");
+        let _: NamespaceInfo = update(
+            &pic,
+            id,
+            manager,
+            "admin_create_namespace",
+            (CreateNamespaceInput {
+                name: namespace.clone(),
+                managers: BTreeSet::from([manager]),
+                ..Default::default()
+            },),
+        )
+        .unwrap();
+        let members: Vec<_> = (0..count)
+            .map(|i| Principal::from_slice(&i.to_be_bytes()))
+            .collect();
+        for chunk in members.chunks(1_000) {
+            let _: () = update(
+                &pic,
+                id,
+                manager,
+                "namespace_add_users",
+                (&namespace, chunk.iter().copied().collect::<BTreeSet<_>>()),
+            )
+            .unwrap();
+        }
+        let extra = Principal::from_slice(&[77, 99]);
+        let before = pic.cycle_balance(id);
+        let _: () = update(
+            &pic,
+            id,
+            manager,
+            "namespace_add_users",
+            (&namespace, BTreeSet::from([extra])),
+        )
+        .unwrap();
+        println!("CYCLES acl_add_{count} {}", before - pic.cycle_balance(id));
+        let before = pic.cycle_balance(id);
+        let _: () = update(
+            &pic,
+            id,
+            manager,
+            "namespace_remove_users",
+            (&namespace, BTreeSet::from([extra])),
+        )
+        .unwrap();
+        println!(
+            "CYCLES acl_remove_{count} {}",
+            before - pic.cycle_balance(id)
+        );
+        let info: NamespaceInfo = query(
+            &pic,
+            id,
+            manager,
+            "namespace_get_info_v2",
+            (&namespace, false),
+        )
+        .unwrap();
+        assert_eq!(info.user_count, count);
+    }
 }

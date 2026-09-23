@@ -11,6 +11,14 @@ pub mod wasm;
 
 pub use setting::SettingPath;
 
+/// A bounded scan page. Continue while `next_cursor` is present, even when no
+/// matching items were returned. The cursor denotes the last scanned record.
+#[derive(CandidType, Clone, Debug, Deserialize, Serialize)]
+pub struct ScanPage<T, C> {
+    pub items: Vec<T>,
+    pub next_cursor: Option<C>,
+}
+
 pub type MapValue =
     BTreeMap<String, icrc_ledger_types::icrc::generic_metadata_value::MetadataValue>;
 

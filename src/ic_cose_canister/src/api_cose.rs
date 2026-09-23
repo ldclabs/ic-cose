@@ -9,7 +9,7 @@ use ic_cose_types::{
 };
 use serde_bytes::{ByteArray, ByteBuf};
 
-use crate::{is_authenticated, rand_bytes, store};
+use crate::{is_authenticated, store};
 
 #[ic_cdk::query]
 fn ecdsa_public_key(input: Option<PublicKeyInput>) -> Result<PublicKeyOutput, String> {
@@ -112,9 +112,7 @@ async fn ecdh_cose_encrypted_key(
         ))?;
     }
 
-    store::ns::charge_raw_rand(&spk.0)?;
-
-    let secret_key: [u8; 32] = rand_bytes().await?;
+    let secret_key: [u8; 32] = store::ns::random_bytes(&spk.0).await?;
     // `raw_rand` suspended this message, so authorization must be current
     // before deriving and returning key material.
     if !store::ns::has_kek_permission(&caller, &spk) {
@@ -139,18 +137,12 @@ async fn vetkd_public_key(path: SettingPath) -> Result<ByteBuf, String> {
     path.validate()?;
 
     let caller = ic_cdk::api::msg_caller();
-    store::ns::with(&path.ns, |ns| {
-        if !ns.can_read_namespace(&path.ns, &caller) {
-            Err(format!(
-                "vetkd_public_key: {} has no permission for {}",
-                caller.to_text(),
-                path.ns
-            ))?;
-        }
-        Ok(())
-    })?;
-
     let spk = store::SettingPathKey::from_path(path, caller);
+    if !store::ns::has_vetkd_public_key_permission(&caller, &spk) {
+        return Err(format!(
+            "vetkd_public_key: {caller} has no permission for {spk}"
+        ));
+    }
     let pk = store::ns::inner_vetkd_public_key(&spk).await?;
     Ok(ByteBuf::from(pk))
 }

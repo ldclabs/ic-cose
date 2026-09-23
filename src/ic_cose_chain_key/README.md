@@ -10,6 +10,11 @@ Candid entry points and owns no namespace, account, authorization, or storage.
   an unknown outcome by silently issuing another signing or derivation call.
 - vetKD accepts exact context/input bytes. Each caller owns its domain encoding.
 
-Cost estimates exclude instruction, storage, response-processing and query costs.
+`Cost` is a conservative call budget: the request payment plus `cost_call`,
+including maximum response-transmission and callback-execution reservations.
+It is not an actual bill and excludes unrelated instruction, storage and query costs.
+`cost_upper_bound` subtracts refunds of attached cycles; it cannot measure the
+system's automatic refunds of unused response/callback reservations. A `NotSent`
+failure costs zero; do not call `msg_cycles_refunded` in that pre-dispatch case.
 Persist request deduplication before awaiting management calls. A consumed Rust
 value alone does not provide durable deduplication or exactly-once execution.

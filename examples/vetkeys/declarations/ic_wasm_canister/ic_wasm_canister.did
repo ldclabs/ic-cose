@@ -1,35 +1,178 @@
-type AddWasmInput = record { name : text; wasm : blob; description : text };
+type AddWasmInput = record {
+  // Defaults to [`WasmEncoding::Raw`] when omitted.
+  encoding : opt WasmEncoding;
+  name : text;
+  wasm : blob;
+  description : text;
+};
+type BatchCallResult = record {
+  error : opt text;
+  canister : principal;
+  reply : opt blob;
+};
+// # Canister Settings
+//
+// For arguments of [`create_canister`](https://internetcomputer.org/docs/current/references/ic-interface-spec/#ic-create_canister),
+// [`update_settings`](https://internetcomputer.org/docs/current/references/ic-interface-spec/#ic-update_settings) and
+// [`provisional_create_canister_with_cycles`](https://internetcomputer.org/docs/current/references/ic-interface-spec/#ic-provisional_create_canister_with_cycles).
+//
+// All fields are `Option` types, allowing selective settings/updates.
 type CanisterSettings = record {
+  // Indicates a length of time in seconds.
+  // A canister is considered frozen whenever the IC estimates that the canister would be depleted of cycles
+  // before `freezing_threshold` seconds pass, given the canister's current size and the IC's current cost for storage.
+  //
+  // Must be a number between 0 and 2<sup>64</sup>-1, inclusively.
+  //
+  // Default value: `2_592_000` (approximately 30 days).
   freezing_threshold : opt nat;
+  // Indicates the threshold on the remaining wasm memory size of the canister in bytes.
+  //
+  // If the remaining wasm memory size of the canister is below the threshold, execution of the "on low wasm memory" hook is scheduled.
+  //
+  // Must be a number between 0 and 2<sup>64</sup>-1, inclusively.
+  //
+  // Default value: `0` (i.e., the "on low wasm memory" hook is never scheduled).
   wasm_memory_threshold : opt nat;
+  // A list of environment variables.
+  //
+  // These variables are accessible to the canister during execution
+  // and can be used to configure canister behavior without code changes.
+  // Each key must be unique.
+  //
+  // Default value: `null` (i.e., no environment variables provided).
+  environment_variables : opt vec EnvironmentVariable;
+  // A list of at most 10 principals.
+  //
+  // The principals in this list become the *controllers* of the canister.
+  //
+  // Default value: A list containing only the caller of the `create_canister` call.
   controllers : opt vec principal;
+  // Indicates the upper limit on [`CanisterStatusResult::reserved_cycles`] of the canister.
+  //
+  // Must be a number between 0 and 2<sup>128</sup>-1, inclusively.
+  //
+  // Default value: `5_000_000_000_000` (5 trillion cycles).
   reserved_cycles_limit : opt nat;
+  // Defines who is allowed to read the canister's logs.
+  //
+  // Default value: [`LogVisibility::Controllers`].
   log_visibility : opt LogVisibility;
+  // Indicates the upper limit on the memory used for canister logs (bytes).
+  //
+  // Default value: `4096`.
+  log_memory_limit : opt nat;
+  // Indicates the upper limit on the WASM heap memory (bytes) consumption of the canister.
+  //
+  // Must be a number between 0 and 2<sup>48</sup>-1 (i.e 256TB), inclusively.
+  //
+  // Default value: `3_221_225_472` (3 GiB).
   wasm_memory_limit : opt nat;
+  // Indicates how much memory (bytes) the canister is allowed to use in total.
+  //
+  // If the IC cannot provide the requested allocation,
+  // for example because it is oversubscribed, the call will be **rejected**.
+  //
+  // If set to 0, then memory growth of the canister will be best-effort and subject to the available memory on the IC.
+  //
+  // Must be a number between 0 and 2<sup>48</sup> (i.e 256TB), inclusively.
+  //
+  // Default value: `0`
   memory_allocation : opt nat;
+  // Indicates how much compute power should be guaranteed to this canister,
+  // expressed as a percentage of the maximum compute power that a single canister can allocate.
+  //
+  // If the IC cannot provide the requested allocation,
+  // for example because it is oversubscribed, the call will be **rejected**.
+  //
+  // Must be a number between 0 and 100, inclusively.
+  //
+  // Default value: `0`
   compute_allocation : opt nat;
 };
+// # Canister Status Result
+//
+// Result type of [`canister_status`](https://internetcomputer.org/docs/current/references/ic-interface-spec/#ic-canister_status).
 type CanisterStatusResult = record {
+  // The detailed metrics on the memory consumption of the canister.
   memory_metrics : MemoryMetrics;
+  // Status of the canister.
   status : CanisterStatusType;
+  // The memory size taken by the canister.
   memory_size : nat;
+  // Indicates whether a stopped canister is ready to be migrated to another subnet
+  // (i.e., whether it has empty queues and flushed streams).
+  ready_for_migration : bool;
+  // The canister version.
+  version : nat64;
+  // The cycle balance of the canister.
   cycles : nat;
+  // Canister settings in effect.
   settings : DefiniteCanisterSettings;
+  // Query statistics.
   query_stats : QueryStats;
+  // Amount of cycles burned per day.
   idle_cycles_burned_per_day : nat;
+  // A SHA256 hash of the module installed on the canister. This is null if the canister is empty.
   module_hash : opt blob;
+  // The reserved cycles balance of the canister.
+  //
+  // These are cycles that are reserved by the resource reservation mechanism on storage allocation.
+  // See also the [`CanisterSettings::reserved_cycles_limit`] parameter in canister settings.
   reserved_cycles : nat;
 };
-type CanisterStatusType = variant { stopped; stopping; running };
+// # Canister Status Type
+//
+// Status of a canister.
+//
+// See [`CanisterStatusResult::status`].
+type CanisterStatusType = variant {
+  // The canister is stopped.
+  stopped;
+  // The canister is stopping.
+  stopping;
+  // The canister is running.
+  running;
+};
 type ChainArgs = variant { Upgrade : UpgradeArgs; Init : InitArgs };
+// Assembles a wasm artifact from chunks staged with `admin_add_wasm_chunk`.
+//
+// Lets a module larger than the 2 MiB ingress limit be published, which a
+// single `admin_add_wasm` call cannot do.
+type CommitWasmChunksInput = record {
+  // Expected `SHA-256` of the assembled artifact.
+  artifact_hash : blob;
+  encoding : opt WasmEncoding;
+  name : text;
+  // Staged chunk hashes, in the order they concatenate.
+  chunk_hashes : vec blob;
+  description : text;
+};
+// # Definite Canister Settings
+//
+// Represents the actual settings in effect.
+//
+// For return of [`canister_status`](https://internetcomputer.org/docs/current/references/ic-interface-spec/#ic-canister_status).
 type DefiniteCanisterSettings = record {
+  // Time in seconds after which the canister is considered frozen.
   freezing_threshold : nat;
+  // Threshold on the remaining wasm memory size of the canister in bytes.
   wasm_memory_threshold : nat;
+  // A list of environment variables.
+  environment_variables : vec EnvironmentVariable;
+  // Controllers of the canister.
   controllers : vec principal;
+  // Upper limit on [`CanisterStatusResult::reserved_cycles`] of the canister.
   reserved_cycles_limit : nat;
+  // Visibility of canister logs.
   log_visibility : LogVisibility;
+  // Upper limit on the memory used for canister logs (bytes).
+  log_memory_limit : nat;
+  // Upper limit on the WASM heap memory (bytes) consumption of the canister.
   wasm_memory_limit : nat;
+  // Total memory (bytes) the canister is allowed to use.
   memory_allocation : nat;
+  // Guaranteed compute allocation as a percentage of the maximum compute power that a single canister can allocate.
   compute_allocation : nat;
 };
 type DeployWasmInput = record {
@@ -38,13 +181,38 @@ type DeployWasmInput = record {
   canister : principal;
 };
 type DeploymentInfo = record {
+  args_hash : opt blob;
+  args_size : nat64;
   args : opt blob;
   name : text;
   prev_hash : blob;
+  log_id : nat64;
   error : opt text;
   deploy_at : nat64;
   canister : principal;
+  module_hash : opt blob;
   wasm_hash : blob;
+};
+// Upgrades an already deployed canister under an exact previous module hash.
+type DeploymentRequest = record {
+  request_id : blob;
+  // `SHA-256(args)`.
+  args_hash : blob;
+  artifact_hash : blob;
+  expected_module_hash : blob;
+  // Compare-and-swap guard: the module hash the canister must currently run.
+  expected_prev_module_hash : blob;
+  args : blob;
+  canister : principal;
+  expires_at : nat64;
+  wasm_name : text;
+};
+// # Environment Variable.
+type EnvironmentVariable = record {
+  // Value of the environment variable.
+  value : text;
+  // Name of the environment variable.
+  name : text;
 };
 type InitArgs = record {
   governance_canister : opt principal;
@@ -52,49 +220,279 @@ type InitArgs = record {
   topup_threshold : nat;
   topup_amount : nat;
 };
+// Installs the template's module on the canister reserved for `request_id`.
+type InstallRequest = record {
+  request_id : blob;
+  // Opaque binding computed by the caller over its own provisioning spec.
+  // Recorded verbatim in the receipt so the caller can prove which spec was
+  // installed; this canister never interprets it.
+  provision_spec_hash : blob;
+  // Module hash the caller committed to. Must equal the template's
+  // `expected_module_hash`: an activation is paid for one exact hash, so
+  // installing anything else would deliver something nobody bought.
+  expected_module_hash : blob;
+  provision_template_hash : blob;
+  init_args : blob;
+  provision_template_id : text;
+  // Must equal the canister named by the reservation receipt.
+  canister : principal;
+  // `SHA-256(init_args)`.
+  init_args_hash : blob;
+  expires_at : nat64;
+};
+// # Log Visibility.
 type LogVisibility = variant {
+  // Controllers.
   controllers;
+  // Public.
   public;
+  // Allowed viewers.
   allowed_viewers : vec principal;
 };
+// # Memory Metrics
+//
+// Memory metrics of a canister.
+//
+// See [`CanisterStatusResult::memory_metrics`].
 type MemoryMetrics = record {
+  // Represents the memory occupied by the Wasm binary that is currently installed on the canister.
   wasm_binary_size : nat;
+  // Represents the memory used by the canister's log store.
+  log_memory_store_size : nat;
+  // Represents the memory used by the Wasm chunk store of the canister.
   wasm_chunk_store_size : nat;
+  // Represents the memory used for storing the canister's history.
   canister_history_size : nat;
+  // Represents the stable memory usage of the canister.
   stable_memory_size : nat;
+  // Represents the memory consumed by all snapshots that belong to this canister.
   snapshots_size : nat;
+  // Represents the Wasm memory usage of the canister, i.e. the heap memory used by the canister's WebAssembly code.
   wasm_memory_size : nat;
+  // Represents the memory usage of the global variables that the canister is using.
   global_memory_size : nat;
+  // Represents the memory used by custom sections defined by the canister.
   custom_sections_size : nat;
 };
+type PoolCanisterInfo = record {
+  request_id : opt blob;
+  created_at : nat64;
+  state : PoolCanisterState;
+  canister : principal;
+};
+// State of one pre-created canister inside a template's pool.
+type PoolCanisterState = variant {
+  // Free to be claimed by a reservation.
+  Available;
+  // Claimed by a request id, not installed yet.
+  Reserved;
+  // Carries an installed module and never returns to the pool.
+  Installed;
+};
+// Whether a template's pool may currently create another canister.
+type PoolStatus = variant {
+  // A create returned an unknown outcome: a canister may exist without this
+  // canister knowing its principal. Refill stays circuit-broken until
+  // governance reconciles.
+  CreateUnknown;
+  // No outstanding create; refill is allowed.
+  Idle;
+  // A create call is in flight. At most one per template.
+  CreatePending;
+};
+// Queryable outcome of one `request_id`, durable across response loss.
+type ProvisionReceipt = record {
+  request_id : blob;
+  updated_at : nat64;
+  args_hash : opt blob;
+  artifact_hash : blob;
+  provision_spec_hash : opt blob;
+  owner : principal;
+  provision_template_hash : opt blob;
+  created_at : nat64;
+  error : opt text;
+  stage : ProvisionStage;
+  // Module hash the canister ran before an upgrade.
+  prev_module_hash : opt blob;
+  // `None` for upgrades, which are not bound to a provisioning template.
+  provision_template_id : opt text;
+  canister : principal;
+  // Module hash reported by the management canister after installation.
+  module_hash : opt blob;
+  expires_at : nat64;
+  wasm_name : text;
+};
+// Canister settings applied to every canister provisioned from a template.
+//
+// Held immutably inside the template so a provisioner can never submit its own
+// controllers, allocations or limits.
+type ProvisionSettings = record {
+  freezing_threshold : opt nat64;
+  // Exactly [`PROVISION_CONTROLLERS`] principals: this canister and the
+  // platform governance canister. The issuer never becomes a controller.
+  controllers : vec principal;
+  reserved_cycles_limit : opt nat;
+  wasm_memory_limit : opt nat64;
+  memory_allocation : opt nat64;
+  compute_allocation : opt nat64;
+};
+type ProvisionStage = variant {
+  Failed;
+  Reserved;
+  Released;
+  InstallPending;
+  Installed;
+};
+// A governance-approved, immutable provisioning template.
+//
+// A provisioner may only name an approved template by `id` and `hash`; every
+// other provisioning parameter is loaded from here, so approving a template is
+// the governance act that fixes which module, settings, controllers, subnet and
+// creation budget allocated to a provisioned canister.
+type ProvisionTemplate = record {
+  id : text;
+  // Total cycles attached to canister creation, including the subnet's
+  // creation fee. The new canister receives the remainder.
+  initial_cycles : nat;
+  // Hash of the stored artifact bytes, as recorded by `add_wasm`.
+  artifact_hash : blob;
+  // Module hash the management canister must report after installation.
+  expected_module_hash : blob;
+  encoding : WasmEncoding;
+  // How many `Available` canisters this template keeps pre-created.
+  pool_size : nat16;
+  settings : ProvisionSettings;
+  // Subnet to create pool canisters on; `None` uses the local subnet.
+  subnet : opt principal;
+  max_init_args_bytes : nat32;
+  wasm_name : text;
+};
+type ProvisionTemplateInfo = record {
+  hash : blob;
+  installed : nat32;
+  "reserved" : nat32;
+  created_at : nat64;
+  created_by : principal;
+  available : nat32;
+  settings_hash : blob;
+  template : ProvisionTemplate;
+  pool_status : PoolStatus;
+  subnet_policy_hash : blob;
+  // Release tombstones currently retained for this template.
+  tombstones : nat32;
+};
+// # Query Stats
+//
+// Query statistics.
+//
+// See [`CanisterStatusResult::query_stats`].
 type QueryStats = record {
+  // Total number of payload bytes use for query call responses.
   response_payload_bytes_total : nat;
+  // Total number of instructions executed by query calls.
   num_instructions_total : nat;
+  // Total number of query calls.
   num_calls_total : nat;
+  // Total number of payload bytes use for query call requests.
   request_payload_bytes_total : nat;
 };
+type ReleaseReceipt = record {
+  request_id : blob;
+  canister : principal;
+  released_at : nat64;
+};
+type ReservationReceipt = record {
+  request_id : blob;
+  // Creation budget committed by the template, inclusive of creation fee.
+  initial_cycles : nat;
+  controllers : vec principal;
+  owner : principal;
+  provision_template_hash : blob;
+  provision_template_id : text;
+  settings_hash : blob;
+  canister : principal;
+  reserved_at : nat64;
+  subnet_policy_hash : blob;
+  expires_at : nat64;
+};
+// Claims one pre-created canister for `request_id`.
+type ReserveRequest = record {
+  request_id : blob;
+  provision_template_hash : blob;
+  provision_template_id : text;
+  // Request epoch in milliseconds. Rejected once elapsed, so a request that
+  // outlives its release tombstone can no longer be replayed.
+  expires_at : nat64;
+};
 type Result = variant { Ok; Err : text };
-type Result_1 = variant { Ok : vec blob; Err : text };
-type Result_2 = variant { Ok : nat; Err : text };
-type Result_3 = variant { Ok : principal; Err : text };
-type Result_4 = variant { Ok : vec DeploymentInfo; Err : text };
-type Result_5 = variant { Ok : CanisterStatusResult; Err : text };
-type Result_6 = variant { Ok : vec principal; Err : text };
-type Result_7 = variant { Ok : StateInfo; Err : text };
-type Result_8 = variant { Ok : WasmInfo; Err : text };
-type Result_9 = variant { Ok : text; Err : text };
+type Result_1 = variant { Ok : ProvisionTemplateInfo; Err : text };
+type Result_10 = variant { Ok : bool; Err : text };
+type Result_11 = variant { Ok : ReleaseReceipt; Err : text };
+type Result_12 = variant { Ok : vec DeploymentInfo; Err : text };
+type Result_13 = variant { Ok : ProvisionReceipt; Err : text };
+type Result_14 = variant { Ok : CanisterStatusResult; Err : text };
+type Result_15 = variant { Ok : vec principal; Err : text };
+type Result_16 = variant { Ok : WasmMetadata; Err : text };
+type Result_17 = variant { Ok : StateInfo; Err : text };
+type Result_18 = variant { Ok : WasmInfo; Err : text };
+type Result_19 = variant { Ok : blob; Err : text };
+type Result_2 = variant { Ok : blob; Err : text };
+type Result_20 = variant { Ok : vec ProvisionReceipt; Err : text };
+type Result_21 = variant { Ok : ScanPage_1; Err : text };
+type Result_22 = variant { Ok : vec record { text; blob }; Err : text };
+type Result_23 = variant { Ok : vec PoolCanisterInfo; Err : text };
+type Result_24 = variant { Ok : vec ProvisionTemplateInfo; Err : text };
+type Result_25 = variant { Ok : ReservationReceipt; Err : text };
+type Result_26 = variant { Ok : text; Err : text };
+type Result_3 = variant { Ok : nat64; Err : text };
+type Result_4 = variant { Ok : ScanPage; Err : text };
+type Result_5 = variant { Ok : vec blob; Err : text };
+type Result_6 = variant { Ok : vec BatchCallResult; Err : text };
+type Result_7 = variant { Ok : nat; Err : text };
+type Result_8 = variant { Ok : vec TopupResult; Err : text };
+type Result_9 = variant { Ok : principal; Err : text };
+// A bounded scan page. Continue while `next_cursor` is present, even when no
+// matching items were returned. The cursor denotes the last scanned record.
+type ScanPage = record { next_cursor : opt blob; items : vec blob };
+// A bounded scan page. Continue while `next_cursor` is present, even when no
+// matching items were returned. The cursor denotes the last scanned record.
+type ScanPage_1 = record {
+  next_cursor : opt blob;
+  items : vec ProvisionReceipt;
+};
 type StateInfo = record {
+  provisioners : vec principal;
   managers : vec principal;
   governance_canister : opt principal;
   name : text;
+  low_wasm_memory : bool;
+  topup_threshold : nat;
+  latest_version_total : nat64;
+  topup_amount : nat;
   deployment_logs : nat64;
   deployed_total : nat64;
   wasm_total : nat64;
+  latest_version_truncated : bool;
   latest_version : vec record { text; blob };
   committers : vec principal;
 };
+type TopupResult = record {
+  deposited : nat;
+  balance_before : opt nat;
+  error : opt text;
+  canister : principal;
+};
+// Argument type of [`update_settings`]
+//
+// # Note
+//
+// This type is a reduced version of [`ic_management_canister_types::UpdateSettingsArgs`].
+//
+// The `sender_canister_version` field is removed as it is set automatically in [`update_settings`].
 type UpdateSettingsArgs = record {
+  // Canister ID.
   canister_id : principal;
+  // See [`CanisterSettings`].
   settings : CanisterSettings;
 };
 type UpgradeArgs = record {
@@ -103,51 +501,202 @@ type UpgradeArgs = record {
   token_expiration : opt nat64;
   topup_threshold : opt nat;
   topup_amount : opt nat;
+  clear_governance_canister : opt bool;
 };
+// How the stored wasm artifact bytes are encoded.
+//
+// The distinction matters because `artifact_hash` covers the bytes this
+// canister stores and transfers, while `module_hash` covers what the management
+// canister reports as installed. For [`WasmEncoding::Gzip`] the two must never
+// be assumed equal.
+type WasmEncoding = variant { Raw; Gzip };
 type WasmInfo = record {
+  // Encoding of `wasm`. For `Gzip`, `hash` is the artifact hash and must not
+  // be assumed equal to the module hash reported once installed.
+  encoding : WasmEncoding;
   hash : blob;
   name : text;
   wasm : blob;
   description : text;
   created_at : nat64;
   created_by : principal;
+  // SHA-256 of the raw Wasm module after decoding `encoding`.
+  module_hash : blob;
+  wasm_size : nat64;
+};
+type WasmMetadata = record {
+  encoding : WasmEncoding;
+  hash : blob;
+  name : text;
+  description : text;
+  created_at : nat64;
+  created_by : principal;
+  module_hash : blob;
+  wasm_size : nat64;
 };
 service : (opt ChainArgs) -> {
   admin_add_committers : (vec principal) -> (Result);
   admin_add_managers : (vec principal) -> (Result);
+  // Approves an immutable provisioning template.
+  //
+  // This is the governance act that fixes which module, settings, controllers,
+  // subnet and creation budget a provisioned canister gets: a provisioner can
+  // afterwards only name the template by id and hash.
+  admin_add_provision_template : (ProvisionTemplate) -> (Result_1);
+  // Grants the least-privilege provisioning role.
+  //
+  // A provisioner may only reserve, install and release canisters from approved
+  // templates; it cannot manage roles, publish modules or deploy an arbitrary
+  // wasm, so this can be granted to another canister without handing over the
+  // repository.
+  admin_add_provisioners : (vec principal) -> (Result);
   admin_add_wasm : (AddWasmInput, opt blob) -> (Result);
-  admin_batch_call : (vec principal, text, opt blob) -> (Result_1);
-  admin_batch_topup : () -> (Result_2);
-  admin_create_canister : (text, opt CanisterSettings, opt blob) -> (Result_3);
+  // Stages one chunk of a wasm artifact for the caller.
+  //
+  // Publishing a module larger than the 2 MiB ingress limit is impossible in a
+  // single `admin_add_wasm` call; chunks are staged here and assembled by
+  // `admin_commit_wasm_chunks`.
+  admin_add_wasm_chunk : (blob) -> (Result_2);
+  // Compacts old successful request receipts into permanent request-id
+  // tombstones. Callers should retain receipts externally before archiving.
+  admin_archive_completed_requests : (nat64, nat32) -> (Result_3);
+  // Archives matching requests from a bounded scan, returning the last scanned cursor.
+  admin_archive_completed_requests_page : (nat64, opt blob, nat32) -> (
+      Result_4,
+    );
+  admin_batch_call : (vec principal, text, opt blob) -> (Result_5);
+  admin_batch_call_v2 : (vec principal, text, opt blob) -> (Result_6);
+  admin_batch_topup : () -> (Result_7);
+  admin_batch_topup_page : (opt principal, opt nat32) -> (Result_8);
+  admin_batch_topup_v2 : () -> (Result_8);
+  admin_clear_low_wasm_memory : () -> (Result);
+  // Drops the caller's staged chunks, e.g. after an abandoned upload.
+  admin_clear_wasm_chunks : () -> (Result_3);
+  admin_clear_wasm_chunks_for : (principal) -> (Result_3);
+  // Assembles the caller's staged chunks into one artifact and publishes it.
+  admin_commit_wasm_chunks : (CommitWasmChunksInput, opt blob) -> (Result_2);
+  admin_create_canister : (text, opt CanisterSettings, opt blob) -> (Result_9);
   admin_create_on : (principal, text, opt CanisterSettings, opt blob) -> (
-      Result_3,
+      Result_9,
     );
   admin_deploy : (DeployWasmInput, opt blob) -> (Result);
+  admin_forget_deployment : (principal) -> (Result_10);
+  // Explicitly transfers target control away from this canister and removes the
+  // target from the managed deployment index after the settings call succeeds.
+  admin_handoff_canister : (UpdateSettingsArgs) -> (Result);
+  // Migrates one legacy monolithic artifact into the chunked stable layout.
+  admin_migrate_legacy_wasm_artifact : (blob) -> (Result_10);
+  // Incrementally builds the per-wasm deployment-log index for records written
+  // by versions that only maintained the global stable log.
+  admin_rebuild_log_index : (nat64, nat32) -> (Result_3);
+  // Repairs the deployment index after a successful target install whose local
+  // callback could not append its log. The target's live module hash is checked
+  // against repository metadata before any record is written.
+  admin_reconcile_deployment : (principal, text, blob) -> (Result);
+  // Clears a `CreateUnknown` breaker after governance has looked for the canister
+  // a lost create may have produced.
+  //
+  // `found` adopts that canister into the pool; `None` records the create as lost.
+  admin_reconcile_pool : (text, opt principal) -> (Result);
+  // Creates one more canister for a template's pool.
+  //
+  // Deliberately separate from any paid flow: creation is the one step whose
+  // response loss cannot be recovered, so it may only ever waste an unpaid pool
+  // canister. An unknown outcome circuit-breaks further refills.
+  admin_refill_pool : (text) -> (Result_9);
+  admin_release_expired_reservation : (blob) -> (Result_11);
   admin_remove_committers : (vec principal) -> (Result);
   admin_remove_managers : (vec principal) -> (Result);
+  admin_remove_provision_template : (text) -> (Result);
+  admin_remove_provisioners : (vec principal) -> (Result);
+  admin_remove_wasm : (blob) -> (Result);
   admin_update_canister_settings : (UpdateSettingsArgs) -> (Result);
-  deployment_logs : (text, opt nat, opt nat) -> (Result_4) query;
-  get_canister_status : (opt principal) -> (Result_5);
-  get_deployed_canisters : () -> (Result_6) query;
-  get_deployed_canisters_info : () -> (Result_4) query;
-  get_state : () -> (Result_7) query;
-  get_wasm : (blob) -> (Result_8) query;
-  validate_admin_add_committers : (vec principal) -> (Result_9);
-  validate_admin_add_managers : (vec principal) -> (Result_9);
-  validate_admin_add_wasm : (AddWasmInput, opt blob) -> (Result_9);
-  validate_admin_batch_call : (vec principal, text, opt blob) -> (Result_9);
-  validate_admin_batch_topup : () -> (Result_9);
+  deployment_logs : (text, opt nat, opt nat) -> (Result_12) query;
+  // Upgrades an already deployed canister to an exact module.
+  //
+  // Restricted to canisters this canister deployed, and to the wasm name they
+  // already run: a provisioner must not be able to push an arbitrary module onto
+  // an arbitrary canister. Compare-and-swaps on `expected_prev_module_hash`, so a
+  // stale request can never overwrite a module the caller did not expect to be
+  // running, and the result is verified against `expected_module_hash`.
+  ensure_deployment : (DeploymentRequest) -> (Result_13);
+  // Installs the template's approved module onto the reserved canister.
+  //
+  // Idempotent by `request_id`: a retry after a lost response converges on the
+  // already-installed module instead of failing, and the module hash reported by
+  // the management canister is verified against the hash the template pins.
+  ensure_install : (InstallRequest) -> (Result_13);
+  get_canister_status : (opt principal) -> (Result_14);
+  get_deployed_canisters : () -> (Result_15) query;
+  get_deployed_canisters_info : () -> (Result_12) query;
+  get_deployed_canisters_info_v2 : (opt principal, opt nat32) -> (
+      Result_12,
+    ) query;
+  get_deployed_canisters_v2 : (opt principal, opt nat32) -> (Result_15) query;
+  get_next_wasm_version : (text, blob) -> (Result_16) query;
+  // The durable outcome of a `request_id`, readable after any lost response.
+  get_provision_receipt : (blob) -> (Result_13) query;
+  // The approved template a provisioner must name by id and hash.
+  get_provision_template : (text) -> (Result_1) query;
+  get_state : () -> (Result_17) query;
+  get_wasm : (blob) -> (Result_18) query;
+  get_wasm_chunk : (blob, nat64, nat32) -> (Result_19) query;
+  get_wasm_metadata : (blob) -> (Result_16) query;
+  list_expired_reservations : (opt blob, opt nat32) -> (Result_20) query;
+  // Bounds scanned records, including non-matching requests. Follow next_cursor even on empty pages.
+  list_expired_reservations_page : (opt blob, nat32) -> (Result_21) query;
+  list_latest_wasm_versions : (opt text, opt nat32) -> (Result_22) query;
+  list_legacy_wasm_artifacts : (opt blob, opt nat32) -> (Result_5) query;
+  // Recorded pool inventory of a template.
+  //
+  // Governance watches this against the reservation churn: a pool that keeps
+  // draining is the signal to rate-limit callers, not to raise the pool size.
+  list_provision_pool : (text) -> (Result_23) query;
+  list_provision_pool_v2 : (text, opt principal, opt nat32) -> (
+      Result_23,
+    ) query;
+  list_provision_templates : () -> (Result_24) query;
+  list_provision_templates_v2 : (opt text, opt nat32) -> (Result_24) query;
+  // Resolves an interrupted install or upgrade, including after its request
+  // epoch expires. Only probes the target: this never installs or upgrades code.
+  // An empty reserved target becomes Failed and may then be released normally.
+  reconcile_provision_request : (blob) -> (Result_13);
+  // Returns a reserved canister to the pool.
+  //
+  // Only valid while the reservation never installed anything; the canister must
+  // still be empty and still carry the template's controllers, so a released
+  // canister cannot come back polluted.
+  release_reservation : (blob, principal) -> (Result_11);
+  // Claims one pre-created canister for `request_id`.
+  //
+  // Idempotent and fully synchronous: the `request_id -> canister` binding is
+  // committed together with the reply, so a caller that never sees the response
+  // recovers the same canister by replaying the call or reading the receipt. It
+  // never creates a canister, which is why a lost management-canister create can
+  // only ever waste an unpaid pool canister.
+  reserve_canister : (ReserveRequest) -> (Result_25);
+  validate_admin_add_committers : (vec principal) -> (Result_26);
+  validate_admin_add_managers : (vec principal) -> (Result_26);
+  validate_admin_add_provision_template : (ProvisionTemplate) -> (Result_26);
+  validate_admin_add_provisioners : (vec principal) -> (Result_26);
+  validate_admin_add_wasm : (AddWasmInput, opt blob) -> (Result_26);
+  validate_admin_batch_call : (vec principal, text, opt blob) -> (Result_26);
+  validate_admin_batch_topup : () -> (Result_26);
   validate_admin_create_canister : (text, opt CanisterSettings, opt blob) -> (
-      Result_9,
+      Result_26,
     );
   validate_admin_create_on : (
       principal,
       text,
       opt CanisterSettings,
       opt blob,
-    ) -> (Result_9);
-  validate_admin_deploy : (DeployWasmInput, opt blob) -> (Result_9);
-  validate_admin_remove_committers : (vec principal) -> (Result_9);
-  validate_admin_remove_managers : (vec principal) -> (Result_9);
-  validate_admin_update_canister_settings : (UpdateSettingsArgs) -> (Result_9);
+    ) -> (Result_26);
+  validate_admin_deploy : (DeployWasmInput, opt blob) -> (Result_26);
+  validate_admin_reconcile_pool : (text, opt principal) -> (Result_26);
+  validate_admin_remove_committers : (vec principal) -> (Result_26);
+  validate_admin_remove_managers : (vec principal) -> (Result_26);
+  validate_admin_remove_provision_template : (text) -> (Result_26);
+  validate_admin_remove_provisioners : (vec principal) -> (Result_26);
+  validate_admin_remove_wasm : (blob) -> (Result_26);
+  validate_admin_update_canister_settings : (UpdateSettingsArgs) -> (Result_26);
 }

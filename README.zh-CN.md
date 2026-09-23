@@ -89,8 +89,7 @@ dfx start --background
 部署后可按需重新生成绑定：
 
 ```bash
-dfx generate ic_cose_canister
-dfx generate ic_wasm_canister
+make bindings
 ```
 
 示例中的演示身份和密钥仅供实验。客户端应持久化实际业务路径、部署请求 ID 和已批准模板 hash，并核对当前部署实例的接口版本。
