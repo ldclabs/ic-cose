@@ -10,7 +10,7 @@ categories.workspace = true
 license.workspace = true
 
 [dependencies]
-ic_cose_types = { path = "../ic_cose_types", version = "0.12" }
+ic_cose_types = { path = "../ic_cose_types", version = "0.11" }
 async-trait = { workspace = true }
 candid = { workspace = true }
 futures = { workspace = true }
@@ -28,7 +28,6 @@ ic-transport-types = "0.49"
 cbor2 = { workspace = true }
 bytes = "1"
 http = "1"
-ic-cdk-management-canister = { workspace = true }
 
 [lib]
 doctest = false

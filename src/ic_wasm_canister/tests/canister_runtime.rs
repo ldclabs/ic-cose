@@ -169,7 +169,7 @@ fn delegation_certification_and_stable_state_survive_upgrade() {
             &signed.signature,
             &sign_in.user_key,
             &pic.root_key().unwrap(),
-            &u128::from(pic.get_time().as_nanos_since_unix_epoch()),
+            u128::from(pic.get_time().as_nanos_since_unix_epoch()),
             Some(300_000_000_000),
         )
         .unwrap();

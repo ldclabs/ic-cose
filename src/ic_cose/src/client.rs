@@ -531,7 +531,6 @@ mod tests {
     use http::{Response, StatusCode};
     use ic_agent::{agent::HttpService, AgentError};
     use ic_auth_types::{ByteBufB64, Delegation};
-    use ic_cdk_management_canister::{VetKDCurve, VetKDKeyId};
     use ic_cose_types::cose::{cose_aes256_key, ecdh::ecdh_x25519, encrypt0::cose_encrypt0, iana};
     use ic_transport_types::{QueryResponse, ReplyResponse};
     use std::{
@@ -761,12 +760,16 @@ mod tests {
         }
     }
 
+    // PocketIC `test_key_1` master public key. Deserialized directly because
+    // `MasterPublicKey::for_pocketic_key` takes the `VetKDKeyId` of the
+    // management-canister crate version ic-vetkeys depends on.
+    const POCKETIC_TEST_KEY_1: &str = "9069b82c7aae418cef27678291e7f2cb1a008a500eceba7199bffca12421b07c158987c6a22618af3d1958738b2835691028801f7663d311799733286c557c8979184bb62cb559a4d582fca7d2e48b860f08ed6641aef66a059ec891889a6218";
+
     fn derived_public_key_bytes() -> Vec<u8> {
-        let key_id = VetKDKeyId {
-            curve: VetKDCurve::Bls12_381_G2,
-            name: "test_key_1".to_string(),
-        };
-        let master = crate::vetkeys::MasterPublicKey::for_pocketic_key(&key_id).unwrap();
+        let master = crate::vetkeys::MasterPublicKey::deserialize(
+            &hex::decode(POCKETIC_TEST_KEY_1).unwrap(),
+        )
+        .unwrap();
         master
             .derive_canister_key(Principal::management_canister().as_slice())
             .serialize()
