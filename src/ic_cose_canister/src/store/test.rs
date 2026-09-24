@@ -1,30 +1,34 @@
 use super::*;
 
-#[test]
-fn sparse_acl_migration_pages_advance_across_empty_results() {
-    for i in 0..12 {
-        NAMESPACES_STORE.with_borrow_mut(|store| {
-            store.insert(
-                format!("scan_{i:02}"),
-                Namespace {
-                    acl_version: if i == 10 { 0 } else { 1 },
-                    ..Default::default()
-                },
-            )
-        });
+/// Inserts a namespace managed by `manager` without going through the API.
+fn seed_namespace(name: &str, manager: Principal, ns: Namespace) {
+    NAMESPACES_STORE.with_borrow_mut(|store| {
+        store.insert(
+            name.to_string(),
+            Namespace {
+                acl_version: ACL_VERSION,
+                manager_count: 1,
+                ..ns
+            },
+        )
+    });
+    ACL_STORE.with_borrow_mut(|store| {
+        store.insert(AclKey(name.to_string(), ROLE_MANAGER, manager), 0);
+    });
+}
+
+/// Stores a setting in the split metadata and payload maps.
+fn seed_setting(key: SettingPathKey, setting: Setting) {
+    let (meta, data) = setting.into_parts();
+    if data.payload.is_some() || data.dek.is_some() {
+        SETTING_DATA_STORE.with_borrow_mut(|store| store.insert(key.clone(), data));
     }
-    let first = ns::migrate_legacy_namespace_acls_page(None, 4);
-    assert!(first.items.is_empty());
-    assert_eq!(first.next_cursor.as_deref(), Some("scan_03"));
-    let second = ns::migrate_legacy_namespace_acls_page(first.next_cursor, 4);
-    assert!(second.items.is_empty());
-    let third = ns::migrate_legacy_namespace_acls_page(second.next_cursor, 4);
-    assert_eq!(third.items, vec!["scan_10"]);
-    assert!(third.next_cursor.is_none());
-    assert_eq!(
-        ns::with(&"scan_10".into(), |ns| Ok(ns.acl_version)).unwrap(),
-        1
-    );
+    SETTING_META_STORE.with_borrow_mut(|store| store.insert(key, meta));
+}
+
+fn load_seeded_setting(key: &SettingPathKey) -> Setting {
+    let meta = SETTING_META_STORE.with_borrow(|store| store.get(key).unwrap());
+    meta.into_setting(SETTING_DATA_STORE.with_borrow(|store| store.get(key)))
 }
 
 #[test]
@@ -219,20 +223,22 @@ fn identity_tokens_never_mislabel_bip340_as_es256k() {
 #[test]
 fn test_stable_cbor_round_trip_handles_principals_and_payloads() {
     let principal = Principal::from_slice(&[1, 2, 3, 4]);
-    let setting = Setting {
+    let (meta, data) = Setting {
         desc: "round_trip".to_string(),
         readers: BTreeSet::from([principal]),
         payload: Some(ByteBuf::from(vec![7; 1024])),
         dek: Some(ByteBuf::from(vec![8; 32])),
         version: 3,
         ..Default::default()
-    };
-    let decoded = Setting::from_bytes(Cow::Owned(setting.clone().into_bytes()));
-    assert_eq!(decoded.desc, setting.desc);
-    assert_eq!(decoded.readers, setting.readers);
-    assert_eq!(decoded.payload, setting.payload);
-    assert_eq!(decoded.dek, setting.dek);
-    assert_eq!(decoded.version, setting.version);
+    }
+    .into_parts();
+    let decoded_meta = SettingMeta::from_bytes(Cow::Owned(meta.clone().into_bytes()));
+    assert_eq!(decoded_meta.desc, meta.desc);
+    assert_eq!(decoded_meta.readers, meta.readers);
+    assert_eq!(decoded_meta.version, meta.version);
+    let decoded_data = SettingData::from_bytes(Cow::Owned(data.clone().into_bytes()));
+    assert_eq!(decoded_data.payload, data.payload);
+    assert_eq!(decoded_data.dek, data.dek);
 
     let key = SettingPathKey(
         "round_trip".to_string(),
@@ -248,14 +254,58 @@ fn test_stable_cbor_round_trip_handles_principals_and_payloads() {
 
     let namespace = Namespace {
         desc: "namespace".to_string(),
-        managers: BTreeSet::from([principal]),
-        fixed_id_names: BTreeMap::from([("fixed".to_string(), BTreeSet::from([principal]))]),
+        acl_version: ACL_VERSION,
+        manager_count: 2,
         ..Default::default()
     };
     let decoded = Namespace::from_bytes(Cow::Owned(namespace.clone().into_bytes()));
     assert_eq!(decoded.desc, namespace.desc);
-    assert_eq!(decoded.managers, namespace.managers);
-    assert_eq!(decoded.fixed_id_names, namespace.fixed_id_names);
+    assert_eq!(decoded.acl_version, ACL_VERSION);
+    assert_eq!(decoded.manager_count, 2);
+
+    // records written by 0.11 still carry the emptied member fields
+    #[derive(Serialize)]
+    struct OldNamespace {
+        d: String,
+        ca: u64,
+        ua: u64,
+        mp: u64,
+        pb: u64,
+        s: i8,
+        v: u8,
+        m: BTreeSet<Principal>,
+        a: BTreeSet<Principal>,
+        u: BTreeSet<Principal>,
+        g: u128,
+        f: BTreeMap<String, BTreeSet<Principal>>,
+        se: u64,
+        av: u8,
+        mc: u32,
+    }
+    let decoded = Namespace::from_bytes(Cow::Owned(
+        cbor2::to_vec(&OldNamespace {
+            d: "old".to_string(),
+            ca: 1,
+            ua: 2,
+            mp: 3,
+            pb: 4,
+            s: 0,
+            v: 1,
+            m: BTreeSet::new(),
+            a: BTreeSet::new(),
+            u: BTreeSet::new(),
+            g: 5,
+            f: BTreeMap::new(),
+            se: 6,
+            av: 1,
+            mc: 7,
+        })
+        .unwrap(),
+    ));
+    assert_eq!(decoded.desc, "old");
+    assert_eq!(decoded.gas_balance, 5);
+    assert_eq!(decoded.session_expires_in_ms, 6);
+    assert_eq!(decoded.manager_count, 7);
 
     let state = State {
         managers: BTreeSet::from([principal]),
@@ -271,22 +321,6 @@ fn test_stable_cbor_round_trip_handles_principals_and_payloads() {
     assert_eq!(decoded.managers, state.managers);
     assert_eq!(decoded.ecdsa_public_key, state.ecdsa_public_key);
     assert_eq!(decoded.init_vector, state.init_vector);
-
-    let legacy_key = (principal, ByteBuf::from([4]));
-    let legacy = BTreeMap::from([(
-        "legacy".to_string(),
-        NamespaceLegacy {
-            managers: BTreeSet::from([principal]),
-            settings: BTreeMap::from([(legacy_key.clone(), setting)]),
-            ..Default::default()
-        },
-    )]);
-    let encoded = to_cbor_bytes(&legacy, 1024, "legacy namespace data");
-    let decoded: BTreeMap<String, NamespaceLegacy> =
-        from_cbor_bytes(&encoded, "legacy namespace data");
-    let decoded = decoded.get("legacy").unwrap();
-    assert!(decoded.managers.contains(&principal));
-    assert!(decoded.settings.contains_key(&legacy_key));
 }
 
 #[test]
@@ -315,16 +349,14 @@ fn test_list_setting_keys_includes_management_principal() {
     let principal = Principal::management_canister();
     let key = ByteBuf::from([1]);
     let max_key = ByteBuf::from([255u8; 64].as_ref());
-    SETTINGS_STORE.with_borrow_mut(|store| {
-        store.insert(
-            SettingPathKey(namespace.clone(), 0, principal, key.clone(), 0),
-            Setting::default(),
-        );
-        store.insert(
-            SettingPathKey(namespace.clone(), 0, principal, max_key.clone(), 0),
-            Setting::default(),
-        );
-    });
+    seed_setting(
+        SettingPathKey(namespace.clone(), 0, principal, key.clone(), 0),
+        Setting::default(),
+    );
+    seed_setting(
+        SettingPathKey(namespace.clone(), 0, principal, max_key.clone(), 0),
+        Setting::default(),
+    );
 
     assert_eq!(
         ns::list_setting_keys(&namespace, false, None),
@@ -345,27 +377,23 @@ fn test_payload_update_preserves_current_and_archived_versions() {
     let old_payload = ByteBuf::from(vec![1; 128]);
     let new_payload = ByteBuf::from(vec![2; 256]);
 
-    NAMESPACES_STORE.with_borrow_mut(|store| {
-        store.insert(
-            namespace.clone(),
-            Namespace {
-                managers: BTreeSet::from([manager]),
-                max_payload_size: 1024,
-                payload_bytes_total: old_payload.len() as u64,
-                ..Default::default()
-            },
-        );
-    });
-    SETTINGS_STORE.with_borrow_mut(|store| {
-        store.insert(
-            current_key.clone(),
-            Setting {
-                payload: Some(old_payload.clone()),
-                version: 1,
-                ..Default::default()
-            },
-        );
-    });
+    seed_namespace(
+        &namespace,
+        manager,
+        Namespace {
+            max_payload_size: 1024,
+            payload_bytes_total: old_payload.len() as u64,
+            ..Default::default()
+        },
+    );
+    seed_setting(
+        current_key.clone(),
+        Setting {
+            payload: Some(old_payload.clone()),
+            version: 1,
+            ..Default::default()
+        },
+    );
 
     let output = ns::update_setting_payload(
         manager,
@@ -379,12 +407,7 @@ fn test_payload_update_preserves_current_and_archived_versions() {
     .unwrap();
     assert_eq!(output.version, 2);
 
-    let current = SETTING_META_STORE.with_borrow(|store| {
-        let meta = store.get(&current_key).unwrap();
-        let data = SETTING_DATA_STORE.with_borrow(|data| data.get(&current_key));
-        meta.into_setting(data)
-    });
-    assert!(SETTINGS_STORE.with_borrow(|store| store.get(&current_key).is_none()));
+    let current = load_seeded_setting(&current_key);
     assert_eq!(current.payload, Some(new_payload));
     assert_eq!(current.version, 2);
     let archived = PAYLOADS_STORE.with_borrow(|store| store.get(&versioned_key).unwrap());
@@ -416,26 +439,22 @@ fn test_payload_update_rejects_malformed_dek_before_writing() {
     let versioned_key = SettingPathKey(namespace.clone(), 0, manager, ByteBuf::from([1]), 1);
     let payload = ByteBuf::from(vec![1; 16]);
 
-    NAMESPACES_STORE.with_borrow_mut(|store| {
-        store.insert(
-            namespace,
-            Namespace {
-                managers: BTreeSet::from([manager]),
-                max_payload_size: 1024,
-                ..Default::default()
-            },
-        );
-    });
-    SETTINGS_STORE.with_borrow_mut(|store| {
-        store.insert(
-            current_key.clone(),
-            Setting {
-                payload: Some(payload.clone()),
-                version: 1,
-                ..Default::default()
-            },
-        );
-    });
+    seed_namespace(
+        &namespace,
+        manager,
+        Namespace {
+            max_payload_size: 1024,
+            ..Default::default()
+        },
+    );
+    seed_setting(
+        current_key.clone(),
+        Setting {
+            payload: Some(payload.clone()),
+            version: 1,
+            ..Default::default()
+        },
+    );
 
     assert!(ns::update_setting_payload(
         manager,
@@ -448,7 +467,7 @@ fn test_payload_update_rejects_malformed_dek_before_writing() {
     )
     .is_err());
 
-    let current = SETTINGS_STORE.with_borrow(|store| store.get(&current_key).unwrap());
+    let current = load_seeded_setting(&current_key);
     assert_eq!(current.payload, Some(payload));
     assert_eq!(current.version, 1);
     assert!(PAYLOADS_STORE.with_borrow(|store| store.get(&versioned_key).is_none()));
@@ -460,27 +479,23 @@ fn archived_settings_require_an_explicit_metadata_recovery_before_payload_writes
     let manager = Principal::from_slice(&[8, 7, 6]);
     let current_key = SettingPathKey(namespace.clone(), 0, manager, ByteBuf::from([2]), 0);
     let versioned_key = SettingPathKey(namespace.clone(), 0, manager, ByteBuf::from([2]), 1);
-    NAMESPACES_STORE.with_borrow_mut(|store| {
-        store.insert(
-            namespace,
-            Namespace {
-                managers: BTreeSet::from([manager]),
-                max_payload_size: 1024,
-                ..Default::default()
-            },
-        );
-    });
-    SETTINGS_STORE.with_borrow_mut(|store| {
-        store.insert(
-            current_key,
-            Setting {
-                status: -1,
-                version: 1,
-                payload: Some(ByteBuf::from([1])),
-                ..Default::default()
-            },
-        );
-    });
+    seed_namespace(
+        &namespace,
+        manager,
+        Namespace {
+            max_payload_size: 1024,
+            ..Default::default()
+        },
+    );
+    seed_setting(
+        current_key,
+        Setting {
+            status: -1,
+            version: 1,
+            payload: Some(ByteBuf::from([1])),
+            ..Default::default()
+        },
+    );
 
     assert_eq!(
         ns::update_setting_payload(
@@ -520,24 +535,14 @@ fn archived_settings_require_an_explicit_metadata_recovery_before_payload_writes
 #[test]
 fn test_delete_namespace_only_looks_at_its_own_settings() {
     let manager = Principal::from_slice(&[1, 1, 1, 1]);
-    NAMESPACES_STORE.with_borrow_mut(|r| {
-        for name in ["alpha", "beta"] {
-            r.insert(
-                name.to_string(),
-                Namespace {
-                    managers: BTreeSet::from([manager]),
-                    ..Default::default()
-                },
-            );
-        }
-    });
+    for name in ["alpha", "beta"] {
+        seed_namespace(name, manager, Namespace::default());
+    }
     // only "beta" holds settings; "alpha" is empty and must stay deletable
-    SETTINGS_STORE.with_borrow_mut(|r| {
-        r.insert(
-            SettingPathKey("beta".to_string(), 0, manager, ByteBuf::from([1]), 0),
-            Setting::default(),
-        );
-    });
+    seed_setting(
+        SettingPathKey("beta".to_string(), 0, manager, ByteBuf::from([1]), 0),
+        Setting::default(),
+    );
 
     assert_eq!(ns::delete_namespace(&manager, "alpha".to_string()), Ok(()));
     assert_eq!(
@@ -546,27 +551,17 @@ fn test_delete_namespace_only_looks_at_its_own_settings() {
     );
 
     // a setting owned by the smallest possible principal still counts
-    SETTINGS_STORE.with_borrow_mut(|r| {
-        r.insert(
-            SettingPathKey(
-                "gamma".to_string(),
-                0,
-                Principal::management_canister(),
-                ByteBuf::new(),
-                0,
-            ),
-            Setting::default(),
-        );
-    });
-    NAMESPACES_STORE.with_borrow_mut(|r| {
-        r.insert(
+    seed_setting(
+        SettingPathKey(
             "gamma".to_string(),
-            Namespace {
-                managers: BTreeSet::from([manager]),
-                ..Default::default()
-            },
-        );
-    });
+            0,
+            Principal::management_canister(),
+            ByteBuf::new(),
+            0,
+        ),
+        Setting::default(),
+    );
+    seed_namespace("gamma", manager, Namespace::default());
     assert_eq!(
         ns::delete_namespace(&manager, "gamma".to_string()),
         Err("namespace gamma is not empty".to_string())
@@ -586,32 +581,22 @@ fn test_list_setting_keys() {
     assert!(p1 < p2);
     assert!(p2 < p3);
 
-    SETTINGS_STORE.with_borrow_mut(|r| {
-        for (i, n) in [n1.clone(), n2.clone()].iter().enumerate() {
-            for p in &[p0, p1, p2, p3] {
-                r.insert(
-                    SettingPathKey(n.clone(), 0, *p, ByteBuf::from([i as u8]), 0),
-                    Setting::default(),
-                );
-                r.insert(
-                    SettingPathKey(n.clone(), 0, *p, ByteBuf::from(p.as_slice()), 0),
-                    Setting::default(),
-                );
-                r.insert(
-                    SettingPathKey(n.clone(), 1, *p, ByteBuf::from([i as u8 + 1]), 0),
-                    Setting::default(),
-                );
-                r.insert(
-                    SettingPathKey(n.clone(), 1, *p, ByteBuf::from(p.as_slice()), 0),
-                    Setting::default(),
-                );
-                r.insert(
-                    SettingPathKey(n.clone(), 2, *p, ByteBuf::from([0]), 0),
+    for (i, n) in [n1.clone(), n2.clone()].iter().enumerate() {
+        for p in &[p0, p1, p2, p3] {
+            for (kind, key) in [
+                (0, ByteBuf::from([i as u8])),
+                (0, ByteBuf::from(p.as_slice())),
+                (1, ByteBuf::from([i as u8 + 1])),
+                (1, ByteBuf::from(p.as_slice())),
+                (2, ByteBuf::from([0])),
+            ] {
+                seed_setting(
+                    SettingPathKey(n.clone(), kind, *p, key, 0),
                     Setting::default(),
                 );
             }
         }
-    });
+    }
 
     {
         let keys = ns::list_setting_keys(&n1, false, None);
@@ -713,8 +698,8 @@ fn administrative_state_remains_recoverable_and_cycles_are_debited_atomically() 
     assert_eq!(info.name, namespace);
     assert!(ns::is_member(&namespace, &manager, "manager", &manager).unwrap());
     let stored = NAMESPACES_STORE.with_borrow(|store| store.get(&namespace).unwrap());
-    assert_eq!(stored.acl_version, 1);
-    assert!(stored.managers.is_empty());
+    assert_eq!(stored.acl_version, ACL_VERSION);
+    assert_eq!(stored.manager_count, 1);
     assert!(
         ns::remove_managers(namespace.clone(), &manager, BTreeSet::from([manager]), 2,)
             .unwrap_err()
@@ -800,112 +785,99 @@ fn administrative_state_remains_recoverable_and_cycles_are_debited_atomically() 
 }
 
 #[test]
-fn failed_legacy_mutations_do_not_partially_externalize_the_acl() {
-    let namespace = "failed_legacy_acl".to_string();
-    let manager = Principal::from_slice(&[7, 8, 9]);
-    NAMESPACES_STORE.with_borrow_mut(|store| {
-        store.insert(
-            namespace.clone(),
-            Namespace {
-                managers: BTreeSet::from([manager]),
-                ..Default::default()
-            },
-        );
-    });
+fn namespace_summaries_keep_counts_but_never_embed_members() {
+    let manager = Principal::from_slice(&[6, 6, 6]);
+    let auditor = Principal::from_slice(&[6, 6, 7]);
+    let namespace = "summary".to_string();
+    let created = ns::create_namespace(
+        CreateNamespaceInput {
+            name: namespace.clone(),
+            managers: BTreeSet::from([manager]),
+            auditors: BTreeSet::from([auditor]),
+            ..Default::default()
+        },
+        1,
+    )
+    .unwrap();
+    assert_eq!(created.managers, BTreeSet::from([manager]));
+    assert_eq!(created.auditor_count, 1);
+    ns::mutate_delegators(
+        namespace.clone(),
+        "identity".to_string(),
+        &manager,
+        BTreeSet::from([auditor]),
+        true,
+        2,
+    )
+    .unwrap();
 
+    let detailed = ns::get_namespace_v2(&auditor, namespace.clone(), true).unwrap();
+    assert_eq!(detailed.managers, BTreeSet::from([manager]));
+    assert_eq!(detailed.auditors, BTreeSet::from([auditor]));
     assert_eq!(
-        ns::with_mut(namespace.clone(), |_namespace| Err::<(), _>(
-            "denied".to_string()
-        )),
-        Err("denied".to_string())
+        detailed.fixed_id_names["identity"],
+        BTreeSet::from([auditor])
     );
-    let stored = NAMESPACES_STORE.with_borrow(|store| store.get(&namespace).unwrap());
-    assert_eq!(stored.acl_version, 0);
-    assert!(stored.managers.contains(&manager));
-    assert!(!ACL_STORE
-        .with_borrow(|store| { store.contains_key(&AclKey(namespace, ROLE_MANAGER, manager)) }));
+    let summary = ns::get_namespace_v2(&auditor, namespace, false).unwrap();
+    assert_eq!(summary.manager_count, 1);
+    assert_eq!(summary.auditor_count, 1);
+    assert_eq!(summary.fixed_delegator_count, 1);
+    assert!(summary.managers.is_empty());
+    assert!(summary.auditors.is_empty());
+    assert!(summary.fixed_id_names.is_empty());
 }
 
 #[test]
-fn namespace_summaries_keep_counts_but_never_embed_legacy_members() {
-    let principal = Principal::from_slice(&[6, 6, 6]);
+fn role_checks_resolve_each_role_once_and_never_for_anonymous() {
+    let manager = Principal::from_slice(&[5, 5, 5]);
+    seed_namespace("access", manager, Namespace::default());
+    let ns = ns::with(&"access".to_string(), Ok).unwrap();
+
+    let access = ns.access("access", &manager);
+    assert!(access.can_manage_namespace());
+    // a removed role stays cached for the rest of the decision
+    ACL_STORE.with_borrow_mut(|store| {
+        store.remove(&AclKey("access".to_string(), ROLE_MANAGER, manager))
+    });
+    assert!(access.is_manager());
+    assert!(!ns.access("access", &manager).is_manager());
+
     let anonymous = Principal::anonymous();
-    let legacy = Namespace {
-        managers: BTreeSet::from([principal, anonymous]),
-        auditors: BTreeSet::from([principal, anonymous]),
-        users: BTreeSet::from([principal, anonymous]),
-        fixed_id_names: BTreeMap::from([(
-            "identity".to_string(),
-            BTreeSet::from([principal, anonymous]),
-        )]),
-        ..Default::default()
-    };
-    assert!(!legacy.can_read_namespace("large_legacy", &anonymous));
-    let detailed = ns::namespace_info("large_legacy".to_string(), legacy.clone());
-    assert!(!detailed.managers.contains(&anonymous));
-    assert!(!detailed.auditors.contains(&anonymous));
-    assert!(!detailed.users.contains(&anonymous));
-    assert!(!detailed.fixed_id_names["identity"].contains(&anonymous));
-    let info = ns::namespace_summary("large_legacy".to_string(), legacy);
-    assert_eq!(info.manager_count, 1);
-    assert_eq!(info.auditor_count, 1);
-    assert_eq!(info.user_count, 1);
-    assert_eq!(info.fixed_delegator_count, 1);
-    assert!(info.managers.is_empty());
-    assert!(info.auditors.is_empty());
-    assert!(info.users.is_empty());
-    assert!(info.fixed_id_names.is_empty());
+    ACL_STORE.with_borrow_mut(|store| {
+        store.insert(AclKey("access".to_string(), ROLE_USER, anonymous), 0)
+    });
+    assert!(!ns.access("access", &anonymous).is_user());
 }
 
 #[test]
-fn legacy_data_is_never_resurrected_without_explicit_migration() {
-    let name = "deleted_legacy".to_string();
-    STATE_STORE.with_borrow_mut(|store| {
-        store.set(to_cbor_bytes(&State::default(), 128, "test state"));
-    });
-    NSLEGACY_STORE.with_borrow_mut(|store| {
-        store.set(to_cbor_bytes(
-            &BTreeMap::from([(name.clone(), NamespaceLegacy::default())]),
-            256,
-            "test legacy",
-        ));
-    });
-    SCHEMA_STORE.with_borrow_mut(|store| {
-        store.set(0);
-    });
+fn upgrades_refuse_state_that_still_needs_a_retired_migration() {
+    assert!(state::ensure_no_legacy_state()
+        .unwrap_err()
+        .contains("upgrade through 0.11"));
+    state::initialize_schema();
+    assert!(state::ensure_no_legacy_state().is_ok());
 
-    state::load(false);
-
-    assert!(NAMESPACES_STORE.with_borrow(|store| store.get(&name).is_none()));
-    assert!(NSLEGACY_STORE.with_borrow(|store| store.get().is_empty()));
-    assert_eq!(
-        SCHEMA_STORE.with_borrow(|store| *store.get()),
-        CURRENT_SCHEMA_VERSION
+    // monolithic settings must be split by 0.11 first
+    let memory = MEMORY_MANAGER.with_borrow(|m| m.get(LEGACY_SETTINGS_MEMORY_ID));
+    let mut legacy = StableBTreeMap::<SettingPathKey, Vec<u8>, Memory>::init(memory);
+    let key = SettingPathKey(
+        "legacy".into(),
+        0,
+        Principal::anonymous(),
+        ByteBuf::new(),
+        0,
     );
-}
+    legacy.insert(key.clone(), vec![0xa0]);
+    assert!(state::ensure_no_legacy_state()
+        .unwrap_err()
+        .contains("admin_migrate_legacy_settings"));
+    legacy.remove(&key);
+    assert!(state::ensure_no_legacy_state().is_ok());
 
-#[test]
-fn explicit_legacy_migration_runs_once() {
-    let name = "explicit_legacy".to_string();
-    STATE_STORE.with_borrow_mut(|store| {
-        store.set(to_cbor_bytes(&State::default(), 128, "test state"));
-    });
-    NSLEGACY_STORE.with_borrow_mut(|store| {
-        store.set(to_cbor_bytes(
-            &BTreeMap::from([(name.clone(), NamespaceLegacy::default())]),
-            256,
-            "test legacy",
-        ));
-    });
-    SCHEMA_STORE.with_borrow_mut(|store| {
-        store.set(0);
-    });
-
-    state::load(true);
-    assert!(NAMESPACES_STORE.with_borrow(|store| store.get(&name).is_some()));
-    NAMESPACES_STORE.with_borrow_mut(|store| {
-        store.remove(&name);
-    });
-    state::load(false);
-    assert!(NAMESPACES_STORE.with_borrow(|store| store.get(&name).is_none()));
+    // namespaces that still embed their members must be externalized by 0.11
+    NAMESPACES_STORE
+        .with_borrow_mut(|store| store.insert("embedded".to_string(), Namespace::default()));
+    assert!(state::ensure_no_legacy_state()
+        .unwrap_err()
+        .contains("admin_migrate_legacy_namespace_acls_page"));
 }

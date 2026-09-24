@@ -26,16 +26,13 @@ pub struct InitArgs {
 
 #[derive(Clone, Debug, CandidType, Deserialize)]
 pub struct UpgradeArgs {
-    name: Option<String>, // seconds
+    name: Option<String>,
     subnet_size: Option<u64>,
     freezing_threshold: Option<u64>, // in cycles
     governance_canister: Option<Principal>,
     vetkd_key_name: Option<String>,
     clear_governance_canister: Option<bool>,
     vetkd_context_version: Option<u8>,
-    /// Explicit opt-in for deployments upgrading directly from the legacy
-    /// monolithic namespace store. Current deployments must leave this false.
-    migrate_legacy_namespaces: Option<bool>,
 }
 
 fn validate_governance_canister(value: Option<&Principal>) -> Result<(), String> {
@@ -141,14 +138,7 @@ fn pre_upgrade() {
 
 #[ic_cdk::post_upgrade]
 fn post_upgrade(args: Option<InstallArgs>) {
-    let migrate_legacy_namespaces = matches!(
-        args.as_ref(),
-        Some(InstallArgs::Upgrade(UpgradeArgs {
-            migrate_legacy_namespaces: Some(true),
-            ..
-        }))
-    );
-    store::state::load(migrate_legacy_namespaces);
+    store::state::load();
 
     match args {
         Some(InstallArgs::Upgrade(args)) => {

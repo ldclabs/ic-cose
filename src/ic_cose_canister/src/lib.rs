@@ -15,8 +15,7 @@ mod api_namespace;
 mod api_setting;
 #[path = "../../canister_memory.rs"]
 mod canister_memory;
-mod ecdsa;
-mod schnorr;
+mod chain_key;
 mod store;
 mod vetkd;
 

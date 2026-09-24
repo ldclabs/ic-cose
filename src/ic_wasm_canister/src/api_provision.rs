@@ -10,7 +10,9 @@ use ic_cose_types::{
 use serde_bytes::ByteArray;
 
 use crate::{
-    is_controller, is_controller_or_manager, is_provisioner, management, store, MILLISECONDS,
+    is_controller, is_controller_or_manager, is_provisioner, management,
+    store::{self, state::OperationGuard},
+    MILLISECONDS,
 };
 
 /// Claims one pre-created canister for `request_id`.
@@ -44,29 +46,7 @@ async fn ensure_install(req: InstallRequest) -> Result<ProvisionReceipt, String>
     let (attempt, canister, artifact_hash, expected, controllers) =
         match store::provision::begin_install(owner, now_ms, &req)? {
             store::provision::InstallPlan::AlreadyInstalled(receipt) => {
-                let receipt = *receipt;
-                let expected = receipt
-                    .module_hash
-                    .ok_or_else(|| "installed receipt is missing module_hash".to_string())?;
-                let lock_attempt = ic_cdk::api::time() / MILLISECONDS;
-                store::state::acquire_operation(
-                    receipt.canister,
-                    req.request_id,
-                    lock_attempt,
-                    lock_attempt,
-                )?;
-                let result = async {
-                    assert_module_hash(receipt.canister, expected).await?;
-                    store::provision::repair_installed_receipt(
-                        &receipt,
-                        &req.init_args,
-                        ic_cdk::api::time() / MILLISECONDS,
-                    )
-                }
-                .await;
-                store::state::release_operation(receipt.canister, &req.request_id, lock_attempt);
-                result?;
-                return Ok(receipt);
+                return confirm_installed(*receipt, req.request_id, &req.init_args).await;
             }
             store::provision::InstallPlan::Install {
                 attempt,
@@ -83,7 +63,8 @@ async fn ensure_install(req: InstallRequest) -> Result<ProvisionReceipt, String>
             ),
         };
 
-    match install_exact(
+    let _lock = OperationGuard::adopt(canister, req.request_id, attempt);
+    let outcome = install_exact(
         canister,
         mgt::CanisterInstallMode::Install,
         artifact_hash,
@@ -91,28 +72,8 @@ async fn ensure_install(req: InstallRequest) -> Result<ProvisionReceipt, String>
         expected,
         &controllers,
     )
-    .await
-    {
-        Ok(module_hash) => {
-            let now_ms = ic_cdk::api::time() / MILLISECONDS;
-            let result = store::provision::commit_install_success(
-                &req.request_id,
-                attempt,
-                module_hash,
-                now_ms,
-                &req.init_args,
-            );
-            if let Err(err) = &result {
-                store::provision::fail_install(&req.request_id, attempt, err.clone(), now_ms);
-            }
-            result
-        }
-        Err(err) => {
-            let now_ms = ic_cdk::api::time() / MILLISECONDS;
-            store::provision::fail_install(&req.request_id, attempt, err.clone(), now_ms);
-            Err(err)
-        }
-    }
+    .await;
+    finish_attempt(&req.request_id, attempt, outcome, &req.init_args)
 }
 
 /// Upgrades an already deployed canister to an exact module.
@@ -172,53 +133,13 @@ async fn ensure_deployment(req: DeploymentRequest) -> Result<ProvisionReceipt, S
         req.expires_at,
     )? {
         store::provision::DeploymentPlan::AlreadyInstalled(receipt) => {
-            let receipt = *receipt;
-            let expected = receipt
-                .module_hash
-                .ok_or_else(|| "installed receipt is missing module_hash".to_string())?;
-            let lock_attempt = ic_cdk::api::time() / MILLISECONDS;
-            store::state::acquire_operation(
-                receipt.canister,
-                req.request_id,
-                lock_attempt,
-                lock_attempt,
-            )?;
-            let result = async {
-                assert_module_hash(receipt.canister, expected).await?;
-                store::provision::repair_installed_receipt(
-                    &receipt,
-                    &req.args,
-                    ic_cdk::api::time() / MILLISECONDS,
-                )
-            }
-            .await;
-            store::state::release_operation(receipt.canister, &req.request_id, lock_attempt);
-            result?;
-            return Ok(receipt);
+            return confirm_installed(*receipt, req.request_id, &req.args).await;
         }
         store::provision::DeploymentPlan::Deploy { attempt } => attempt,
     };
-    match upgrade_exact(&req).await {
-        Ok(module_hash) => {
-            let now_ms = ic_cdk::api::time() / MILLISECONDS;
-            let result = store::provision::commit_install_success(
-                &req.request_id,
-                attempt,
-                module_hash,
-                now_ms,
-                &req.args,
-            );
-            if let Err(err) = &result {
-                store::provision::fail_install(&req.request_id, attempt, err.clone(), now_ms);
-            }
-            result
-        }
-        Err(err) => {
-            let now_ms = ic_cdk::api::time() / MILLISECONDS;
-            store::provision::fail_install(&req.request_id, attempt, err.clone(), now_ms);
-            Err(err)
-        }
-    }
+    let _lock = OperationGuard::adopt(req.canister, req.request_id, attempt);
+    let outcome = upgrade_exact(&req).await;
+    finish_attempt(&req.request_id, attempt, outcome, &req.args)
 }
 
 /// Returns a reserved canister to the pool.
@@ -249,25 +170,7 @@ async fn release_reservation(
             canister,
         );
     }
-    let expected = store::provision::expected_controllers(owner, &request_id)?;
-    let now_ms = ic_cdk::api::time() / MILLISECONDS;
-    store::state::acquire_operation(canister, request_id, now_ms, now_ms)?;
-    let result = async {
-        let info = management::canister_info(canister).await?;
-        if info.module_hash.is_some() {
-            return Err("canister is not empty and cannot be released".to_string());
-        }
-        store::provision::assert_controllers(&info.controllers, &expected)?;
-        store::provision::release(
-            owner,
-            ic_cdk::api::time() / MILLISECONDS,
-            &request_id,
-            canister,
-        )
-    }
-    .await;
-    store::state::release_operation(canister, &request_id, now_ms);
-    result
+    probe_and_release(owner, request_id, canister).await
 }
 
 /// The durable outcome of a `request_id`, readable after any lost response.
@@ -325,6 +228,7 @@ async fn reconcile_provision_request(
         &request_id,
         ic_cdk::api::time() / MILLISECONDS,
     )?;
+    let _lock = OperationGuard::adopt(canister, request_id, attempt);
     let result = async {
         let info = management::canister_info(canister).await?;
         store::provision::finish_reconcile(
@@ -367,27 +271,68 @@ async fn admin_release_expired_reservation(
     ) {
         return Err("only an unused reservation can be reclaimed".to_string());
     }
-    let expected = store::provision::expected_controllers(receipt.owner, &request_id)?;
-    store::state::acquire_operation(receipt.canister, request_id, now_ms, now_ms)?;
-    let result = async {
-        let info = management::canister_info(receipt.canister).await?;
-        if info.module_hash.is_some() {
-            return Err("canister is not empty and cannot be released".to_string());
-        }
-        store::provision::assert_controllers(&info.controllers, &expected)?;
-        store::provision::release(
-            receipt.owner,
-            ic_cdk::api::time() / MILLISECONDS,
-            &request_id,
-            receipt.canister,
-        )
-    }
-    .await;
-    store::state::release_operation(receipt.canister, &request_id, now_ms);
-    result
+    probe_and_release(receipt.owner, request_id, receipt.canister).await
 }
 
 // ----- helpers -----
+
+/// Re-verifies an installed receipt against the live module and repairs a
+/// deployment record whose commit was lost, so a replay converges.
+async fn confirm_installed(
+    receipt: ProvisionReceipt,
+    request_id: ByteArray<32>,
+    args: &[u8],
+) -> Result<ProvisionReceipt, String> {
+    let expected = receipt
+        .module_hash
+        .ok_or_else(|| "installed receipt is missing module_hash".to_string())?;
+    let now_ms = ic_cdk::api::time() / MILLISECONDS;
+    let _lock = OperationGuard::acquire(receipt.canister, request_id, now_ms, now_ms)?;
+    assert_module_hash(receipt.canister, expected).await?;
+    store::provision::repair_installed_receipt(&receipt, args, ic_cdk::api::time() / MILLISECONDS)?;
+    Ok(receipt)
+}
+
+/// Records the outcome of an install or upgrade attempt; a failed commit
+/// leaves the request `Failed` so it can be reconciled.
+fn finish_attempt(
+    request_id: &ByteArray<32>,
+    attempt: u64,
+    outcome: Result<ByteArray<32>, String>,
+    args: &[u8],
+) -> Result<ProvisionReceipt, String> {
+    let now_ms = ic_cdk::api::time() / MILLISECONDS;
+    let result = outcome.and_then(|module_hash| {
+        store::provision::commit_install_success(request_id, attempt, module_hash, now_ms, args)
+    });
+    if let Err(err) = &result {
+        store::provision::fail_install(request_id, attempt, err.clone(), now_ms);
+    }
+    result
+}
+
+/// Returns a reservation's canister to the pool once it is proven empty and
+/// still carries the template's controllers.
+async fn probe_and_release(
+    owner: Principal,
+    request_id: ByteArray<32>,
+    canister: Principal,
+) -> Result<ReleaseReceipt, String> {
+    let expected = store::provision::expected_controllers(owner, &request_id)?;
+    let now_ms = ic_cdk::api::time() / MILLISECONDS;
+    let _lock = OperationGuard::acquire(canister, request_id, now_ms, now_ms)?;
+    let info = management::canister_info(canister).await?;
+    if info.module_hash.is_some() {
+        return Err("canister is not empty and cannot be released".to_string());
+    }
+    store::provision::assert_controllers(&info.controllers, &expected)?;
+    store::provision::release(
+        owner,
+        ic_cdk::api::time() / MILLISECONDS,
+        &request_id,
+        canister,
+    )
+}
 
 /// Installs onto an empty canister and returns the resulting module hash.
 ///

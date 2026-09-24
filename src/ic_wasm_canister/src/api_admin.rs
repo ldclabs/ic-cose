@@ -13,8 +13,12 @@ use std::fmt::Debug;
 
 use crate::{
     create_canister_on, create_pool_canister, extend_role_set, is_controller,
-    is_controller_or_manager, is_controller_or_manager_or_committer, management, store,
-    validate_principals, CreateOutcome, MILLISECONDS,
+    is_controller_or_manager, is_controller_or_manager_or_committer, management,
+    store::{
+        self,
+        state::{OperationGuard, TopupGuard},
+    },
+    validate_principals, CreateOutcome, MAX_MESSAGE_PAYLOAD_BYTES, MILLISECONDS,
 };
 
 // encoded candid arguments: ()
@@ -24,6 +28,9 @@ static EMPTY_CANDID_ARGS: &[u8] = &[68, 73, 68, 76, 0, 0];
 /// creation fee.
 const DEFAULT_CREATION_BUDGET: u128 = 2_000_000_000_000;
 const MAX_TARGET_CONTROLLERS: usize = 10;
+/// Target calls a batch operation keeps in flight at once.
+const BATCH_CONCURRENCY: usize = 7;
+const MAX_BATCH_REPLY_BYTES: usize = 64 * 1024;
 
 // Only controller-authorized adoption may undo an explicit handoff/forget.
 // Receipt repair deliberately uses commit_deployment without lifting the barrier.
@@ -77,12 +84,8 @@ async fn validate_reconcile_candidate(
     Ok(())
 }
 
-fn validate_target_creation_settings(
-    settings: Option<&mgt::CanisterSettings>,
-) -> Result<(), String> {
-    let Some(controllers) = settings.and_then(|settings| settings.controllers.as_ref()) else {
-        return Ok(());
-    };
+/// Rules every controller list sent to the management canister must meet.
+fn validate_target_controllers(controllers: &[Principal]) -> Result<(), String> {
     if controllers.contains(&Principal::anonymous()) {
         return Err("anonymous target controller is not allowed".to_string());
     }
@@ -95,10 +98,68 @@ fn validate_target_creation_settings(
     if unique.len() != controllers.len() {
         return Err("target controllers must be unique".to_string());
     }
+    Ok(())
+}
+
+fn validate_target_creation_settings(
+    settings: Option<&mgt::CanisterSettings>,
+) -> Result<(), String> {
+    let Some(controllers) = settings.and_then(|settings| settings.controllers.as_ref()) else {
+        return Ok(());
+    };
+    validate_target_controllers(controllers)?;
     if !controllers.contains(&ic_cdk::api::canister_self())
         && controllers.len() >= MAX_TARGET_CONTROLLERS
     {
         return Err("cannot add this canister to a full controllers list".to_string());
+    }
+    Ok(())
+}
+
+fn validate_install_args(args: &[u8]) -> Result<(), String> {
+    if args.len() > MAX_MESSAGE_PAYLOAD_BYTES {
+        return Err(format!(
+            "install arguments exceed {MAX_MESSAGE_PAYLOAD_BYTES} bytes"
+        ));
+    }
+    Ok(())
+}
+
+/// A settings change on a managed target, idle and still controlled by this
+/// canister; handing control away takes the explicit handoff flow.
+fn validate_managed_settings(args: &mgt::UpdateSettingsArgs) -> Result<(), String> {
+    ensure_idle_deployment(&args.canister_id)?;
+    if let Some(controllers) = args.settings.controllers.as_ref() {
+        if !controllers.contains(&ic_cdk::api::canister_self()) {
+            return Err(
+                "refusing to remove the wasm canister from target controllers; use an explicit handoff flow"
+                    .to_string(),
+            );
+        }
+        validate_target_controllers(controllers)?;
+    }
+    Ok(())
+}
+
+fn validate_handoff(args: &mgt::UpdateSettingsArgs) -> Result<(), String> {
+    ensure_idle_deployment(&args.canister_id)?;
+    let controllers = args
+        .settings
+        .controllers
+        .as_ref()
+        .ok_or_else(|| "handoff requires an explicit controllers list".to_string())?;
+    if controllers.is_empty() || controllers.contains(&ic_cdk::api::canister_self()) {
+        return Err("handoff controllers must be non-empty and exclude this canister".to_string());
+    }
+    validate_target_controllers(controllers)
+}
+
+fn ensure_idle_deployment(canister: &Principal) -> Result<(), String> {
+    if store::state::deployed(canister).is_none() {
+        return Err("NotFound: canister not found".to_string());
+    }
+    if store::state::operation_active(canister) {
+        return Err("a deployment is in flight for this canister".to_string());
     }
     Ok(())
 }
@@ -249,9 +310,7 @@ async fn create_and_install(
     let (hash, wasm) = store::wasm::get_latest_metadata(&wasm_name)?;
     let expected_module_hash = wasm.module_hash;
     let arg = args.unwrap_or_else(|| ByteBuf::from(EMPTY_CANDID_ARGS));
-    if arg.len() > 1_500_000 {
-        return Err("install arguments exceed 1.5 MB".to_string());
-    }
+    validate_install_args(&arg)?;
     let canister_id = match subnet {
         Some(subnet) => create_canister_on(subnet, Some(settings), DEFAULT_CREATION_BUDGET).await?,
         None => management::create_canister(settings, DEFAULT_CREATION_BUDGET)
@@ -259,7 +318,7 @@ async fn create_and_install(
             .map_err(format_error)?,
     };
     let attempt = ic_cdk::api::time() / MILLISECONDS;
-    store::state::acquire_operation(canister_id, hash, attempt, attempt).map_err(|err| {
+    let _lock = OperationGuard::acquire(canister_id, hash, attempt, attempt).map_err(|err| {
         format!(
             "canister {} was created, but its install lock failed: {}",
             canister_id.to_text(),
@@ -295,7 +354,6 @@ async fn create_and_install(
     } else {
         store::wasm::add_log(log).map(|_| ())
     };
-    store::state::release_operation(canister_id, &hash, attempt);
     if let Err(record_error) = record_result {
         return Err(format!(
             "canister {} was created, but recording its install outcome failed: {}; reconcile it explicitly",
@@ -324,9 +382,7 @@ fn validate_admin_create_canister(
     let _ = store::wasm::get_latest_metadata(&wasm_name)?;
     validate_target_creation_settings(settings.as_ref())?;
     let args = args.unwrap_or_else(|| ByteBuf::from(EMPTY_CANDID_ARGS));
-    if args.len() > 1_500_000 {
-        return Err("install arguments exceed 1.5 MB".to_string());
-    }
+    validate_install_args(&args)?;
     pretty_format(&(
         &wasm_name,
         &settings,
@@ -349,9 +405,7 @@ fn validate_admin_create_on(
     let _ = store::wasm::get_latest_metadata(&wasm_name)?;
     validate_target_creation_settings(settings.as_ref())?;
     let args = args.unwrap_or_else(|| ByteBuf::from(EMPTY_CANDID_ARGS));
-    if args.len() > 1_500_000 {
-        return Err("install arguments exceed 1.5 MB".to_string());
-    }
+    validate_install_args(&args)?;
     pretty_format(&(
         &subnet,
         &wasm_name,
@@ -378,12 +432,10 @@ async fn admin_deploy(
     let arg = args
         .args
         .unwrap_or_else(|| ByteBuf::from(EMPTY_CANDID_ARGS));
-    if arg.len() > 1_500_000 {
-        return Err("upgrade arguments exceed 1.5 MB".to_string());
-    }
+    validate_install_args(&arg)?;
     let expected_module_hash = wasm.module_hash;
     let attempt = ic_cdk::api::time() / MILLISECONDS;
-    store::state::acquire_operation(canister, hash, attempt, attempt)?;
+    let _lock = OperationGuard::acquire(canister, hash, attempt, attempt)?;
     let mut observed_prev_hash = ByteArray::from([0u8; 32]);
     let res = async {
         let info = management::canister_info(canister).await?;
@@ -435,7 +487,6 @@ async fn admin_deploy(
     } else {
         store::wasm::add_log(log).map(|_| ())
     };
-    store::state::release_operation(canister, &hash, attempt);
     if let Err(record_error) = record_result {
         return if res.is_ok() {
             Err(format!(
@@ -468,43 +519,38 @@ async fn admin_reconcile_deployment(
         return Err("artifact belongs to another wasm name".to_string());
     }
     let attempt = ic_cdk::api::time() / MILLISECONDS;
-    store::state::acquire_operation(canister, artifact_hash, attempt, attempt)?;
-    let result = async {
-        let info = management::canister_info(canister).await?;
-        if !info.controllers.contains(&ic_cdk::api::canister_self()) {
-            return Err("this canister is not a target controller".to_string());
-        }
-        if info.module_hash != Some(metadata.module_hash) {
-            return Err("target module hash does not match the artifact".to_string());
-        }
-        if store::state::deployed(&canister).is_some_and(|deployment| {
-            deployment.artifact_hash == artifact_hash
-                && deployment.module_hash == metadata.module_hash
-                && deployment.wasm_name == wasm_name
-        }) {
-            store::state::resume_management(&canister);
-            return Ok(());
-        }
-        let previous = store::state::deployed(&canister)
-            .map(|deployment| deployment.module_hash)
-            .unwrap_or_default();
-        commit_admin_deployment(store::DeployLog {
-            name: wasm_name,
-            deploy_at: ic_cdk::api::time() / MILLISECONDS,
-            canister,
-            prev_hash: previous,
-            wasm_hash: artifact_hash,
-            module_hash: Some(metadata.module_hash),
-            args: ByteBuf::new(),
-            args_hash: None,
-            args_size: 0,
-            error: None,
-        })?;
-        Ok(())
+    let _lock = OperationGuard::acquire(canister, artifact_hash, attempt, attempt)?;
+    let info = management::canister_info(canister).await?;
+    if !info.controllers.contains(&ic_cdk::api::canister_self()) {
+        return Err("this canister is not a target controller".to_string());
     }
-    .await;
-    store::state::release_operation(canister, &artifact_hash, attempt);
-    result
+    if info.module_hash != Some(metadata.module_hash) {
+        return Err("target module hash does not match the artifact".to_string());
+    }
+    if store::state::deployed(&canister).is_some_and(|deployment| {
+        deployment.artifact_hash == artifact_hash
+            && deployment.module_hash == metadata.module_hash
+            && deployment.wasm_name == wasm_name
+    }) {
+        store::state::resume_management(&canister);
+        return Ok(());
+    }
+    let previous = store::state::deployed(&canister)
+        .map(|deployment| deployment.module_hash)
+        .unwrap_or_default();
+    commit_admin_deployment(store::DeployLog {
+        name: wasm_name,
+        deploy_at: ic_cdk::api::time() / MILLISECONDS,
+        canister,
+        prev_hash: previous,
+        wasm_hash: artifact_hash,
+        module_hash: Some(metadata.module_hash),
+        args: ByteBuf::new(),
+        args_hash: None,
+        args_size: 0,
+        error: None,
+    })?;
+    Ok(())
 }
 
 #[ic_cdk::update(guard = "is_controller")]
@@ -517,9 +563,7 @@ async fn validate_admin_deploy(
         .args
         .as_ref()
         .map_or(EMPTY_CANDID_ARGS, |value| value.as_slice());
-    if args_.len() > 1_500_000 {
-        return Err("upgrade arguments exceed 1.5 MB".to_string());
-    }
+    validate_install_args(args_)?;
     let rt = pretty_format(&(
         &args.name,
         &args.canister,
@@ -609,57 +653,52 @@ async fn batch_call_results(
     validate_batch_input(&method, &args)?;
     let token = ByteArray::from([0xfc; 32]);
     let attempt = ic_cdk::api::time() / MILLISECONDS;
-    let mut locked = Vec::with_capacity(ids.len());
-    for id in &ids {
-        if let Err(err) = store::state::acquire_operation(*id, token, attempt, attempt) {
-            for acquired in locked {
-                store::state::release_operation(acquired, &token, attempt);
+    // Dropping the guards releases every target, also when a later lock fails.
+    let _locks = ids
+        .iter()
+        .map(|id| OperationGuard::acquire(*id, token, attempt, attempt))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut results = Vec::with_capacity(ids.len());
+    let mut response_bytes = 0usize;
+    for group in ids.chunks(BATCH_CONCURRENCY) {
+        // Bounded wait: a target that never answers must not keep this
+        // canister from stopping, nor hold the batch's locks forever.
+        let replies = futures::future::join_all(group.iter().map(|id| {
+            let (method, args) = (&method, &args);
+            async move {
+                ic_cdk::call::Call::bounded_wait(*id, method)
+                    .with_raw_args(args)
+                    .await
             }
-            return Err(err);
-        }
-        locked.push(*id);
-    }
-    let result = async {
-        let mut results = Vec::with_capacity(ids.len());
-        let mut response_bytes = 0usize;
-        for id in ids {
-            match ic_cdk::call::Call::unbounded_wait(id, &method)
-                .with_raw_args(&args)
-                .await
-            {
+        }))
+        .await;
+        for (id, reply) in group.iter().zip(replies) {
+            let (reply, error) = match reply {
                 Ok(data) => {
                     let bytes = data.into_bytes();
-                    if bytes.len() > 64 * 1024
-                        || response_bytes.saturating_add(bytes.len()) > 1_500_000
+                    if bytes.len() > MAX_BATCH_REPLY_BYTES
+                        || response_bytes.saturating_add(bytes.len()) > MAX_MESSAGE_PAYLOAD_BYTES
                     {
-                        results.push(BatchCallResult {
-                            canister: id,
-                            reply: None,
-                            error: Some("reply exceeds the batch response limit".to_string()),
-                        });
+                        (
+                            None,
+                            Some("reply exceeds the batch response limit".to_string()),
+                        )
                     } else {
-                        response_bytes = response_bytes.saturating_add(bytes.len());
-                        results.push(BatchCallResult {
-                            canister: id,
-                            reply: Some(ByteBuf::from(bytes)),
-                            error: None,
-                        });
+                        response_bytes += bytes.len();
+                        (Some(ByteBuf::from(bytes)), None)
                     }
                 }
-                Err(err) => results.push(BatchCallResult {
-                    canister: id,
-                    reply: None,
-                    error: Some(bounded_error(format_error(err))),
-                }),
-            }
+                Err(err) => (None, Some(bounded_error(format_error(err)))),
+            };
+            results.push(BatchCallResult {
+                canister: *id,
+                reply,
+                error,
+            });
         }
-        Ok(results)
     }
-    .await;
-    for id in locked {
-        store::state::release_operation(id, &token, attempt);
-    }
-    result
+    Ok(results)
 }
 
 #[ic_cdk::update(guard = "is_controller")]
@@ -702,100 +741,95 @@ async fn batch_topup_results(
     take: usize,
 ) -> Result<Vec<TopupResult>, String> {
     store::state::ensure_memory_available()?;
-    store::state::begin_topup()?;
-    let result = async {
-        let (threshold, amount) = store::state::with(|s| (s.topup_threshold, s.topup_amount));
-        let canisters = store::state::deployed_canisters_page(prev, take);
-        if threshold == 0 || amount == 0 {
-            return Err("canister topup is disabled".to_string());
-        }
-        if amount <= threshold {
-            return Err("topup_amount must exceed topup_threshold".to_string());
-        }
-        if canisters.is_empty() {
-            return Err("no canister deployed".to_string());
-        }
-        if canisters.len() > 100 {
-            return Err("more than 100 deployed canisters; use admin_batch_topup_page".to_string());
-        }
+    let _topup = TopupGuard::begin()?;
+    let (threshold, amount) = store::state::with(|s| (s.topup_threshold, s.topup_amount));
+    let canisters = store::state::deployed_canisters_page(prev, take);
+    if threshold == 0 || amount == 0 {
+        return Err("canister topup is disabled".to_string());
+    }
+    if amount <= threshold {
+        return Err("topup_amount must exceed topup_threshold".to_string());
+    }
+    if canisters.is_empty() {
+        return Err("no canister deployed".to_string());
+    }
+    if canisters.len() > 100 {
+        return Err("more than 100 deployed canisters; use admin_batch_topup_page".to_string());
+    }
 
-        let mut results = Vec::with_capacity(canisters.len());
-        for ids in canisters.chunks(7) {
-            let chunk = futures::future::join_all(ids.iter().map(|id| async move {
-                match management::cycle_balance(*id).await {
-                    Ok(cycles) => TopupResult {
-                        canister: *id,
-                        balance_before: Some(cycles),
-                        deposited: 0,
-                        error: None,
-                    },
-                    Err(err) => TopupResult {
-                        canister: *id,
-                        balance_before: None,
-                        deposited: 0,
-                        error: Some(bounded_error(err)),
-                    },
-                }
-            }))
-            .await;
-            results.extend(chunk);
-        }
+    let mut results = Vec::with_capacity(canisters.len());
+    for ids in canisters.chunks(BATCH_CONCURRENCY) {
+        let chunk = futures::future::join_all(ids.iter().map(|id| async move {
+            match management::cycle_balance(*id).await {
+                Ok(cycles) => TopupResult {
+                    canister: *id,
+                    balance_before: Some(cycles),
+                    deposited: 0,
+                    error: None,
+                },
+                Err(err) => TopupResult {
+                    canister: *id,
+                    balance_before: None,
+                    deposited: 0,
+                    error: Some(bounded_error(err)),
+                },
+            }
+        }))
+        .await;
+        results.extend(chunk);
+    }
 
-        let needs_topup: Vec<usize> = results
-            .iter()
-            .enumerate()
-            .filter_map(|(index, result)| {
-                result
-                    .balance_before
-                    .is_some_and(|cycles| cycles <= threshold)
-                    .then_some(index)
-            })
-            .collect();
-        if needs_topup.is_empty() {
-            return Ok(results);
-        }
-        let balance = ic_cdk::api::canister_liquid_cycle_balance();
-        let required = threshold
-            .checked_add(
-                amount
-                    .checked_mul(needs_topup.len() as u128)
-                    .ok_or_else(|| "top-up amount overflowed".to_string())?,
-            )
-            .ok_or_else(|| "top-up reserve overflowed".to_string())?;
-        if balance < required {
-            return Err(format!(
-                "liquid balance {} is less than reserve {} + amount {} x {}",
-                balance,
-                threshold,
-                amount,
-                needs_topup.len()
-            ));
-        }
+    let needs_topup: Vec<usize> = results
+        .iter()
+        .enumerate()
+        .filter_map(|(index, result)| {
+            result
+                .balance_before
+                .is_some_and(|cycles| cycles <= threshold)
+                .then_some(index)
+        })
+        .collect();
+    if needs_topup.is_empty() {
+        return Ok(results);
+    }
+    let balance = ic_cdk::api::canister_liquid_cycle_balance();
+    let required = threshold
+        .checked_add(
+            amount
+                .checked_mul(needs_topup.len() as u128)
+                .ok_or_else(|| "top-up amount overflowed".to_string())?,
+        )
+        .ok_or_else(|| "top-up reserve overflowed".to_string())?;
+    if balance < required {
+        return Err(format!(
+            "liquid balance {} is less than reserve {} + amount {} x {}",
+            balance,
+            threshold,
+            amount,
+            needs_topup.len()
+        ));
+    }
 
-        for indexes in needs_topup.chunks(7) {
-            let deposits = futures::future::join_all(indexes.iter().map(|index| {
-                let canister = results[*index].canister;
-                async move {
-                    let arg = mgt::CanisterStatusArgs {
-                        canister_id: canister,
-                    };
-                    (canister, mgt::deposit_cycles(&arg, amount).await)
-                }
-            }))
-            .await;
-            for (index, (canister, outcome)) in indexes.iter().zip(deposits) {
-                debug_assert_eq!(results[*index].canister, canister);
-                match outcome {
-                    Ok(()) => results[*index].deposited = amount,
-                    Err(err) => results[*index].error = Some(bounded_error(format_error(err))),
-                }
+    for indexes in needs_topup.chunks(BATCH_CONCURRENCY) {
+        let deposits = futures::future::join_all(indexes.iter().map(|index| {
+            let canister = results[*index].canister;
+            async move {
+                let arg = mgt::CanisterStatusArgs {
+                    canister_id: canister,
+                };
+                (canister, mgt::deposit_cycles(&arg, amount).await)
+            }
+        }))
+        .await;
+        for (index, (canister, outcome)) in indexes.iter().zip(deposits) {
+            debug_assert_eq!(results[*index].canister, canister);
+            match outcome {
+                Ok(()) => results[*index].deposited = amount,
+                Err(err) => results[*index].error = Some(bounded_error(format_error(err))),
             }
         }
-        Ok(results)
     }
-    .await;
-    store::state::end_topup();
-    result
+    Ok(results)
 }
 
 #[ic_cdk::update(guard = "is_controller_or_manager")]
@@ -835,80 +869,32 @@ async fn admin_batch_topup_page(
 
 #[ic_cdk::update(guard = "is_controller")]
 async fn admin_update_canister_settings(args: mgt::UpdateSettingsArgs) -> Result<(), String> {
-    if store::state::deployed(&args.canister_id).is_none() {
-        return Err("NotFound: canister not found".to_string());
-    }
-    if store::state::operation_active(&args.canister_id) {
-        return Err("a deployment is in flight for this canister".to_string());
-    }
-    if let Some(controllers) = args.settings.controllers.as_ref() {
-        if !controllers.contains(&ic_cdk::api::canister_self()) {
-            return Err(
-                "refusing to remove the wasm canister from target controllers; use an explicit handoff flow"
-                    .to_string(),
-            );
-        }
-        let unique: BTreeSet<_> = controllers.iter().collect();
-        if unique.len() != controllers.len() || controllers.contains(&Principal::anonymous()) {
-            return Err("controllers must be unique and non-anonymous".to_string());
-        }
-        if controllers.len() > MAX_TARGET_CONTROLLERS {
-            return Err(format!(
-                "controllers exceed the limit {MAX_TARGET_CONTROLLERS}"
-            ));
-        }
-    }
-    let token = ByteArray::from([0xfe; 32]);
+    validate_managed_settings(&args)?;
     let attempt = ic_cdk::api::time() / MILLISECONDS;
-    store::state::acquire_operation(args.canister_id, token, attempt, attempt)?;
-    let result = mgt::update_settings(&args).await.map_err(format_error);
-    store::state::release_operation(args.canister_id, &token, attempt);
-    result
+    let _lock = OperationGuard::acquire(
+        args.canister_id,
+        ByteArray::from([0xfe; 32]),
+        attempt,
+        attempt,
+    )?;
+    mgt::update_settings(&args).await.map_err(format_error)
 }
 
 /// Explicitly transfers target control away from this canister and removes the
 /// target from the managed deployment index after the settings call succeeds.
 #[ic_cdk::update(guard = "is_controller")]
 async fn admin_handoff_canister(args: mgt::UpdateSettingsArgs) -> Result<(), String> {
-    if store::state::deployed(&args.canister_id).is_none() {
-        return Err("NotFound: canister not found".to_string());
-    }
-    if store::state::operation_active(&args.canister_id) {
-        return Err("a deployment is in flight for this canister".to_string());
-    }
-    let controllers = args
-        .settings
-        .controllers
-        .as_ref()
-        .ok_or_else(|| "handoff requires an explicit controllers list".to_string())?;
-    if controllers.is_empty()
-        || controllers.contains(&Principal::anonymous())
-        || controllers.contains(&ic_cdk::api::canister_self())
-    {
-        return Err(
-            "handoff controllers must be non-empty, non-anonymous, and exclude this canister"
-                .to_string(),
-        );
-    }
-    let unique: BTreeSet<_> = controllers.iter().collect();
-    if unique.len() != controllers.len() {
-        return Err("handoff controllers must be unique".to_string());
-    }
-    if controllers.len() > MAX_TARGET_CONTROLLERS {
-        return Err(format!(
-            "handoff controllers exceed the limit {MAX_TARGET_CONTROLLERS}"
-        ));
-    }
-    let canister = args.canister_id;
-    let token = ByteArray::from([0xfd; 32]);
+    validate_handoff(&args)?;
     let attempt = ic_cdk::api::time() / MILLISECONDS;
-    store::state::acquire_operation(canister, token, attempt, attempt)?;
-    let result = mgt::update_settings(&args).await.map_err(format_error);
-    if result.is_ok() {
-        store::state::forget_deployment(&canister);
-    }
-    store::state::release_operation(canister, &token, attempt);
-    result
+    let _lock = OperationGuard::acquire(
+        args.canister_id,
+        ByteArray::from([0xfd; 32]),
+        attempt,
+        attempt,
+    )?;
+    mgt::update_settings(&args).await.map_err(format_error)?;
+    store::state::forget_deployment(&args.canister_id);
+    Ok(())
 }
 
 #[ic_cdk::update(guard = "is_controller")]
@@ -955,26 +941,7 @@ fn validate_admin_batch_topup() -> Result<String, String> {
 fn validate_admin_update_canister_settings(
     args: mgt::UpdateSettingsArgs,
 ) -> Result<String, String> {
-    if store::state::deployed(&args.canister_id).is_none() {
-        return Err("NotFound: canister not found".to_string());
-    }
-    if store::state::operation_active(&args.canister_id) {
-        return Err("a deployment is in flight for this canister".to_string());
-    }
-    if let Some(controllers) = args.settings.controllers.as_ref() {
-        if !controllers.contains(&ic_cdk::api::canister_self()) {
-            return Err("controller handoff requires the explicit handoff flow".to_string());
-        }
-        let unique: BTreeSet<_> = controllers.iter().collect();
-        if unique.len() != controllers.len() || controllers.contains(&Principal::anonymous()) {
-            return Err("controllers must be unique and non-anonymous".to_string());
-        }
-        if controllers.len() > MAX_TARGET_CONTROLLERS {
-            return Err(format!(
-                "controllers exceed the limit {MAX_TARGET_CONTROLLERS}"
-            ));
-        }
-    }
+    validate_managed_settings(&args)?;
     pretty_format(&args)
 }
 
@@ -1197,21 +1164,6 @@ fn admin_clear_wasm_chunks_for(uploader: Principal) -> Result<u64, String> {
 fn admin_clear_low_wasm_memory() -> Result<(), String> {
     store::state::set_low_wasm_memory(false);
     Ok(())
-}
-
-/// Incrementally builds the per-wasm deployment-log index for records written
-/// by versions that only maintained the global stable log.
-#[ic_cdk::update(guard = "is_controller_or_manager")]
-fn admin_rebuild_log_index(start: u64, take: u32) -> Result<u64, String> {
-    store::state::ensure_memory_available()?;
-    store::wasm::rebuild_log_index(start, take.clamp(1, 100) as usize)
-}
-
-/// Migrates one legacy monolithic artifact into the chunked stable layout.
-#[ic_cdk::update(guard = "is_controller_or_manager")]
-fn admin_migrate_legacy_wasm_artifact(hash: ByteArray<32>) -> Result<bool, String> {
-    store::state::ensure_memory_available()?;
-    store::wasm::migrate_legacy_artifact(&hash)
 }
 
 /// Compacts old successful request receipts into permanent request-id

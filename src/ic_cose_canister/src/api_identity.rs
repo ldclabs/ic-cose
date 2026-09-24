@@ -50,9 +50,10 @@ fn namespace_add_delegator(input: NamespaceDelegatorsInput) -> Result<BTreeSet<P
 
     let caller = ic_cdk::api::msg_caller();
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
+    // validation already rejected any non-lowercase name
     store::ns::mutate_delegators(
         input.ns,
-        input.name.to_ascii_lowercase(),
+        input.name,
         &caller,
         input.delegators,
         true,
@@ -69,7 +70,7 @@ fn namespace_remove_delegator(input: NamespaceDelegatorsInput) -> Result<(), Str
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
     store::ns::mutate_delegators(
         input.ns,
-        input.name.to_ascii_lowercase(),
+        input.name,
         &caller,
         input.delegators,
         false,

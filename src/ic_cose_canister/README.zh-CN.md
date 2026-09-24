@@ -464,14 +464,12 @@ Scope 随角色变化：manager 为 `Namespace.*:<ns>`；auditor 为 `Namespace.
 | `admin_add_allowed_apis` / `admin_remove_allowed_apis` | update | `(vec text) → ()`                                     | Controller / governance                          |
 | `admin_create_namespace`                               | update | `(CreateNamespaceInput) → NamespaceInfo`              | Controller / governance / 全局 manager           |
 | `admin_list_namespace`                                 | query  | `(opt text prev, opt nat32 take) → vec NamespaceInfo` | Controller / governance / 全局 manager / auditor |
-| `admin_migrate_legacy_settings`                        | update | `(nat32 take) → nat64`                                | Controller / governance；增量迁移 setting 存储   |
-| `admin_migrate_legacy_namespace_acls`                  | update | `(nat32 take) → nat64`                                | Controller / governance；增量迁移 ACL            |
 | `admin_recover_namespace_managers`                     | update | `(text, vec principal) → ()`                          | Controller / governance；仅限 manager 已为空     |
 | `admin_clear_low_wasm_memory`                          | update | `() → ()`                                             | Controller / governance；确认恢复后清除保护状态  |
 
 `admin_list_namespace` 按 namespace 名称排序，`prev` 是排除式游标；`take` 默认 10，最大 100。下一页传上一页最后一个 name。Controller / governance 可直接列举；全局 auditor 也可读取。
 
-`allowed_apis` **为空表示全部允许**；非空时只允许集合中精确匹配的方法名。这是业务 update 白名单，覆盖 namespace / setting 更新、普通签名、密钥获取、CWT、delegator 更新和 delegation 签发，以及 `admin_create_namespace`。Query、管理角色 / 白名单接口和 validate 接口不受它限制。清空集合会重新开放全部受控接口，不是关闭全部接口。
+`allowed_apis` **为空表示全部允许**；非空时只允许集合中精确匹配的方法名。这是业务 update 白名单，覆盖 namespace / setting 更新、普通签名、密钥获取、CWT、delegator 更新和 delegation 签发，以及 `admin_create_namespace`。Query、管理角色 / 白名单接口和 validate 接口不受它限制。由于空集合表示全部允许，`admin_remove_allowed_apis` 及其 validate 接口会拒绝把非空集合移除为空的操作。
 
 治理提案可使用六组校验接口，对应 `admin_{add,remove}_{managers,auditors,allowed_apis}`：
 
@@ -492,9 +490,9 @@ Scope 随角色变化：manager 为 `Namespace.*:<ns>`；auditor 为 `Namespace.
 
 Allowed API 校验目前不检查方法名是否真实存在。
 
-升级接收 `opt variant { Upgrade = record { ... } }`，也允许 `null` 仅恢复状态。可选字段为 `name`、`subnet_size`、`freezing_threshold`、`governance_canister`、`vetkd_key_name`、`clear_governance_canister`、`vetkd_context_version`、`migrate_legacy_namespaces`。空选项保留旧值；清除治理身份必须显式传 `clear_governance_canister = opt true`，且不能同时设置新 governance。ECDSA / Schnorr key name 不在升级参数中。
+升级接收 `opt variant { Upgrade = record { ... } }`，也允许 `null` 仅恢复状态。可选字段为 `name`、`subnet_size`、`freezing_threshold`、`governance_canister`、`vetkd_key_name`、`clear_governance_canister`、`vetkd_context_version`。空选项保留旧值；清除治理身份必须显式传 `clear_governance_canister = opt true`，且不能同时设置新 governance。ECDSA / Schnorr key name 不在升级参数中。
 
-Namespace、setting、ACL、历史 payload 和短期 canister-signature intent 使用 stable storage，升级保存 / 恢复全局状态及 certified root。`migrate_legacy_namespaces = opt true` 只用于从最早期单体 namespace 存储直接升级；当前 stable-map 部署必须保持 false / null，以免把旧快照误当作权威数据。若公钥或内部 IV 缺失，升级后会持续退避重试；不会覆盖已经存在的 IV。更换 VetKD key name 或 context version 前需要处理旧密文兼容；reinstall 不能当作普通升级使用。
+Namespace、setting、ACL、历史 payload 和短期 canister-signature intent 使用 stable storage，升级保存 / 恢复全局状态及 certified root。自 0.12 起移除了旧单体存储及其迁移：stable schema 低于 v2、仍有旧 setting 记录或仍有 namespace 内嵌成员时，升级会 trap 并回滚。此类部署需先升级到 0.11，并在其上运行 `admin_migrate_legacy_settings` 与 `admin_migrate_legacy_namespace_acls_page` 直至迁移完毕。若公钥或内部 IV 缺失，升级后会持续退避重试；不会覆盖已经存在的 IV。更换 VetKD key name 或 context version 前需要处理旧密文兼容；reinstall 不能当作普通升级使用。
 
 wasm32 与 wasm64 均使用真实 IC stable memory；wasm64 显式适配稳定存储，避免依赖的默认内存模拟后端。两种 Wasm 架构都会使用 IC 时间并更新 canister-signature 的认证根，宿主单元测试才使用模拟后端。
 
@@ -609,9 +607,7 @@ pub async fn update_plaintext(cli: &Client, mut path: SettingPath) -> Result<u32
 
 公开可见性不授予消耗 namespace gas 的权限；VetKD 公钥调用仍要求 namespace 角色或现有 setting 授权。
 
-### 有界 ACL 迁移与 Rust 客户端
-
-`admin_migrate_legacy_namespace_acls_page(prev, scan_limit)` 每次最多扫描 100 个 namespace，返回 `{ items; next_cursor }`；items 是本次迁移的名称。即使 items 为空，也要继续使用 next_cursor，直到其为空。旧迁移接口在总 namespace 数超过 1000 时要求使用分页版本。
+### Rust 客户端
 
 Rust `build_agent` 默认保留 IC root key 并验证 query 签名，包括 HTTP host。仅本地 replica 使用显式 `build_local_agent`。`setting_get_consensus` 用 update 读取配置；常规查询保留 query 速度。SDK 还提供 `namespace_get_info_v2`、成员/固定身份分页和 `namespace_list_setting_keys_v2`。
 

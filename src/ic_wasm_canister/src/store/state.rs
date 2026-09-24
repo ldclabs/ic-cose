@@ -31,9 +31,7 @@ pub fn get_state_info() -> StateInfo {
         }),
         latest_version_total,
         latest_version_truncated: latest_version_total > 1_000,
-        wasm_total: WASM_STORE
-            .with(|r| r.borrow().len())
-            .saturating_add(ARTIFACT_META_STORE.with_borrow(|r| r.len())),
+        wasm_total: ARTIFACT_META_STORE.with_borrow(|r| r.len()),
         deployed_total: DEPLOYED_STORE.with_borrow(|r| r.len()),
         deployment_logs: INSTALL_LOGS.with(|r| r.borrow().len()),
         governance_canister: s.governance_canister,
@@ -59,11 +57,42 @@ pub fn initialize_schema() {
     });
 }
 
+/// Rejects stable state that still needs a migration removed from this version.
+///
+/// Versions up to 0.11 carried the schema v1 migration, the monolithic
+/// artifact store and the per-wasm log index rebuild. State that has not been
+/// through them must first be upgraded to 0.11 and migrated there; trapping
+/// here rolls the upgrade back instead of silently dropping that data.
+pub(crate) fn ensure_no_legacy_state() -> Result<(), String> {
+    let schema = SCHEMA_STORE.with_borrow(|r| *r.get());
+    if schema != CURRENT_SCHEMA_VERSION {
+        return Err(format!(
+            "stable schema {schema} is not {CURRENT_SCHEMA_VERSION}; upgrade through 0.11 first"
+        ));
+    }
+    let legacy_artifacts = retired_map_len::<[u8; 32], _>(
+        MEMORY_MANAGER.with_borrow(|m| m.get(LEGACY_WASM_MEMORY_ID)),
+    );
+    if legacy_artifacts > 0 {
+        return Err(format!(
+            "{legacy_artifacts} legacy artifacts remain; run admin_migrate_legacy_wasm_artifact on 0.11 first"
+        ));
+    }
+    let logs = INSTALL_LOGS.with_borrow(|r| r.len());
+    let indexed = LOG_INDEX_STORE.with_borrow(|r| r.len());
+    if indexed != logs {
+        return Err(format!(
+            "deployment log index covers {indexed} of {logs} logs; run admin_rebuild_log_index on 0.11 first"
+        ));
+    }
+    Ok(())
+}
+
 pub fn load() {
+    ensure_no_legacy_state().unwrap_or_else(|err| ic_cdk::trap(&err));
     STATE_STORE.with_borrow(|r| {
         STATE.with_borrow_mut(|h| {
-            let s = r.get().to_owned();
-            *h = s;
+            *h = r.get().clone();
         });
     });
     with_mut(|state| {
@@ -78,102 +107,11 @@ pub fn load() {
         {
             state.canister_id = Some(ic_cdk::api::canister_self());
         }
-    });
-
-    let schema = SCHEMA_STORE.with_borrow(|r| *r.get());
-    if schema < CURRENT_SCHEMA_VERSION {
-        let (latest, paths, deployed) = with_mut(|s| {
-            (
-                std::mem::take(&mut s.latest_version),
-                std::mem::take(&mut s.upgrade_path),
-                std::mem::take(&mut s.deployed_list),
-            )
-        });
-
-        LATEST_STORE.with_borrow_mut(|r| {
-            for (name, hash) in latest {
-                r.insert(name, *hash);
-            }
-        });
-        RELEASE_PATH_STORE.with_borrow_mut(|r| {
-            let mut paths: Vec<_> = paths.into_iter().collect();
-            paths.sort_unstable_by(|left, right| left.0.cmp(&right.0).then(left.1.cmp(&right.1)));
-            for (previous_artifact, next_artifact) in paths {
-                let Some(next) = WASM_STORE.with_borrow(|store| store.get(&*next_artifact)) else {
-                    continue;
-                };
-                let previous_module = if *previous_artifact == [0u8; 32] {
-                    ByteArray::from([0u8; 32])
-                } else if let Ok(hash) = wasm::module_hash(&previous_artifact) {
-                    hash
-                } else {
-                    continue;
-                };
-                r.insert(ReleaseKey(next.name, previous_module), *next_artifact);
-            }
-            let mut first_by_name = BTreeMap::<String, (u64, [u8; 32])>::new();
-            WASM_STORE.with_borrow(|store| {
-                for entry in store.iter() {
-                    let wasm = entry.value();
-                    let candidate = (wasm.created_at, *entry.key());
-                    first_by_name
-                        .entry(wasm.name)
-                        .and_modify(|current| {
-                            if candidate < *current {
-                                *current = candidate;
-                            }
-                        })
-                        .or_insert(candidate);
-                }
-            });
-            for (name, (_, artifact_hash)) in first_by_name {
-                let key = ReleaseKey(name, ByteArray::from([0u8; 32]));
-                if !r.contains_key(&key) {
-                    r.insert(key, artifact_hash);
-                }
-            }
-        });
-        DEPLOYED_STORE.with_borrow_mut(|r| {
-            for (canister, (log_id, artifact_hash)) in deployed {
-                let Some(wasm_name) =
-                    INSTALL_LOGS.with_borrow(|logs| logs.get(log_id).map(|log| log.name))
-                else {
-                    ic_cdk::api::debug_print(format!(
-                        "skipped deployment {} with missing log {} during migration",
-                        canister, log_id
-                    ));
-                    continue;
-                };
-                let Ok(module_hash) = wasm::module_hash(&artifact_hash) else {
-                    ic_cdk::api::debug_print(format!(
-                        "skipped deployment {} with invalid artifact {} during migration",
-                        canister,
-                        hex::encode(artifact_hash.as_ref())
-                    ));
-                    continue;
-                };
-                r.insert(
-                    canister,
-                    DeploymentIndex {
-                        log_id,
-                        artifact_hash,
-                        module_hash,
-                        wasm_name,
-                    },
-                );
-            }
-        });
-        SCHEMA_STORE.with_borrow_mut(|r| {
-            r.set(CURRENT_SCHEMA_VERSION);
-        });
-        save();
-    }
-
-    with_mut(|s| {
-        s.available_pool.clear();
-        s.active_operations.clear();
-        s.topup_in_progress = false;
-        s.low_wasm_memory = false;
+        // transient fields are never serialized; reset them explicitly so an
+        // in-process save/load behaves like a real upgrade
+        state.active_operations.clear();
+        state.topup_in_progress = false;
+        state.low_wasm_memory = false;
     });
     provision::recover_after_upgrade();
 }
@@ -238,6 +176,47 @@ pub fn resume_management(canister: &Principal) {
     FORGOTTEN_DEPLOYMENT_STORE.with_borrow_mut(|r| r.remove(canister));
 }
 
+/// Serializes operations on one target canister.
+///
+/// The lock is released when the guard drops, which ic-cdk also does when a
+/// callback traps and cancels the task, so a failure after an `await` can
+/// never strand the target until the next upgrade.
+#[must_use = "the lock is released as soon as the guard is dropped"]
+#[derive(Debug)]
+pub struct OperationGuard {
+    canister: Principal,
+    request_id: ByteArray<32>,
+    attempt: u64,
+}
+
+impl OperationGuard {
+    pub fn acquire(
+        canister: Principal,
+        request_id: ByteArray<32>,
+        attempt: u64,
+        now_ms: u64,
+    ) -> Result<Self, String> {
+        acquire_operation(canister, request_id, attempt, now_ms)?;
+        Ok(Self::adopt(canister, request_id, attempt))
+    }
+
+    /// Takes over a lock already acquired by a provisioning step. Releasing is
+    /// idempotent, so a step that also releases it explicitly is harmless.
+    pub fn adopt(canister: Principal, request_id: ByteArray<32>, attempt: u64) -> Self {
+        Self {
+            canister,
+            request_id,
+            attempt,
+        }
+    }
+}
+
+impl Drop for OperationGuard {
+    fn drop(&mut self) {
+        release_operation(self.canister, &self.request_id, self.attempt);
+    }
+}
+
 pub fn acquire_operation(
     canister: Principal,
     request_id: ByteArray<32>,
@@ -279,18 +258,26 @@ pub fn operation_active(canister: &Principal) -> bool {
     with(|state| state.active_operations.contains_key(canister))
 }
 
-pub fn begin_topup() -> Result<(), String> {
-    with_mut(|s| {
-        if s.topup_in_progress {
-            return Err("a batch top-up is already in flight".to_string());
-        }
-        s.topup_in_progress = true;
-        Ok(())
-    })
+/// Marks a batch top-up in flight until dropped, including on a trap.
+#[must_use = "the top-up flag is cleared as soon as the guard is dropped"]
+pub struct TopupGuard(());
+
+impl TopupGuard {
+    pub fn begin() -> Result<Self, String> {
+        with_mut(|s| {
+            if s.topup_in_progress {
+                return Err("a batch top-up is already in flight".to_string());
+            }
+            s.topup_in_progress = true;
+            Ok(Self(()))
+        })
+    }
 }
 
-pub fn end_topup() {
-    with_mut(|s| s.topup_in_progress = false);
+impl Drop for TopupGuard {
+    fn drop(&mut self) {
+        with_mut(|s| s.topup_in_progress = false);
+    }
 }
 
 pub fn set_low_wasm_memory(value: bool) {

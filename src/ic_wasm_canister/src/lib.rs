@@ -32,6 +32,10 @@ fn unsupported_getrandom(_: &mut [u8]) -> Result<(), getrandom_02::Error> {
 // NNS Cycles Minting Canister: "rkp4c-7iaaa-aaaaa-aaaca-cai"
 static CMC_PRINCIPAL: Principal = Principal::from_slice(&[0, 0, 0, 0, 0, 0, 0, 4, 1, 1]);
 const MILLISECONDS: u64 = 1_000_000;
+/// Keeps a payload this canister builds comfortably below the 2 MiB message
+/// limit, including Candid framing: install arguments, direct installs, query
+/// replies and batch replies.
+const MAX_MESSAGE_PAYLOAD_BYTES: usize = 1_500_000;
 
 fn is_controller() -> Result<(), String> {
     let caller = ic_cdk::api::msg_caller();

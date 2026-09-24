@@ -481,14 +481,12 @@ Certified signature intents are retained in stable storage and reconstructed acr
 | `admin_add_allowed_apis` / `admin_remove_allowed_apis` | update | `(vec text) → ()`                                     | Controller / governance                                |
 | `admin_create_namespace`                               | update | `(CreateNamespaceInput) → NamespaceInfo`              | Controller / governance / Global manager               |
 | `admin_list_namespace`                                 | query  | `(opt text prev, opt nat32 take) → vec NamespaceInfo` | Controller / governance / Global manager / auditor     |
-| `admin_migrate_legacy_settings`                        | update | `(nat32 take) → nat64`                                | Controller / governance; incremental setting migration |
-| `admin_migrate_legacy_namespace_acls`                  | update | `(nat32 take) → nat64`                                | Controller / governance; incremental ACL migration     |
 | `admin_recover_namespace_managers`                     | update | `(text, vec principal) → ()`                          | Controller / governance; only if manager set is empty  |
 | `admin_clear_low_wasm_memory`                          | update | `() → ()`                                             | Controller / governance; clears low-memory protection  |
 
 `admin_list_namespace` orders entries lexicographically by namespace name. `prev` acts as an exclusive cursor; `take` defaults to 10 (maximum 100). Fetch subsequent pages by passing the last name of the previous page.
 
-When `allowed_apis` is **empty, all endpoints are permitted**. When non-empty, only exact matching method names are allowed. This whitelist applies to state-modifying business updates: namespace and setting writes, signing, key derivations, CWT issuance, delegator updates, delegation issuance, and `admin_create_namespace`. Queries, administrative role/whitelist updates, and validation endpoints are exempt. Emptying the list re-enables all methods rather than locking them down.
+When `allowed_apis` is **empty, all endpoints are permitted**. When non-empty, only exact matching method names are allowed. This whitelist applies to state-modifying business updates: namespace and setting writes, signing, key derivations, CWT issuance, delegator updates, delegation issuance, and `admin_create_namespace`. Queries, administrative role/whitelist updates, and validation endpoints are exempt. Because an empty list permits everything, `admin_remove_allowed_apis` (and its validation endpoints) rejects a removal that would empty a non-empty list.
 
 Governance proposals can validate inputs ahead of execution using six validation endpoints corresponding to `admin_{add,remove}_{managers,auditors,allowed_apis}`:
 
@@ -498,9 +496,9 @@ Governance proposals can validate inputs ahead of execution using six validation
 
 These methods require controller/governance callers and return `Result<text>` with a Candid-formatted preview of the changes without modifying state. Legacy `validate_admin_*` endpoints returning `Result<()>` remain available; prefer `validate2_` for new integrations. Method existence is not validated when whitelisting APIs.
 
-Canister upgrades take `opt variant { Upgrade = record { ... } }` or `null` to restore state without parameter changes. Optional upgrade fields include `name`, `subnet_size`, `freezing_threshold`, `governance_canister`, `vetkd_key_name`, `clear_governance_canister`, `vetkd_context_version`, and `migrate_legacy_namespaces`. To remove governance privileges, explicitly set `clear_governance_canister = opt true` while leaving `governance_canister` null. ECDSA and Schnorr key names cannot be modified during upgrades.
+Canister upgrades take `opt variant { Upgrade = record { ... } }` or `null` to restore state without parameter changes. Optional upgrade fields include `name`, `subnet_size`, `freezing_threshold`, `governance_canister`, `vetkd_key_name`, `clear_governance_canister`, and `vetkd_context_version`. To remove governance privileges, explicitly set `clear_governance_canister = opt true` while leaving `governance_canister` null. ECDSA and Schnorr key names cannot be modified during upgrades.
 
-Namespaces, settings, ACLs, archives, and short-term delegation intents are stored in stable storage. Set `migrate_legacy_namespaces = opt true` only when upgrading directly from very early monolithic storage layouts; modern deployments using stable structures must leave this false or null. Changing VetKD key names or context versions breaks compatibility with existing ciphertexts. Upgrades preserve state; never execute a reinstall in place of an upgrade.
+Namespaces, settings, ACLs, archives, and short-term delegation intents are stored in stable storage. Since 0.12 the legacy monolithic stores and their migrations are gone: an upgrade traps, and is rolled back, while the stable schema is older than v2, legacy settings remain, or any namespace still embeds its members. Upgrade such deployments to 0.11 first and run `admin_migrate_legacy_settings` and `admin_migrate_legacy_namespace_acls_page` there until nothing is left. Changing VetKD key names or context versions breaks compatibility with existing ciphertexts. Upgrades preserve state; never execute a reinstall in place of an upgrade.
 
 Both wasm32 and wasm64 utilize native IC stable memory. The wasm64 target explicitly configures stable memory backends to avoid simulated in-memory storage. Both architectures synchronize with IC time and maintain certified data roots.
 
@@ -616,9 +614,7 @@ Business errors do not return numeric status codes; avoid coupling application c
 
 Public visibility does not authorize spending namespace gas on VetKD public-key calls. Those calls require a namespace role or an existing setting grant.
 
-### Bounded migration and client defaults
-
-`admin_migrate_legacy_namespace_acls_page(prev, scan_limit)` scans at most 100 namespaces and returns `{ items; next_cursor }`. Follow the last-scanned cursor even on empty result pages. The legacy migration endpoint requires the paginated method above 1000 namespaces.
+### Key permissions and client defaults
 
 Namespace members may prefetch their own KEKs. External subjects/readers need an existing setting grant; that grant also permits the corresponding VetKD public key. Management calls reserve request fees plus the `cost_call` upper bound. Unsent calls are fully refunded; returned attached cycles are credited after callbacks. The remaining response/callback reservation is a conservative charge, not measured actual expenditure.
 

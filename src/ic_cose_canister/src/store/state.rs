@@ -221,11 +221,46 @@ fn restore_signature_intents() {
     });
 }
 
-pub fn load(migrate_legacy_namespaces: bool) {
+/// Rejects stable state that still needs a migration removed from this version.
+///
+/// Versions up to 0.11 carried the monolithic namespace and setting stores and
+/// the migration that externalizes namespace members into the ACL stores.
+/// State that has not been through them must first be upgraded to 0.11 and
+/// migrated there; trapping here rolls the upgrade back instead of silently
+/// dropping that data.
+pub(crate) fn ensure_no_legacy_state() -> Result<(), String> {
+    let schema = SCHEMA_STORE.with_borrow(|r| *r.get());
+    if schema != CURRENT_SCHEMA_VERSION {
+        return Err(format!(
+            "stable schema {schema} is not {CURRENT_SCHEMA_VERSION}; upgrade through 0.11 first"
+        ));
+    }
+    let legacy_settings = retired_map_len::<SettingPathKey, _>(
+        MEMORY_MANAGER.with_borrow(|m| m.get(LEGACY_SETTINGS_MEMORY_ID)),
+    );
+    if legacy_settings > 0 {
+        return Err(format!(
+            "{legacy_settings} legacy settings remain; run admin_migrate_legacy_settings on 0.11 first"
+        ));
+    }
+    let legacy_namespaces = NAMESPACES_STORE.with_borrow(|r| {
+        r.iter()
+            .filter(|entry| entry.value().acl_version < ACL_VERSION)
+            .count()
+    });
+    if legacy_namespaces > 0 {
+        return Err(format!(
+            "{legacy_namespaces} namespaces still embed their members; run admin_migrate_legacy_namespace_acls_page on 0.11 first"
+        ));
+    }
+    Ok(())
+}
+
+pub fn load() {
+    ensure_no_legacy_state().unwrap_or_else(|err| ic_cdk::trap(&err));
     STATE_STORE.with_borrow(|r| {
         STATE.with_borrow_mut(|h| {
-            let v: State = from_cbor_bytes(r.get(), "STATE_STORE data");
-            *h = v;
+            *h = from_cbor_bytes(r.get(), "STATE_STORE data");
         });
     });
     with_mut(|state| {
@@ -236,26 +271,6 @@ pub fn load(migrate_legacy_namespaces: bool) {
         state.managers.remove(&Principal::anonymous());
         state.auditors.remove(&Principal::anonymous());
     });
-
-    let schema = SCHEMA_STORE.with_borrow(|r| *r.get());
-    if schema < CURRENT_SCHEMA_VERSION {
-        let legacy = NSLEGACY_STORE.with_borrow(|r| r.get().clone());
-        if migrate_legacy_namespaces && !legacy.is_empty() {
-            if NAMESPACES_STORE.with_borrow(|r| r.len()) > 0 {
-                ic_cdk::trap(
-                    "legacy namespace migration requested but current namespaces are not empty",
-                );
-            }
-            let m: BTreeMap<String, NamespaceLegacy> = from_cbor_bytes(&legacy, "NS_STORE data");
-            ns::migrate(m);
-        }
-        NSLEGACY_STORE.with_borrow_mut(|r| {
-            r.set(Vec::new());
-        });
-        SCHEMA_STORE.with_borrow_mut(|r| {
-            r.set(CURRENT_SCHEMA_VERSION);
-        });
-    }
 
     restore_signature_intents();
     certify_signature_root();

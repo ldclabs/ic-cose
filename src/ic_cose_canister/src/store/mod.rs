@@ -31,27 +31,31 @@ use serde_bytes::{ByteArray, ByteBuf};
 use sha3::Digest;
 use std::{
     borrow::Cow,
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::{BTreeMap, BTreeSet},
     fmt::{self, Debug},
     ops,
 };
 
 use crate::{
-    canister_memory::DefaultMemoryImpl,
-    ecdsa::{derive_public_key, ecdsa_public_key},
+    canister_memory::{retired_map_len, DefaultMemoryImpl},
+    chain_key::{
+        derive_ecdsa_public_key, derive_schnorr_public_key, ecdsa_public_key, schnorr_public_key,
+    },
     rand_bytes,
-    schnorr::{derive_schnorr_public_key, schnorr_public_key},
     vetkd::derivation_path_to_context,
 };
 
 const SESSION_EXPIRES_IN_MS: u64 = 1000 * 3600 * 24; // 1 day
 const CURRENT_SCHEMA_VERSION: u32 = 2;
-const MAX_NAMESPACE_RECORD_BYTES: usize = 512 * 1024;
-const MAX_NAMESPACE_PAGE_BYTES: usize = 3 * MAX_NAMESPACE_RECORD_BYTES;
+const MAX_NAMESPACE_PAGE_BYTES: usize = 1536 * 1024;
 const MAX_NAMESPACE_ROLE_PRINCIPALS: usize = 4_000;
 const MAX_NAMESPACE_FIXED_DELEGATORS: usize = 5_000;
 const MAX_SIGNATURE_INTENTS: u64 = 4_096;
+/// Namespace members live in the ACL stores. Version 0 marked records whose
+/// members were still embedded; 0.11 migrated them and this version refuses
+/// to start while any remain.
+const ACL_VERSION: u8 = 1;
 
 fn legacy_vetkd_context_version() -> u8 {
     1
@@ -114,6 +118,28 @@ where
     buf
 }
 
+/// Implements CBOR `Storable` for `$ty`, pre-sizing the buffer with `$hint`.
+macro_rules! impl_cbor_storable {
+    ($ty:ty, $ctx:literal, |$value:ident| $hint:expr) => {
+        impl Storable for $ty {
+            const BOUND: Bound = Bound::Unbounded;
+
+            fn into_bytes(self) -> Vec<u8> {
+                self.to_bytes().into_owned()
+            }
+
+            fn to_bytes(&self) -> Cow<'_, [u8]> {
+                let $value = self;
+                Cow::Owned(to_cbor_bytes(self, $hint, $ctx))
+            }
+
+            fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
+                from_cbor_bytes(&bytes, $ctx)
+            }
+        }
+    };
+}
+
 #[derive(Clone, Default, Deserialize, Serialize)]
 pub struct State {
     #[serde(rename = "n")]
@@ -155,6 +181,7 @@ pub struct State {
 
 impl State {
     pub fn to_info(&self, with_keys: bool) -> StateInfo {
+        let key = |key: &Option<PublicKeyOutput>| key.clone().filter(|_| with_keys);
         StateInfo {
             name: self.name.clone(),
             ecdsa_key_name: self.ecdsa_key_name.clone(),
@@ -166,21 +193,9 @@ impl State {
             namespace_total: 0,
             subnet_size: self.subnet_size,
             freezing_threshold: self.freezing_threshold,
-            ecdsa_public_key: if with_keys {
-                self.ecdsa_public_key.clone()
-            } else {
-                None
-            },
-            schnorr_ed25519_public_key: if with_keys {
-                self.schnorr_ed25519_public_key.clone()
-            } else {
-                None
-            },
-            schnorr_secp256k1_public_key: if with_keys {
-                self.schnorr_secp256k1_public_key.clone()
-            } else {
-                None
-            },
+            ecdsa_public_key: key(&self.ecdsa_public_key),
+            schnorr_ed25519_public_key: key(&self.schnorr_ed25519_public_key),
+            schnorr_secp256k1_public_key: key(&self.schnorr_secp256k1_public_key),
             governance_canister: self.governance_canister,
             vetkd_context_version: self.vetkd_context_version,
             low_wasm_memory: self.low_wasm_memory,
@@ -188,40 +203,9 @@ impl State {
     }
 }
 
-#[derive(Clone, Default, Deserialize, Serialize)]
-pub struct NamespaceLegacy {
-    #[serde(rename = "d")]
-    pub desc: String,
-    #[serde(rename = "ca")]
-    pub created_at: u64, // unix timestamp in milliseconds
-    #[serde(rename = "ua")]
-    pub updated_at: u64, // unix timestamp in milliseconds
-    #[serde(rename = "mp")]
-    pub max_payload_size: u64, // max payload size in bytes
-    #[serde(rename = "pb")]
-    pub payload_bytes_total: u64, // total payload size in bytes
-    #[serde(rename = "s")]
-    pub status: i8, // -1: archived; 0: readable and writable; 1: readonly
-    #[serde(rename = "v")]
-    pub visibility: u8, // 0: private; 1: public
-    #[serde(rename = "m")]
-    pub managers: BTreeSet<Principal>, // managers can read and write all settings
-    #[serde(rename = "a")]
-    pub auditors: BTreeSet<Principal>, // auditors can read all settings
-    #[serde(rename = "u")]
-    pub users: BTreeSet<Principal>, // users can read and write settings they created
-    #[serde(rename = "ss")]
-    pub settings: BTreeMap<(Principal, ByteBuf), Setting>, // settings created by managers for users
-    #[serde(rename = "us")]
-    pub user_settings: BTreeMap<(Principal, ByteBuf), Setting>, // settings created by users
-    #[serde(rename = "g")]
-    pub gas_balance: u128, // namespace cycles budget
-    #[serde(default, rename = "f")]
-    pub fixed_id_names: BTreeMap<String, BTreeSet<Principal>>, // fixed_id_name -> users
-    #[serde(default, rename = "se")]
-    pub session_expires_in_ms: u64, // session expires in milliseconds
-}
-
+/// Namespace record. Its managers, auditors, users and fixed-identity
+/// delegators live in [`ACL_STORE`] and [`FIXED_IDENTITY_STORE`]; only their
+/// counts are kept here, so rewriting the record stays cheap.
 #[derive(Clone, Default, Deserialize, Serialize)]
 pub struct Namespace {
     #[serde(rename = "d")]
@@ -238,16 +222,8 @@ pub struct Namespace {
     pub status: i8, // -1: archived; 0: readable and writable; 1: readonly
     #[serde(rename = "v")]
     pub visibility: u8, // 0: private; 1: public
-    #[serde(rename = "m")]
-    pub managers: BTreeSet<Principal>, // managers can read and write all settings
-    #[serde(rename = "a")]
-    pub auditors: BTreeSet<Principal>, // auditors can read all settings
-    #[serde(rename = "u")]
-    pub users: BTreeSet<Principal>, // users can read and write settings they created
     #[serde(rename = "g")]
     pub gas_balance: u128, // namespace cycles budget
-    #[serde(default, rename = "f")]
-    pub fixed_id_names: BTreeMap<String, BTreeSet<Principal>>, // fixed_id_name -> users
     #[serde(default, rename = "se")]
     pub session_expires_in_ms: u64, // session expires in milliseconds
     #[serde(default, rename = "av")]
@@ -272,134 +248,119 @@ pub enum NamespaceReadPermission {
     None,
 }
 
+fn acl_contains(namespace: &str, role: u8, principal: &Principal) -> bool {
+    principal != &Principal::anonymous()
+        && ACL_STORE.with_borrow(|store| {
+            store.contains_key(&AclKey(namespace.to_string(), role, *principal))
+        })
+}
+
 impl Namespace {
-    fn encoded_size_hint(&self) -> usize {
-        let direct_principals = self
-            .managers
-            .len()
-            .saturating_add(self.auditors.len())
-            .saturating_add(self.users.len());
-        let fixed_id_size = self
-            .fixed_id_names
-            .iter()
-            .fold(0usize, |size, (name, delegators)| {
-                size.saturating_add(name.len()).saturating_add(
-                    delegators
-                        .len()
-                        .saturating_mul(Principal::MAX_LENGTH_IN_BYTES + 2),
-                )
-            });
-
-        256usize
-            .saturating_add(self.desc.len())
-            .saturating_add(direct_principals.saturating_mul(Principal::MAX_LENGTH_IN_BYTES + 2))
-            .saturating_add(fixed_id_size)
-    }
-
+    /// Conservative size of this namespace's info with all members embedded.
     fn info_size_hint(&self) -> usize {
-        if self.acl_version == 0 {
-            return self.encoded_size_hint();
-        }
         let role_principals = self
             .manager_count
             .saturating_add(self.auditor_count)
             .saturating_add(self.user_count) as usize;
-        let fixed_delegators = self.fixed_delegator_count as usize;
-        self.encoded_size_hint()
+        256usize
+            .saturating_add(self.desc.len())
             .saturating_add(role_principals.saturating_mul(Principal::MAX_LENGTH_IN_BYTES + 68))
             // One fixed-identity name may exist per delegator. Account for its
             // maximum validated length as a conservative response-size bound.
             .saturating_add(
-                fixed_delegators.saturating_mul(Principal::MAX_LENGTH_IN_BYTES + 68 + 64),
+                (self.fixed_delegator_count as usize)
+                    .saturating_mul(Principal::MAX_LENGTH_IN_BYTES + 68 + 64),
             )
     }
 
-    pub fn into_info(self, name: String) -> NamespaceInfo {
-        let manager_count = if self.acl_version == 0 {
-            self.managers
-                .iter()
-                .filter(|principal| **principal != Principal::anonymous())
-                .count() as u32
-        } else {
-            self.manager_count
-        };
-        let auditor_count = if self.acl_version == 0 {
-            self.auditors
-                .iter()
-                .filter(|principal| **principal != Principal::anonymous())
-                .count() as u32
-        } else {
-            self.auditor_count
-        };
-        let user_count = if self.acl_version == 0 {
-            self.users
-                .iter()
-                .filter(|principal| **principal != Principal::anonymous())
-                .count() as u32
-        } else {
-            self.user_count
-        };
-        let fixed_delegator_count = if self.acl_version == 0 {
-            self.fixed_id_names
-                .values()
-                .map(|principals| {
-                    principals
-                        .iter()
-                        .filter(|principal| **principal != Principal::anonymous())
-                        .count()
-                })
-                .sum::<usize>() as u32
-        } else {
-            self.fixed_delegator_count
-        };
+    fn role_count(&self, role: u8) -> u32 {
+        match role {
+            ROLE_MANAGER => self.manager_count,
+            ROLE_AUDITOR => self.auditor_count,
+            _ => self.user_count,
+        }
+    }
+
+    fn set_role_count(&mut self, role: u8, count: u32) {
+        match role {
+            ROLE_MANAGER => self.manager_count = count,
+            ROLE_AUDITOR => self.auditor_count = count,
+            _ => self.user_count = count,
+        }
+    }
+
+    /// Namespace info without members; see [`ns::namespace_info`].
+    pub fn to_info(&self, name: String) -> NamespaceInfo {
         NamespaceInfo {
             name,
-            desc: self.desc,
+            desc: self.desc.clone(),
             created_at: self.created_at,
             updated_at: self.updated_at,
             max_payload_size: self.max_payload_size,
             payload_bytes_total: self.payload_bytes_total,
             status: self.status,
             visibility: self.visibility,
-            managers: self.managers,
-            auditors: self.auditors,
-            users: self.users,
-            manager_count,
-            auditor_count,
-            user_count,
-            fixed_delegator_count,
+            managers: BTreeSet::new(),
+            auditors: BTreeSet::new(),
+            users: BTreeSet::new(),
+            manager_count: self.manager_count,
+            auditor_count: self.auditor_count,
+            user_count: self.user_count,
+            fixed_delegator_count: self.fixed_delegator_count,
             gas_balance: self.gas_balance,
-            fixed_id_names: self.fixed_id_names,
+            fixed_id_names: BTreeMap::new(),
             session_expires_in_ms: self.session_expires_in_ms,
         }
     }
 
-    fn has_role(&self, namespace: &str, role: u8, caller: &Principal) -> bool {
-        if caller == &Principal::anonymous() {
-            return false;
+    pub fn access<'a>(&'a self, namespace: &'a str, caller: &'a Principal) -> NamespaceAccess<'a> {
+        NamespaceAccess {
+            ns: self,
+            namespace,
+            caller,
+            roles: Default::default(),
         }
-        if self.acl_version == 0 {
-            return match role {
-                ROLE_MANAGER => self.managers.contains(caller),
-                ROLE_AUDITOR => self.auditors.contains(caller),
-                ROLE_USER => self.users.contains(caller),
-                _ => false,
-            };
+    }
+}
+
+/// A caller's permissions on one namespace.
+///
+/// Each role is resolved lazily and at most once, so a permission decision
+/// that consults the same role repeatedly still pays one ACL lookup for it.
+pub struct NamespaceAccess<'a> {
+    ns: &'a Namespace,
+    namespace: &'a str,
+    caller: &'a Principal,
+    roles: [Cell<Option<bool>>; 3],
+}
+
+impl NamespaceAccess<'_> {
+    fn has(&self, role: u8) -> bool {
+        let slot = &self.roles[role as usize];
+        if let Some(value) = slot.get() {
+            return value;
         }
-        ACL_STORE
-            .with_borrow(|store| store.contains_key(&AclKey(namespace.to_string(), role, *caller)))
+        let value = acl_contains(self.namespace, role, self.caller);
+        slot.set(Some(value));
+        value
     }
 
-    pub fn read_permission(&self, namespace: &str, caller: &Principal) -> NamespaceReadPermission {
-        if self.visibility == 1 {
-            return NamespaceReadPermission::Full;
-        }
+    pub fn is_manager(&self) -> bool {
+        self.has(ROLE_MANAGER)
+    }
 
-        if self.has_role(namespace, ROLE_MANAGER, caller)
-            || self.has_role(namespace, ROLE_AUDITOR, caller)
-        {
+    pub fn is_auditor(&self) -> bool {
+        self.has(ROLE_AUDITOR)
+    }
+
+    pub fn is_user(&self) -> bool {
+        self.has(ROLE_USER)
+    }
+
+    pub fn read_permission(&self) -> NamespaceReadPermission {
+        if self.ns.visibility == 1 || self.is_manager() || self.is_auditor() {
             NamespaceReadPermission::Full
-        } else if self.status >= 0 && self.has_role(namespace, ROLE_USER, caller) {
+        } else if self.ns.status >= 0 && self.is_user() {
             NamespaceReadPermission::User
         } else {
             NamespaceReadPermission::None
@@ -409,109 +370,62 @@ impl Namespace {
     /// Namespace managers may always change administrative metadata, including
     /// moving a namespace out of the read-only state. Content writes remain
     /// governed by [`Self::can_write_setting`].
-    pub fn can_manage_namespace(&self, namespace: &str, caller: &Principal) -> bool {
-        self.has_role(namespace, ROLE_MANAGER, caller)
+    pub fn can_manage_namespace(&self) -> bool {
+        self.is_manager()
     }
 
-    pub fn can_read_namespace(&self, namespace: &str, caller: &Principal) -> bool {
-        if self.visibility == 1 {
-            return true;
-        }
-
-        if self.status < 0 {
-            return self.has_role(namespace, ROLE_MANAGER, caller)
-                || self.has_role(namespace, ROLE_AUDITOR, caller);
-        }
-
-        self.has_role(namespace, ROLE_MANAGER, caller)
-            || self.has_role(namespace, ROLE_AUDITOR, caller)
-            || self.has_role(namespace, ROLE_USER, caller)
+    pub fn can_read_namespace(&self) -> bool {
+        self.ns.visibility == 1
+            || self.is_manager()
+            || self.is_auditor()
+            || (self.ns.status >= 0 && self.is_user())
     }
 
-    pub fn can_write_setting(&self, caller: &Principal, spk: &SettingPathKey) -> bool {
-        if self.status != 0 {
+    pub fn can_write_setting(&self, spk: &SettingPathKey) -> bool {
+        if self.ns.status != 0 {
             return false;
         }
-
         // only managers can create server side settings for any subject
         if spk.1 == 0 {
-            return self.has_role(&spk.0, ROLE_MANAGER, caller);
+            return self.is_manager();
         }
-
         // users can create settings for themselves and update them
-        self.has_role(&spk.0, ROLE_USER, caller) && caller == &spk.2
+        self.caller == &spk.2 && self.is_user()
     }
 
-    fn partial_can_read_setting(&self, caller: &Principal, spk: &SettingPathKey) -> Option<bool> {
-        if self.visibility == 1 {
+    fn partial_can_read_setting(&self, spk: &SettingPathKey) -> Option<bool> {
+        if self.ns.visibility == 1 {
             return Some(true);
         }
-
-        if self.status < 0 {
-            return Some(
-                self.has_role(&spk.0, ROLE_MANAGER, caller)
-                    || self.has_role(&spk.0, ROLE_AUDITOR, caller),
-            );
+        if self.ns.status < 0 {
+            return Some(self.is_manager() || self.is_auditor());
         }
-
-        if self.has_role(&spk.0, ROLE_MANAGER, caller)
-            || self.has_role(&spk.0, ROLE_AUDITOR, caller)
-            || caller == &spk.2
-        {
+        if self.is_manager() || self.is_auditor() || self.caller == &spk.2 {
             return Some(true);
         }
         None
     }
 
-    pub fn has_ns_signing_permission(&self, namespace: &str, caller: &Principal) -> bool {
-        if self.status < 0 && !self.has_role(namespace, ROLE_MANAGER, caller) {
-            return false;
-        }
-        self.has_role(namespace, ROLE_MANAGER, caller)
-            || self.has_role(namespace, ROLE_USER, caller)
+    pub fn has_signing_permission(&self) -> bool {
+        self.is_manager() || (self.ns.status >= 0 && self.is_user())
     }
 }
 
-impl Storable for Namespace {
-    const BOUND: Bound = Bound::Unbounded;
+impl_cbor_storable!(Namespace, "Namespace data", |ns| 256 + ns.desc.len());
 
-    fn into_bytes(self) -> Vec<u8> {
-        let capacity = self.encoded_size_hint();
-        to_cbor_bytes(&self, capacity, "Namespace data")
-    }
-
-    fn to_bytes(&self) -> Cow<'_, [u8]> {
-        Cow::Owned(to_cbor_bytes(
-            self,
-            self.encoded_size_hint(),
-            "Namespace data",
-        ))
-    }
-
-    fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
-        from_cbor_bytes(&bytes, "Namespace data")
-    }
-}
-
-#[derive(Clone, Default, Deserialize, Serialize)]
+/// A setting's metadata and current payload, as the API sees it. Stored split
+/// into [`SettingMeta`] and [`SettingData`] so metadata edits never rewrite
+/// the payload.
+#[derive(Clone, Default)]
 pub struct Setting {
-    #[serde(rename = "d")]
     pub desc: String,
-    #[serde(rename = "ca")]
     pub created_at: u64, // unix timestamp in milliseconds
-    #[serde(rename = "ua")]
     pub updated_at: u64, // unix timestamp in milliseconds
-    #[serde(rename = "s")]
-    pub status: i8, // -1: archived; 0: readable and writable; 1: readonly
-    #[serde(rename = "v")]
+    pub status: i8,      // -1: archived; 0: readable and writable; 1: readonly
     pub version: u32,
-    #[serde(rename = "r")]
     pub readers: BTreeSet<Principal>, // readers can read the setting
-    #[serde(rename = "t")]
     pub tags: BTreeMap<String, String>, // tags for query
-    #[serde(rename = "p")]
     pub payload: Option<ByteBuf>,
-    #[serde(rename = "k")]
     pub dek: Option<ByteBuf>, // Data Encryption Key that encrypted by BYOK or vetKey in COSE_Encrypt0
 }
 
@@ -541,26 +455,6 @@ impl Setting {
             .saturating_add(self.dek.as_ref().map_or(0, |value| value.len() as u64))
     }
 
-    fn encoded_size_hint(&self) -> usize {
-        let payload_size = self.payload.as_ref().map_or(0, |value| value.len());
-        let dek_size = self.dek.as_ref().map_or(0, |value| value.len());
-        let readers_size = self
-            .readers
-            .len()
-            .saturating_mul(Principal::MAX_LENGTH_IN_BYTES + 2);
-        let tags_size = self.tags.iter().fold(0usize, |size, (key, value)| {
-            size.saturating_add(key.len())
-                .saturating_add(value.len())
-                .saturating_add(4)
-        });
-        payload_size
-            .saturating_add(dek_size)
-            .saturating_add(self.desc.len())
-            .saturating_add(readers_size)
-            .saturating_add(tags_size)
-            .saturating_add(256)
-    }
-
     pub fn into_info(self, subject: Principal, key: ByteBuf, with_payload: bool) -> SettingInfo {
         SettingInfo {
             key,
@@ -575,27 +469,6 @@ impl Setting {
             dek: if with_payload { self.dek } else { None },
             payload: if with_payload { self.payload } else { None },
         }
-    }
-}
-
-impl Storable for Setting {
-    const BOUND: Bound = Bound::Unbounded;
-
-    fn into_bytes(self) -> Vec<u8> {
-        let capacity = self.encoded_size_hint();
-        to_cbor_bytes(&self, capacity, "Setting data")
-    }
-
-    fn to_bytes(&self) -> Cow<'_, [u8]> {
-        Cow::Owned(to_cbor_bytes(
-            self,
-            self.encoded_size_hint(),
-            "Setting data",
-        ))
-    }
-
-    fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
-        from_cbor_bytes(&bytes, "Setting data")
     }
 }
 
@@ -634,25 +507,14 @@ impl SettingMeta {
     }
 }
 
-impl Storable for SettingMeta {
-    const BOUND: Bound = Bound::Unbounded;
-
-    fn into_bytes(self) -> Vec<u8> {
-        to_cbor_bytes(&self, 512 + self.desc.len(), "SettingMeta data")
-    }
-
-    fn to_bytes(&self) -> Cow<'_, [u8]> {
-        Cow::Owned(to_cbor_bytes(
-            self,
-            512 + self.desc.len(),
-            "SettingMeta data",
-        ))
-    }
-
-    fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
-        from_cbor_bytes(&bytes, "SettingMeta data")
-    }
-}
+impl_cbor_storable!(SettingMeta, "SettingMeta data", |meta| {
+    let readers = meta.readers.len() * (Principal::MAX_LENGTH_IN_BYTES + 2);
+    let tags = meta
+        .tags
+        .iter()
+        .fold(0, |size, (key, value)| size + key.len() + value.len() + 4);
+    256 + meta.desc.len() + readers + tags
+});
 
 #[derive(Clone, Default, Deserialize, Serialize)]
 struct SettingData {
@@ -669,21 +531,7 @@ impl SettingData {
     }
 }
 
-impl Storable for SettingData {
-    const BOUND: Bound = Bound::Unbounded;
-
-    fn into_bytes(self) -> Vec<u8> {
-        to_cbor_bytes(&self, self.size() + 32, "SettingData data")
-    }
-
-    fn to_bytes(&self) -> Cow<'_, [u8]> {
-        Cow::Owned(to_cbor_bytes(self, self.size() + 32, "SettingData data"))
-    }
-
-    fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
-        from_cbor_bytes(&bytes, "SettingData data")
-    }
-}
+impl_cbor_storable!(SettingData, "SettingData data", |data| data.size() + 32);
 
 // SettingPathKey: (namespace name, 0 or 1, subject, setting name, version)
 #[derive(Clone, Debug, Deserialize, Serialize, Ord, PartialOrd, Eq, PartialEq)]
@@ -703,32 +551,11 @@ impl SettingPathKey {
     pub fn v0(&self) -> SettingPathKey {
         SettingPathKey(self.0.clone(), self.1, self.2, self.3.clone(), 0)
     }
-
-    fn encoded_size_hint(&self) -> usize {
-        self.0.len().saturating_add(self.3.len()).saturating_add(64)
-    }
 }
 
-impl Storable for SettingPathKey {
-    const BOUND: Bound = Bound::Unbounded;
-
-    fn into_bytes(self) -> Vec<u8> {
-        let capacity = self.encoded_size_hint();
-        to_cbor_bytes(&self, capacity, "SettingPathKey data")
-    }
-
-    fn to_bytes(&self) -> Cow<'_, [u8]> {
-        Cow::Owned(to_cbor_bytes(
-            self,
-            self.encoded_size_hint(),
-            "SettingPathKey data",
-        ))
-    }
-
-    fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
-        from_cbor_bytes(&bytes, "SettingPathKey data")
-    }
-}
+impl_cbor_storable!(SettingPathKey, "SettingPathKey data", |key| key.0.len()
+    + key.3.len()
+    + 64);
 
 impl fmt::Display for SettingPathKey {
     /// Formats the `Resource` enum into a human-readable string.
@@ -748,48 +575,14 @@ impl fmt::Display for SettingPathKey {
 #[derive(Clone, Debug, Deserialize, Serialize, Ord, PartialOrd, Eq, PartialEq)]
 struct AclKey(String, u8, Principal);
 
-impl Storable for AclKey {
-    const BOUND: Bound = Bound::Unbounded;
-
-    fn into_bytes(self) -> Vec<u8> {
-        to_cbor_bytes(&self, self.0.len() + 48, "AclKey data")
-    }
-
-    fn to_bytes(&self) -> Cow<'_, [u8]> {
-        Cow::Owned(to_cbor_bytes(self, self.0.len() + 48, "AclKey data"))
-    }
-
-    fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
-        from_cbor_bytes(&bytes, "AclKey data")
-    }
-}
+impl_cbor_storable!(AclKey, "AclKey data", |key| key.0.len() + 48);
 
 #[derive(Clone, Debug, Deserialize, Serialize, Ord, PartialOrd, Eq, PartialEq)]
 struct FixedIdentityKey(String, String, Principal);
 
-impl Storable for FixedIdentityKey {
-    const BOUND: Bound = Bound::Unbounded;
-
-    fn into_bytes(self) -> Vec<u8> {
-        to_cbor_bytes(
-            &self,
-            self.0.len() + self.1.len() + 48,
-            "FixedIdentityKey data",
-        )
-    }
-
-    fn to_bytes(&self) -> Cow<'_, [u8]> {
-        Cow::Owned(to_cbor_bytes(
-            self,
-            self.0.len() + self.1.len() + 48,
-            "FixedIdentityKey data",
-        ))
-    }
-
-    fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
-        from_cbor_bytes(&bytes, "FixedIdentityKey data")
-    }
-}
+impl_cbor_storable!(FixedIdentityKey, "FixedIdentityKey data", |key| key.0.len()
+    + key.1.len()
+    + 48);
 
 #[derive(Clone, Deserialize, Serialize)]
 struct SignatureIntent {
@@ -798,29 +591,11 @@ struct SignatureIntent {
     expires_at_ns: u64,
 }
 
-impl Storable for SignatureIntent {
-    const BOUND: Bound = Bound::Unbounded;
-
-    fn into_bytes(self) -> Vec<u8> {
-        to_cbor_bytes(
-            &self,
-            self.seed.len() + self.message.len() + 32,
-            "SignatureIntent data",
-        )
-    }
-
-    fn to_bytes(&self) -> Cow<'_, [u8]> {
-        Cow::Owned(to_cbor_bytes(
-            self,
-            self.seed.len() + self.message.len() + 32,
-            "SignatureIntent data",
-        ))
-    }
-
-    fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
-        from_cbor_bytes(&bytes, "SignatureIntent data")
-    }
-}
+impl_cbor_storable!(SignatureIntent, "SignatureIntent data", |intent| intent
+    .seed
+    .len()
+    + intent.message.len()
+    + 32);
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct SettingArchived {
@@ -841,42 +616,20 @@ impl SettingArchived {
             .map_or(0, |value| value.len() as u64)
             .saturating_add(self.dek.as_ref().map_or(0, |value| value.len() as u64))
     }
-
-    fn encoded_size_hint(&self) -> usize {
-        self.payload
-            .as_ref()
-            .map_or(0, |value| value.len())
-            .saturating_add(self.dek.as_ref().map_or(0, |value| value.len()))
-            .saturating_add(64)
-    }
 }
 
-impl Storable for SettingArchived {
-    const BOUND: Bound = Bound::Unbounded;
-
-    fn into_bytes(self) -> Vec<u8> {
-        let capacity = self.encoded_size_hint();
-        to_cbor_bytes(&self, capacity, "SettingArchived data")
-    }
-
-    fn to_bytes(&self) -> Cow<'_, [u8]> {
-        Cow::Owned(to_cbor_bytes(
-            self,
-            self.encoded_size_hint(),
-            "SettingArchived data",
-        ))
-    }
-
-    fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
-        from_cbor_bytes(&bytes, "SettingArchived data")
-    }
-}
+impl_cbor_storable!(
+    SettingArchived,
+    "SettingArchived data",
+    |archived| archived.data_size() as usize + 64
+);
 
 const STATE_MEMORY_ID: MemoryId = MemoryId::new(0);
-const NSLEGACY_MEMORY_ID: MemoryId = MemoryId::new(1);
+// MemoryId 1 held the retired monolithic namespace store; schema v2 left it empty.
 const PAYLOADS_MEMORY_ID: MemoryId = MemoryId::new(2);
 const NAMESPACES_MEMORY_ID: MemoryId = MemoryId::new(3);
-const SETTINGS_MEMORY_ID: MemoryId = MemoryId::new(4);
+/// Retired monolithic setting store; must be empty before this version runs.
+const LEGACY_SETTINGS_MEMORY_ID: MemoryId = MemoryId::new(4);
 const SCHEMA_MEMORY_ID: MemoryId = MemoryId::new(5);
 const SETTING_META_MEMORY_ID: MemoryId = MemoryId::new(6);
 const SETTING_DATA_MEMORY_ID: MemoryId = MemoryId::new(7);
@@ -898,13 +651,6 @@ thread_local! {
         )
     );
 
-    static NSLEGACY_STORE: RefCell<StableCell<Vec<u8>, Memory>> = RefCell::new(
-        StableCell::init(
-            MEMORY_MANAGER.with_borrow(|m| m.get(NSLEGACY_MEMORY_ID)),
-            Vec::new()
-        )
-    );
-
     static PAYLOADS_STORE: RefCell<StableBTreeMap<SettingPathKey, SettingArchived, Memory>> = RefCell::new(
         StableBTreeMap::init(
             MEMORY_MANAGER.with_borrow(|m| m.get(PAYLOADS_MEMORY_ID)),
@@ -914,12 +660,6 @@ thread_local! {
     static NAMESPACES_STORE: RefCell<StableBTreeMap<String, Namespace, Memory>> = RefCell::new(
         StableBTreeMap::init(
             MEMORY_MANAGER.with_borrow(|m| m.get(NAMESPACES_MEMORY_ID)),
-        )
-    );
-
-    static SETTINGS_STORE: RefCell<StableBTreeMap<SettingPathKey, Setting, Memory>> = RefCell::new(
-        StableBTreeMap::init(
-            MEMORY_MANAGER.with_borrow(|m| m.get(SETTINGS_MEMORY_ID)),
         )
     );
 

@@ -24,6 +24,20 @@ fn validate_allowed_apis(values: &BTreeSet<String>) -> Result<(), String> {
     Ok(())
 }
 
+/// An empty allow-list allows every API, so removing its last entry would
+/// silently open the canister instead of closing it.
+fn validate_allowed_apis_removal(values: &BTreeSet<String>) -> Result<(), String> {
+    validate_allowed_apis(values)?;
+    store::state::with(|s| {
+        if !s.allowed_apis.is_empty() && s.allowed_apis.iter().all(|api| values.contains(api)) {
+            return Err(
+                "cannot remove every allowed API: an empty list allows all APIs".to_string(),
+            );
+        }
+        Ok(())
+    })
+}
+
 #[ic_cdk::update(guard = "is_controller")]
 fn admin_add_managers(args: BTreeSet<Principal>) -> Result<(), String> {
     store::state::ensure_memory_available()?;
@@ -84,7 +98,7 @@ fn admin_add_allowed_apis(args: BTreeSet<String>) -> Result<(), String> {
 
 #[ic_cdk::update(guard = "is_controller")]
 fn admin_remove_allowed_apis(args: BTreeSet<String>) -> Result<(), String> {
-    validate_allowed_apis(&args)?;
+    validate_allowed_apis_removal(&args)?;
     store::state::with_mut(|s| {
         remove_set_items(&mut s.allowed_apis, args);
         Ok(())
@@ -120,45 +134,6 @@ fn admin_list_namespace(
         let namespaces = store::ns::list_namespaces(prev, take as usize);
         Ok(namespaces)
     })
-}
-
-/// Incrementally moves legacy monolithic setting records into split metadata
-/// and payload stable maps. Re-run until it returns zero.
-#[ic_cdk::update(guard = "is_controller")]
-fn admin_migrate_legacy_settings(take: u32) -> Result<u64, String> {
-    store::state::ensure_memory_available()?;
-    Ok(store::ns::migrate_legacy_settings(
-        take.clamp(1, 100) as usize
-    ))
-}
-
-#[ic_cdk::update(guard = "is_controller")]
-fn admin_migrate_legacy_namespace_acls(take: u32) -> Result<u64, String> {
-    store::state::ensure_memory_available()?;
-    if store::ns::namespace_count() > 1_000 {
-        return Err(
-            "more than 1000 namespaces; use admin_migrate_legacy_namespace_acls_page".into(),
-        );
-    }
-    Ok(store::ns::migrate_legacy_namespace_acls(
-        take.clamp(1, 100) as usize
-    ))
-}
-
-/// Scans at most `scan_limit` namespaces. Continue with next_cursor even when items is empty.
-#[ic_cdk::update(guard = "is_controller")]
-fn admin_migrate_legacy_namespace_acls_page(
-    prev: Option<String>,
-    scan_limit: u32,
-) -> Result<ic_cose_types::types::ScanPage<String, String>, String> {
-    store::state::ensure_memory_available()?;
-    if let Some(cursor) = &prev {
-        ic_cose_types::validate_str(cursor)?;
-    }
-    Ok(store::ns::migrate_legacy_namespace_acls_page(
-        prev,
-        scan_limit.clamp(1, 100) as usize,
-    ))
 }
 
 #[ic_cdk::update(guard = "is_controller")]
@@ -240,12 +215,12 @@ fn validate2_admin_add_allowed_apis(args: BTreeSet<String>) -> Result<String, St
 
 #[ic_cdk::update(guard = "is_controller")]
 fn validate_admin_remove_allowed_apis(args: BTreeSet<String>) -> Result<(), String> {
-    validate_allowed_apis(&args)
+    validate_allowed_apis_removal(&args)
 }
 
 #[ic_cdk::update(guard = "is_controller")]
 fn validate2_admin_remove_allowed_apis(args: BTreeSet<String>) -> Result<String, String> {
-    validate_allowed_apis(&args)?;
+    validate_allowed_apis_removal(&args)?;
     Ok(format_strings(&args))
 }
 
@@ -281,6 +256,21 @@ fn format_vec<T>(values: &BTreeSet<T>, mut format_value: impl FnMut(&mut String,
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn removing_every_allowed_api_is_rejected() {
+        let apis = BTreeSet::from(["setting_get".to_string(), "setting_create".to_string()]);
+        store::state::with_mut(|s| s.allowed_apis = apis.clone());
+        assert!(validate_allowed_apis_removal(&apis)
+            .unwrap_err()
+            .contains("allows all APIs"));
+        assert!(
+            validate_allowed_apis_removal(&BTreeSet::from(["setting_get".to_string()])).is_ok()
+        );
+        // with nothing restricted there is nothing to open up
+        store::state::with_mut(|s| s.allowed_apis.clear());
+        assert!(validate_allowed_apis_removal(&apis).is_ok());
+    }
 
     #[test]
     fn validation_messages_keep_the_candid_vec_shape() {

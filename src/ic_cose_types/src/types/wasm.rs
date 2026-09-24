@@ -270,7 +270,8 @@ pub enum PoolCanisterState {
     Available,
     /// Claimed by a request id, not installed yet.
     Reserved,
-    /// Carries an installed module and never returns to the pool.
+    /// Carries an installed module. No longer recorded: an installed canister
+    /// leaves the pool, and the variant remains only so old data decodes.
     Installed,
 }
 

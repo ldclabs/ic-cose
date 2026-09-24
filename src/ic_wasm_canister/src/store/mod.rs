@@ -19,12 +19,12 @@ use serde_bytes::{ByteArray, ByteBuf};
 use std::{
     borrow::Cow,
     cell::RefCell,
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet},
     io::Read,
     ops,
 };
 
-use crate::canister_memory::DefaultMemoryImpl;
+use crate::canister_memory::{retired_map_len, DefaultMemoryImpl};
 use flate2::read::MultiGzDecoder;
 
 type Memory = VirtualMemory<DefaultMemoryImpl>;
@@ -41,18 +41,34 @@ where
     from_slice(bytes).unwrap_or_else(|err| panic!("failed to decode {context}: {err:?}"))
 }
 
+macro_rules! impl_cbor_storable {
+    ($ty:ty, $ctx:literal) => {
+        impl Storable for $ty {
+            const BOUND: Bound = Bound::Unbounded;
+
+            fn into_bytes(self) -> Vec<u8> {
+                let mut buf = vec![];
+                to_writer(&self, &mut buf).expect(concat!("failed to encode ", $ctx));
+                buf
+            }
+
+            fn to_bytes(&self) -> Cow<'_, [u8]> {
+                let mut buf = vec![];
+                to_writer(self, &mut buf).expect(concat!("failed to encode ", $ctx));
+                Cow::Owned(buf)
+            }
+
+            fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
+                from_cbor_bytes(&bytes, $ctx)
+            }
+        }
+    };
+}
+
 #[derive(Clone, Default, Deserialize, Serialize)]
 pub struct State {
     pub name: String,
     pub managers: BTreeSet<Principal>,
-    /// Legacy heap indexes, consumed into stable indexes on the first upgrade
-    /// to schema v2 and omitted from all subsequent snapshots.
-    #[serde(default, skip_serializing)]
-    pub latest_version: BTreeMap<String, ByteArray<32>>,
-    #[serde(default, skip_serializing)]
-    pub upgrade_path: HashMap<ByteArray<32>, ByteArray<32>>,
-    #[serde(default, skip_serializing)]
-    pub deployed_list: BTreeMap<Principal, (u64, ByteArray<32>)>,
     pub topup_threshold: u128,
     pub topup_amount: u128,
     pub governance_canister: Option<Principal>,
@@ -63,14 +79,6 @@ pub struct State {
     /// release canisters from approved templates, nothing else.
     #[serde(default)]
     pub provisioners: BTreeSet<Principal>,
-    /// Heap index over the stable pool inventory.
-    ///
-    /// A template retains installed canisters for auditability, so scanning the
-    /// stable pool for every reservation would become linear in all historical
-    /// installs. This bounded index contains only currently available entries.
-    /// It is derived and can be rebuilt lazily after upgrading old state.
-    #[serde(default, skip)]
-    pub available_pool: BTreeMap<String, BTreeSet<Principal>>,
     /// Transient per-target serialization. Durable request attempts provide the
     /// recovery record; locks deliberately reset on upgrade.
     #[serde(default, skip)]
@@ -88,93 +96,13 @@ pub struct OperationLock {
     pub started_at: u64,
 }
 
-impl Storable for State {
-    const BOUND: Bound = Bound::Unbounded;
+impl_cbor_storable!(State, "State data");
 
-    fn into_bytes(self) -> Vec<u8> {
-        let mut buf = vec![];
-        to_writer(&self, &mut buf).expect("failed to encode State data");
-        buf
-    }
-
-    fn to_bytes(&self) -> Cow<'_, [u8]> {
-        let mut buf = vec![];
-        to_writer(self, &mut buf).expect("failed to encode State data");
-        Cow::Owned(buf)
-    }
-
-    fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
-        from_cbor_bytes(&bytes, "State data")
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Wasm {
-    #[serde(rename = "n", alias = "name")]
-    pub name: String,
-    #[serde(rename = "a", alias = "created_at")]
-    pub created_at: u64, // in milliseconds
-    #[serde(rename = "b", alias = "created_by")]
-    pub created_by: Principal,
-    #[serde(rename = "d", alias = "description")]
-    pub description: String,
-    #[serde(rename = "w", alias = "wasm")]
-    pub wasm: ByteBuf,
-    #[serde(default, rename = "e", alias = "encoding")]
-    pub encoding: WasmEncoding,
-    #[serde(default, rename = "mh", alias = "module_hash")]
-    pub module_hash: Option<ByteArray<32>>,
-}
-
-impl Wasm {
-    fn effective_encoding(&self) -> WasmEncoding {
-        // Before encoding was recorded, gzip artifacts were stored with the
-        // default Raw value. Match the management canister's magic-byte dispatch.
-        if self.module_hash.is_none() {
-            if self.wasm.starts_with(&[0x1f, 0x8b, 0x08]) {
-                return WasmEncoding::Gzip;
-            }
-            if self.wasm.starts_with(WASM_HEADER) {
-                return WasmEncoding::Raw;
-            }
-        }
-        self.encoding
-    }
-
-    fn effective_module_hash(
-        &self,
-        artifact_hash: &ByteArray<32>,
-    ) -> Result<ByteArray<32>, String> {
-        self.module_hash
-            .map(Ok)
-            .unwrap_or_else(|| module_hash_from_artifact(&self.wasm, self.effective_encoding()))
-            .or_else(|error| {
-                // Old raw artifacts were keyed by exactly the bytes whose hash
-                // the management canister reports. Preserve their deploy index
-                // even if a newer parser rejects a once-supported feature.
-                (self.effective_encoding() == WasmEncoding::Raw
-                    && self.wasm.starts_with(WASM_HEADER))
-                .then_some(*artifact_hash)
-                .ok_or(error)
-            })
-    }
-
-    pub fn metadata(&self, artifact_hash: ByteArray<32>) -> Result<WasmMetadata, String> {
-        Ok(WasmMetadata {
-            name: self.name.clone(),
-            created_at: self.created_at,
-            created_by: self.created_by,
-            description: self.description.clone(),
-            hash: artifact_hash,
-            module_hash: self.effective_module_hash(&artifact_hash)?,
-            wasm_size: self.wasm.len() as u64,
-            encoding: self.effective_encoding(),
-        })
-    }
-}
-
+/// Returns the module hash the management canister reports once `artifact`
+/// is installed. For a raw module that is the artifact hash itself.
 fn module_hash_from_artifact(
     artifact: &[u8],
+    artifact_hash: ByteArray<32>,
     encoding: WasmEncoding,
 ) -> Result<ByteArray<32>, String> {
     if artifact.len() > MAX_ARTIFACT_BYTES {
@@ -187,7 +115,7 @@ fn module_hash_from_artifact(
     match encoding {
         WasmEncoding::Raw => {
             validate_wasm_module(artifact, "raw artifact")?;
-            Ok(ByteArray::from(sha256(artifact)))
+            Ok(artifact_hash)
         }
         WasmEncoding::Gzip => {
             let mut decoder = MultiGzDecoder::new(artifact);
@@ -217,38 +145,6 @@ fn validate_wasm_module(module: &[u8], context: &str) -> Result<(), String> {
         .validate_all(module)
         .map_err(|err| format!("{context} contains invalid WebAssembly: {err}"))?;
     Ok(())
-}
-
-impl Storable for Wasm {
-    const BOUND: Bound = Bound::Unbounded;
-
-    fn into_bytes(self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(
-            self.wasm
-                .len()
-                .saturating_add(self.name.len())
-                .saturating_add(self.description.len())
-                .saturating_add(192),
-        );
-        to_writer(&self, &mut buf).expect("failed to encode Wasm data");
-        buf
-    }
-
-    fn to_bytes(&self) -> Cow<'_, [u8]> {
-        let mut buf = Vec::with_capacity(
-            self.wasm
-                .len()
-                .saturating_add(self.name.len())
-                .saturating_add(self.description.len())
-                .saturating_add(192),
-        );
-        to_writer(self, &mut buf).expect("failed to encode Wasm data");
-        Cow::Owned(buf)
-    }
-
-    fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
-        from_cbor_bytes(&bytes, "Wasm data")
-    }
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -516,30 +412,6 @@ pub struct CompletedRequest {
     pub completed_at: u64,
 }
 
-macro_rules! impl_cbor_storable {
-    ($ty:ty, $ctx:literal) => {
-        impl Storable for $ty {
-            const BOUND: Bound = Bound::Unbounded;
-
-            fn into_bytes(self) -> Vec<u8> {
-                let mut buf = vec![];
-                to_writer(&self, &mut buf).expect(concat!("failed to encode ", $ctx));
-                buf
-            }
-
-            fn to_bytes(&self) -> Cow<'_, [u8]> {
-                let mut buf = vec![];
-                to_writer(self, &mut buf).expect(concat!("failed to encode ", $ctx));
-                Cow::Owned(buf)
-            }
-
-            fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
-                from_cbor_bytes(&bytes, $ctx)
-            }
-        }
-    };
-}
-
 impl_cbor_storable!(TemplateEntry, "TemplateEntry data");
 impl_cbor_storable!(PoolCanister, "PoolCanister data");
 impl_cbor_storable!(ProvisionRequest, "ProvisionRequest data");
@@ -567,7 +439,8 @@ pub struct ChunkKey(pub Principal, pub ByteArray<32>);
 impl_cbor_storable!(ChunkKey, "ChunkKey data");
 
 const STATE_MEMORY_ID: MemoryId = MemoryId::new(0);
-const WASM_MEMORY_ID: MemoryId = MemoryId::new(1);
+/// Retired monolithic artifact store; must be empty before this version runs.
+const LEGACY_WASM_MEMORY_ID: MemoryId = MemoryId::new(1);
 const INSTALL_LOG_INDEX_MEMORY_ID: MemoryId = MemoryId::new(2);
 const INSTALL_LOG_DATA_MEMORY_ID: MemoryId = MemoryId::new(3);
 const TEMPLATE_MEMORY_ID: MemoryId = MemoryId::new(4);
@@ -595,12 +468,6 @@ thread_local! {
         StableCell::init(
             MEMORY_MANAGER.with_borrow(|m| m.get(STATE_MEMORY_ID)),
             State::default()
-        )
-    );
-
-    static WASM_STORE: RefCell<StableBTreeMap<[u8; 32], Wasm, Memory>> = RefCell::new(
-        StableBTreeMap::init(
-            MEMORY_MANAGER.with_borrow(|m| m.get(WASM_MEMORY_ID)),
         )
     );
 

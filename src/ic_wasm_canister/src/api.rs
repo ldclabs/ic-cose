@@ -9,7 +9,7 @@ use ic_cose_types::{
 use num_traits::ToPrimitive;
 use serde_bytes::ByteArray;
 
-use crate::{is_controller_or_manager, store};
+use crate::{is_controller_or_manager, store, MAX_MESSAGE_PAYLOAD_BYTES};
 
 #[ic_cdk::query]
 fn get_state() -> Result<StateInfo, String> {
@@ -42,19 +42,19 @@ fn get_next_wasm_version(
 #[ic_cdk::query]
 fn get_wasm(hash: ByteArray<32>) -> Result<WasmInfo, String> {
     let metadata = store::wasm::get_metadata(&hash)?;
-    if metadata.wasm_size > 1_500_000 {
+    if metadata.wasm_size > MAX_MESSAGE_PAYLOAD_BYTES as u64 {
         return Err(
             "artifact is too large for one query response; use get_wasm_metadata and get_wasm_chunk"
                 .to_string(),
         );
     }
-    let w = store::wasm::get_wasm(&hash).ok_or_else(|| "NotFound: wasm not found".to_string())?;
+    let wasm = store::wasm::get_wasm(&hash)?;
     Ok(WasmInfo {
-        name: w.name,
-        created_at: w.created_at,
-        created_by: w.created_by,
-        description: w.description,
-        wasm: w.wasm,
+        name: metadata.name,
+        created_at: metadata.created_at,
+        created_by: metadata.created_by,
+        description: metadata.description,
+        wasm: wasm.into(),
         hash,
         module_hash: metadata.module_hash,
         wasm_size: metadata.wasm_size,
@@ -76,17 +76,6 @@ fn get_wasm_chunk(
     let take = take.clamp(1, 1024 * 1024) as usize;
     let offset = usize::try_from(offset).map_err(|_| "offset exceeds usize".to_string())?;
     store::wasm::get_chunk(&hash, offset, take).map(serde_bytes::ByteBuf::from)
-}
-
-#[ic_cdk::query(guard = "is_controller_or_manager")]
-fn list_legacy_wasm_artifacts(
-    prev: Option<ByteArray<32>>,
-    take: Option<u32>,
-) -> Result<Vec<ByteArray<32>>, String> {
-    Ok(store::wasm::list_legacy_artifacts(
-        prev,
-        take.unwrap_or(20).clamp(1, 100) as usize,
-    ))
 }
 
 #[ic_cdk::query]

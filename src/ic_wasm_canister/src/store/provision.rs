@@ -32,6 +32,22 @@ pub fn recover_after_upgrade() {
             Ok(())
         });
     }
+
+    // Older versions kept installed canisters in the pool. Their history lives
+    // on in the request and deployment stores; dropping them keeps the pool
+    // bounded by pool sizes and outstanding reservations, so reservations can
+    // scan it directly.
+    let installed: Vec<PoolKey> = POOL_STORE.with_borrow(|r| {
+        r.iter()
+            .filter(|entry| entry.value().state == PoolCanisterState::Installed)
+            .map(|entry| entry.key().clone())
+            .collect()
+    });
+    POOL_STORE.with_borrow_mut(|r| {
+        for key in installed {
+            r.remove(&key);
+        }
+    });
 }
 
 /// Rejects a request whose epoch has elapsed or reaches implausibly far
@@ -272,7 +288,6 @@ pub fn finish_pool_create(id: &str, canister: Principal, now_ms: u64) -> Result<
             },
         )
     });
-    add_available(id, canister);
     Ok(())
 }
 
@@ -321,7 +336,6 @@ pub fn reconcile_pool(id: &str, found: Option<Principal>, now_ms: u64) -> Result
                 },
             )
         });
-        add_available(id, canister);
     }
     Ok(())
 }
@@ -385,62 +399,17 @@ pub fn list_pool_page(id: &str, prev: Option<Principal>, take: usize) -> Vec<Poo
     })
 }
 
+/// The pool holds only available and reserved canisters, so a template's
+/// range stays bounded by its pool size and outstanding reservations.
 fn take_available(id: &str) -> Option<Principal> {
-    if let Some(canister) = state::with(|s| {
-        s.available_pool
-            .get(id)
-            .and_then(|canisters| canisters.first().copied())
-    }) {
-        return Some(canister);
-    }
-
-    // State written before this index was introduced has no heap index.
-    // Rebuild the whole template once, then future reservations stay O(log n)
-    // even though the stable audit inventory keeps every installed canister.
-    let expected = TEMPLATE_STORE
-        .with_borrow(|r| r.get(&id.to_string()).map(|entry| entry.available))
-        .unwrap_or(0);
-    if expected == 0 {
-        return None;
-    }
-    let available: BTreeSet<Principal> = POOL_STORE.with_borrow(|r| {
+    POOL_STORE.with_borrow(|r| {
         r.range(ops::RangeFrom {
             start: PoolKey(id.to_string(), Principal::management_canister()),
         })
         .take_while(|e| e.key().0 == id)
-        .filter_map(|e| (e.value().state == PoolCanisterState::Available).then_some(e.key().1))
-        .collect()
-    });
-    let canister = available.first().copied()?;
-    state::with_mut(|s| {
-        s.available_pool.insert(id.to_string(), available);
-    });
-    Some(canister)
-}
-
-fn add_available(id: &str, canister: Principal) {
-    state::with_mut(|s| {
-        s.available_pool
-            .entry(id.to_string())
-            .or_default()
-            .insert(canister);
-    });
-}
-
-fn remove_available(id: &str, canister: &Principal) {
-    state::with_mut(|s| {
-        let remove_entry = s
-            .available_pool
-            .get_mut(id)
-            .map(|canisters| {
-                canisters.remove(canister);
-                canisters.is_empty()
-            })
-            .unwrap_or(false);
-        if remove_entry {
-            s.available_pool.remove(id);
-        }
-    });
+        .find(|e| e.value().state == PoolCanisterState::Available)
+        .map(|e| e.key().1)
+    })
 }
 
 // ----- requests -----
@@ -683,7 +652,6 @@ pub fn reserve(
     pool.state = PoolCanisterState::Reserved;
     pool.request_id = Some(req.request_id);
     POOL_STORE.with_borrow_mut(|r| r.insert(pool_key, pool));
-    remove_available(&req.provision_template_id, &canister);
     with_template_mut(&req.provision_template_id, |e| {
         e.available -= 1;
         e.reserved += 1;
@@ -882,7 +850,7 @@ fn finish_install_state(
             return Err("template counters are inconsistent".to_string());
         }
     }
-    let (receipt, template_id, was_reserved) = REQUEST_STORE.with_borrow_mut(|r| {
+    let (receipt, pooled) = REQUEST_STORE.with_borrow_mut(|r| {
         let mut cur = r
             .get(request_id)
             .ok_or_else(|| "NotFound: request not found".to_string())?;
@@ -893,31 +861,23 @@ fn finish_install_state(
             return Err("finish_install received an unexpected module hash".to_string());
         }
         if cur.stage == ProvisionStage::Installed {
-            return Ok((cur.into_receipt(*request_id), None, false));
+            return Ok((cur.into_receipt(*request_id), None));
         }
         if cur.stage != ProvisionStage::InstallPending {
             return Err("request is not pending installation".to_string());
         }
-        let was_reserved = true;
         cur.stage = ProvisionStage::Installed;
         cur.module_hash = Some(module_hash);
         cur.error = None;
         cur.updated_at = now_ms;
-        let template_id = cur.template_id.clone();
-        let canister = cur.canister;
+        let pooled = cur.template_id.clone().map(|id| (id, cur.canister));
         r.insert(**request_id, cur.clone());
-        Ok::<_, String>((
-            cur.into_receipt(*request_id),
-            template_id.map(|t| (t, canister)),
-            was_reserved,
-        ))
+        Ok::<_, String>((cur.into_receipt(*request_id), pooled))
     })?;
 
-    if let (Some((id, canister)), true) = (template_id, was_reserved) {
-        POOL_STORE.with_borrow_mut(|r| {
-            let key = PoolKey(id.clone(), canister);
-            r.remove(&key);
-        });
+    // an installed canister leaves the pool for good
+    if let Some((id, canister)) = pooled {
+        POOL_STORE.with_borrow_mut(|r| r.remove(&PoolKey(id.clone(), canister)));
         with_template_mut(&id, |e| {
             e.reserved -= 1;
             e.installed += 1;
@@ -1290,7 +1250,6 @@ pub fn release(
         pc.request_id = None;
         r.insert(pool_key, pc);
     });
-    add_available(&template_id, canister);
     REQUEST_STORE.with_borrow_mut(|r| {
         let mut cur = existing;
         cur.stage = ProvisionStage::Released;

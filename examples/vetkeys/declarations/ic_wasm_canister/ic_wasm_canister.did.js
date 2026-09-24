@@ -429,16 +429,6 @@ export const idlFactory = ({ IDL }) => {
       ),
     'admin_forget_deployment' : IDL.Func([IDL.Principal], [Result_10], []),
     'admin_handoff_canister' : IDL.Func([UpdateSettingsArgs], [Result], []),
-    'admin_migrate_legacy_wasm_artifact' : IDL.Func(
-        [IDL.Vec(IDL.Nat8)],
-        [Result_10],
-        [],
-      ),
-    'admin_rebuild_log_index' : IDL.Func(
-        [IDL.Nat64, IDL.Nat32],
-        [Result_3],
-        [],
-      ),
     'admin_reconcile_deployment' : IDL.Func(
         [IDL.Principal, IDL.Text, IDL.Vec(IDL.Nat8)],
         [Result],
@@ -525,11 +515,6 @@ export const idlFactory = ({ IDL }) => {
     'list_latest_wasm_versions' : IDL.Func(
         [IDL.Opt(IDL.Text), IDL.Opt(IDL.Nat32)],
         [Result_22],
-        ['query'],
-      ),
-    'list_legacy_wasm_artifacts' : IDL.Func(
-        [IDL.Opt(IDL.Vec(IDL.Nat8)), IDL.Opt(IDL.Nat32)],
-        [Result_5],
         ['query'],
       ),
     'list_provision_pool' : IDL.Func([IDL.Text], [Result_23], ['query']),

@@ -343,6 +343,144 @@ fn provisioning_handoff_stays_forgotten_after_upgrade_and_owner_retry() {
     assert_eq!(metadata.module_hash, hash);
 }
 
+#[test]
+#[ignore = "requires built Wasm files and a local PocketIC 16 server"]
+fn large_artifacts_install_through_concurrently_uploaded_chunks() {
+    let pic = replica();
+    let controller = Principal::from_slice(&[1, 2, 3]);
+    let owner = Principal::from_slice(&[2, 3, 4]);
+    let id = pic.create_canister_with_settings(Some(controller), None);
+    pic.add_cycles(id, 100_000_000_000_000);
+    pic.install_canister(
+        id,
+        wasm("ic_wasm_canister"),
+        candid::encode_one(Some(Init::Init(WasmInit {
+            name: "runtime".into(),
+            topup_threshold: 0,
+            topup_amount: 0,
+            governance_canister: Some(controller),
+        })))
+        .unwrap(),
+        Some(controller),
+    );
+
+    // Five 1 MiB storage chunks: more than one concurrent upload group and far
+    // above the direct-install limit.
+    let payload = "a".repeat(4_500_000);
+    let module = wat::parse_str(format!(
+        r#"(module (memory 80) (data (i32.const 0) "{payload}"))"#
+    ))
+    .unwrap();
+    let hash = ByteArray::from(sha256(&module));
+    let chunk_hashes: Vec<ByteArray<32>> = module
+        .chunks(1024 * 1024)
+        .map(|chunk| {
+            update(
+                &pic,
+                id,
+                controller,
+                "admin_add_wasm_chunk",
+                (ByteBuf::from(chunk),),
+            )
+            .unwrap()
+        })
+        .collect();
+    let committed: ByteArray<32> = update(
+        &pic,
+        id,
+        controller,
+        "admin_commit_wasm_chunks",
+        (
+            CommitWasmChunksInput {
+                name: "large".into(),
+                description: String::new(),
+                chunk_hashes,
+                artifact_hash: hash,
+                encoding: Some(WasmEncoding::Raw),
+            },
+            None::<ByteArray<32>>,
+        ),
+    )
+    .unwrap();
+    assert_eq!(committed, hash);
+
+    let _: () = update(
+        &pic,
+        id,
+        controller,
+        "admin_add_provisioners",
+        (BTreeSet::from([owner]),),
+    )
+    .unwrap();
+    let controllers: Vec<_> = BTreeSet::from([id, controller]).into_iter().collect();
+    let template: ProvisionTemplateInfo = update(
+        &pic,
+        id,
+        controller,
+        "admin_add_provision_template",
+        (ProvisionTemplate {
+            id: "large".into(),
+            wasm_name: "large".into(),
+            artifact_hash: hash,
+            expected_module_hash: hash,
+            encoding: WasmEncoding::Raw,
+            settings: ProvisionSettings {
+                controllers,
+                ..Default::default()
+            },
+            subnet: None,
+            initial_cycles: 5_000_000_000_000,
+            max_init_args_bytes: 1024,
+            pool_size: 1,
+        },),
+    )
+    .unwrap();
+    let target: Principal = update(&pic, id, controller, "admin_refill_pool", ("large",)).unwrap();
+    let expires_at = pic.get_time().as_nanos_since_unix_epoch() / 1_000_000 + 3_600_000;
+    let request_id = ByteArray::from([7; 32]);
+    let _: ReservationReceipt = update(
+        &pic,
+        id,
+        owner,
+        "reserve_canister",
+        (ReserveRequest {
+            request_id,
+            provision_template_id: "large".into(),
+            provision_template_hash: template.hash,
+            expires_at,
+        },),
+    )
+    .unwrap();
+    let args = ByteBuf::from(b"DIDL\0\0".as_slice());
+    let installed: ProvisionReceipt = update(
+        &pic,
+        id,
+        owner,
+        "ensure_install",
+        (InstallRequest {
+            request_id,
+            canister: target,
+            provision_template_id: "large".into(),
+            provision_template_hash: template.hash,
+            expected_module_hash: hash,
+            init_args_hash: sha256(&args).into(),
+            init_args: args,
+            provision_spec_hash: [6; 32].into(),
+            expires_at,
+        },),
+    )
+    .unwrap();
+    assert_eq!(installed.stage, ProvisionStage::Installed);
+    assert_eq!(installed.module_hash, Some(hash));
+    assert_eq!(
+        pic.canister_status(target, Some(id))
+            .unwrap()
+            .module_hash
+            .as_deref(),
+        Some(hash.as_slice())
+    );
+}
+
 // Minimal local wallet fixture: forwards the top-up arguments with attached cycles.
 fn fund_namespace(pic: &PocketIc, target: Principal, caller: Principal, namespace: &str) {
     let target_bytes = target

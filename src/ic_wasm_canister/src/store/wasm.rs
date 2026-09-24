@@ -83,9 +83,7 @@ fn validate_new_wasm(
             ));
         }
     }
-    if WASM_STORE.with_borrow(|m| m.contains_key(&hash))
-        || ARTIFACT_META_STORE.with_borrow(|m| m.contains_key(&*hash))
-    {
+    if ARTIFACT_META_STORE.with_borrow(|m| m.contains_key(&*hash)) {
         return Err("wasm already exists".to_string());
     }
     let latest = LATEST_STORE.with_borrow(|r| r.get(&args.name).map(ByteArray::from));
@@ -98,16 +96,7 @@ fn validate_new_wasm(
             ));
         }
     }
-    let current_module_hash = match encoding {
-        WasmEncoding::Raw => {
-            if args.wasm.len() > MAX_ARTIFACT_BYTES {
-                return Err(format!("artifact exceeds the limit {MAX_ARTIFACT_BYTES}"));
-            }
-            validate_wasm_module(&args.wasm, "raw artifact")?;
-            hash
-        }
-        WasmEncoding::Gzip => module_hash_from_artifact(&args.wasm, encoding)?,
-    };
+    let current_module_hash = module_hash_from_artifact(&args.wasm, hash, encoding)?;
     let previous_artifact = force_prev_hash
         .or(latest)
         .unwrap_or_else(|| ByteArray::from([0u8; 32]));
@@ -138,16 +127,6 @@ fn validate_new_wasm(
     })
 }
 
-#[cfg(test)]
-pub fn get_latest(name: &str) -> Result<(ByteArray<32>, Wasm), String> {
-    let hash = LATEST_STORE
-        .with_borrow(|r| r.get(&name.to_string()).map(ByteArray::from))
-        .ok_or_else(|| format!("NotFound: {} not found", name))?;
-    get_wasm(&hash)
-        .map(|wasm| (hash, wasm))
-        .ok_or_else(|| "NotFound: latest wasm not found".to_string())
-}
-
 pub fn get_latest_metadata(name: &str) -> Result<(ByteArray<32>, WasmMetadata), String> {
     let hash = LATEST_STORE
         .with_borrow(|r| r.get(&name.to_string()).map(ByteArray::from))
@@ -155,159 +134,71 @@ pub fn get_latest_metadata(name: &str) -> Result<(ByteArray<32>, WasmMetadata), 
     Ok((hash, get_metadata(&hash)?))
 }
 
-pub fn get_wasm(hash: &ByteArray<32>) -> Option<Wasm> {
-    if let Some(metadata) = ARTIFACT_META_STORE.with_borrow(|r| r.get(&**hash)) {
-        let mut bytes = Vec::with_capacity(metadata.wasm_size as usize);
-        for index in 0..metadata.chunks {
-            let chunk =
-                ARTIFACT_CHUNK_STORE.with_borrow(|r| r.get(&ArtifactChunkKey(**hash, index)))?;
-            bytes.extend_from_slice(&chunk);
-        }
-        if bytes.len() as u64 != metadata.wasm_size {
-            return None;
-        }
-        return Some(Wasm {
-            name: metadata.name,
-            created_at: metadata.created_at,
-            created_by: metadata.created_by,
-            description: metadata.description,
-            wasm: ByteBuf::from(bytes),
-            encoding: metadata.encoding,
-            module_hash: Some(metadata.module_hash),
-        });
+fn artifact_metadata(hash: &ByteArray<32>) -> Result<ArtifactMetadata, String> {
+    ARTIFACT_META_STORE
+        .with_borrow(|r| r.get(&**hash))
+        .ok_or_else(|| "NotFound: wasm not found".to_string())
+}
+
+/// Assembles the complete artifact bytes in heap memory.
+pub fn get_wasm(hash: &ByteArray<32>) -> Result<Vec<u8>, String> {
+    let metadata = artifact_metadata(hash)?;
+    let mut bytes = Vec::with_capacity(metadata.wasm_size as usize);
+    for index in 0..metadata.chunks {
+        bytes.extend_from_slice(&storage_chunk(hash, index)?);
     }
-    WASM_STORE.with_borrow(|r| r.get(hash)).map(|mut wasm| {
-        wasm.encoding = wasm.effective_encoding();
-        wasm
-    })
+    if bytes.len() as u64 != metadata.wasm_size {
+        return Err("artifact chunks do not add up to its size".to_string());
+    }
+    Ok(bytes)
 }
 
 pub fn get_metadata(hash: &ByteArray<32>) -> Result<WasmMetadata, String> {
-    if let Some(metadata) = ARTIFACT_META_STORE.with_borrow(|r| r.get(&**hash)) {
-        return Ok(metadata.public(*hash));
-    }
-    WASM_STORE
-        .with_borrow(|r| r.get(hash))
-        .ok_or_else(|| "NotFound: wasm not found".to_string())?
-        .metadata(*hash)
-}
-
-pub fn is_legacy_artifact(hash: &ByteArray<32>) -> bool {
-    !ARTIFACT_META_STORE.with_borrow(|store| store.contains_key(&**hash))
-        && WASM_STORE.with_borrow(|store| store.contains_key(hash))
+    artifact_metadata(hash).map(|metadata| metadata.public(*hash))
 }
 
 pub fn module_hash(hash: &ByteArray<32>) -> Result<ByteArray<32>, String> {
-    if let Some(metadata) = ARTIFACT_META_STORE.with_borrow(|r| r.get(&**hash)) {
-        return Ok(metadata.module_hash);
-    }
-    let wasm = WASM_STORE
-        .with_borrow(|r| r.get(hash))
-        .ok_or_else(|| "NotFound: wasm not found".to_string())?;
-    wasm.effective_module_hash(hash)
+    artifact_metadata(hash).map(|metadata| metadata.module_hash)
 }
 
 pub fn get_chunk(hash: &ByteArray<32>, offset: usize, take: usize) -> Result<Vec<u8>, String> {
-    if let Some(metadata) = ARTIFACT_META_STORE.with_borrow(|r| r.get(&**hash)) {
-        let size = usize::try_from(metadata.wasm_size)
-            .map_err(|_| "artifact size exceeds usize".to_string())?;
-        if offset > size {
-            return Err("offset exceeds artifact size".to_string());
-        }
-        let end = offset.saturating_add(take).min(size);
-        let mut out = Vec::with_capacity(end.saturating_sub(offset));
-        let mut cursor = offset;
-        while cursor < end {
-            let index = cursor / ARTIFACT_STORAGE_CHUNK_BYTES;
-            let within = cursor % ARTIFACT_STORAGE_CHUNK_BYTES;
-            let chunk = ARTIFACT_CHUNK_STORE
-                .with_borrow(|r| r.get(&ArtifactChunkKey(**hash, index as u32)))
-                .ok_or_else(|| "artifact chunk is missing".to_string())?;
-            if within >= chunk.len() {
-                return Err("artifact chunk is truncated".to_string());
-            }
-            let available = chunk.len().saturating_sub(within);
-            let count = available.min(end - cursor);
-            out.extend_from_slice(&chunk[within..within + count]);
-            cursor += count;
-        }
-        return Ok(out);
-    }
-    let wasm = WASM_STORE
-        .with_borrow(|r| r.get(hash))
-        .ok_or_else(|| "NotFound: wasm not found".to_string())?;
-    if offset > wasm.wasm.len() {
+    let metadata = artifact_metadata(hash)?;
+    let size = usize::try_from(metadata.wasm_size)
+        .map_err(|_| "artifact size exceeds usize".to_string())?;
+    if offset > size {
         return Err("offset exceeds artifact size".to_string());
     }
-    let end = offset.saturating_add(take).min(wasm.wasm.len());
-    Ok(wasm.wasm[offset..end].to_vec())
-}
-
-pub fn storage_chunk_count(hash: &ByteArray<32>) -> Result<u32, String> {
-    let metadata = get_metadata(hash)?;
-    Ok((metadata.wasm_size as usize).div_ceil(ARTIFACT_STORAGE_CHUNK_BYTES) as u32)
-}
-
-pub fn storage_chunk(hash: &ByteArray<32>, index: u32) -> Result<Vec<u8>, String> {
-    let offset = (index as usize)
-        .checked_mul(ARTIFACT_STORAGE_CHUNK_BYTES)
-        .ok_or_else(|| "artifact chunk offset overflowed".to_string())?;
-    get_chunk(hash, offset, ARTIFACT_STORAGE_CHUNK_BYTES)
-}
-
-pub fn list_legacy_artifacts(prev: Option<ByteArray<32>>, take: usize) -> Vec<ByteArray<32>> {
-    WASM_STORE.with_borrow(|r| {
-        let lower = prev
-            .map(|hash| std::ops::Bound::Excluded(*hash))
-            .unwrap_or(std::ops::Bound::Unbounded);
-        r.keys_range((lower, std::ops::Bound::Unbounded))
-            .take(take)
-            .map(ByteArray::from)
-            .collect()
-    })
-}
-
-pub fn migrate_legacy_artifact(hash: &ByteArray<32>) -> Result<bool, String> {
-    if ARTIFACT_META_STORE.with_borrow(|r| r.contains_key(&**hash)) {
-        return Ok(false);
-    }
-    let legacy = WASM_STORE
-        .with_borrow(|r| r.get(hash))
-        .ok_or_else(|| "NotFound: legacy artifact not found".to_string())?;
-    let module_hash = legacy.effective_module_hash(hash)?;
-    let encoding = legacy.effective_encoding();
-    let wasm = legacy.wasm.into_vec();
-    let chunks = wasm.len().div_ceil(ARTIFACT_STORAGE_CHUNK_BYTES) as u32;
-    ARTIFACT_CHUNK_STORE.with_borrow_mut(|store| {
-        for (index, chunk) in wasm.chunks(ARTIFACT_STORAGE_CHUNK_BYTES).enumerate() {
-            store.insert(ArtifactChunkKey(**hash, index as u32), chunk.to_vec());
+    let end = offset.saturating_add(take).min(size);
+    let mut out = Vec::with_capacity(end - offset);
+    let mut cursor = offset;
+    while cursor < end {
+        let index = cursor / ARTIFACT_STORAGE_CHUNK_BYTES;
+        let within = cursor % ARTIFACT_STORAGE_CHUNK_BYTES;
+        let chunk = storage_chunk(hash, index as u32)?;
+        if within >= chunk.len() {
+            return Err("artifact chunk is truncated".to_string());
         }
-    });
-    ARTIFACT_META_STORE.with_borrow_mut(|store| {
-        store.insert(
-            **hash,
-            ArtifactMetadata {
-                name: legacy.name,
-                created_at: legacy.created_at,
-                created_by: legacy.created_by,
-                description: legacy.description,
-                encoding,
-                module_hash,
-                wasm_size: wasm.len() as u64,
-                chunks,
-            },
-        );
-    });
-    WASM_STORE.with_borrow_mut(|store| {
-        store.remove(hash);
-    });
-    Ok(true)
+        let count = (chunk.len() - within).min(end - cursor);
+        out.extend_from_slice(&chunk[within..within + count]);
+        cursor += count;
+    }
+    Ok(out)
+}
+
+/// Number of stored chunks, each at most [`ARTIFACT_STORAGE_CHUNK_BYTES`].
+pub fn storage_chunk_count(hash: &ByteArray<32>) -> Result<u32, String> {
+    artifact_metadata(hash).map(|metadata| metadata.chunks)
+}
+
+/// Reads one stored chunk directly, as `upload_chunk` expects it.
+pub fn storage_chunk(hash: &ByteArray<32>, index: u32) -> Result<Vec<u8>, String> {
+    ARTIFACT_CHUNK_STORE
+        .with_borrow(|r| r.get(&ArtifactChunkKey(**hash, index)))
+        .ok_or_else(|| "artifact chunk is missing".to_string())
 }
 
 pub fn validate_remove_wasm(hash: &ByteArray<32>) -> Result<(), String> {
-    if get_metadata(hash).is_err() {
-        return Err("NotFound: wasm not found".to_string());
-    }
+    artifact_metadata(hash)?;
     if LATEST_STORE.with_borrow(|r| r.iter().any(|entry| entry.value() == **hash)) {
         return Err("cannot remove a latest artifact".to_string());
     }
@@ -337,10 +228,6 @@ pub fn remove_wasm(hash: &ByteArray<32>) -> Result<(), String> {
                 r.remove(&ArtifactChunkKey(**hash, index));
             }
         });
-    } else {
-        WASM_STORE.with_borrow_mut(|r| {
-            r.remove(hash);
-        });
     }
     Ok(())
 }
@@ -357,23 +244,9 @@ pub fn next_version_metadata(
 
 fn next_version_hash(name: &str, prev_hash: ByteArray<32>) -> Result<ByteArray<32>, String> {
     ic_cose_types::validate_str(name)?;
-    let key = ReleaseKey(name.to_string(), prev_hash);
     let hash = RELEASE_PATH_STORE
-        .with_borrow(|r| r.get(&key).map(ByteArray::from))
-        .or_else(|| {
-            if *prev_hash != [0u8; 32] {
-                return None;
-            }
-            // The legacy global zero edge lost all but one wasm family.
-            // Recover the first release deterministically from artifact
-            // metadata and keep future publications on the v2 path.
-            WASM_STORE.with_borrow(|r| {
-                r.iter()
-                    .filter(|entry| entry.value().name == name)
-                    .min_by_key(|entry| (entry.value().created_at, *entry.key()))
-                    .map(|entry| ByteArray::from(*entry.key()))
-            })
-        })
+        .with_borrow(|r| r.get(&ReleaseKey(name.to_string(), prev_hash)))
+        .map(ByteArray::from)
         .ok_or_else(|| "no next version".to_string())?;
     let metadata = get_metadata(&hash)?;
     if metadata.name != name {
@@ -395,22 +268,6 @@ pub fn add_log(log: DeployLog) -> Result<u64, String> {
         r.insert(LogKey(name, id), id);
     });
     Ok(id)
-}
-
-pub fn rebuild_log_index(start: u64, take: usize) -> Result<u64, String> {
-    let len = INSTALL_LOGS.with_borrow(|logs| logs.len());
-    if start > len {
-        return Err("log rebuild cursor exceeds log length".to_string());
-    }
-    let end = start.saturating_add(take as u64).min(len);
-    for id in start..end {
-        if let Some(log) = INSTALL_LOGS.with_borrow(|logs| logs.get(id)) {
-            LOG_INDEX_STORE.with_borrow_mut(|index| {
-                index.insert(LogKey(log.name, id), id);
-            });
-        }
-    }
-    Ok(end)
 }
 
 pub fn commit_deployment(log: DeployLog) -> Result<u64, String> {
@@ -457,54 +314,25 @@ pub fn get_deployed_page(prev: Option<Principal>, take: usize) -> Vec<Deployment
 }
 
 pub fn deployment_logs(name: &str, prev: Option<u64>, take: usize) -> Vec<DeploymentInfo> {
-    INSTALL_LOGS.with(|r| {
-        let logs = r.borrow();
-        let latest = logs.len();
-        if latest == 0 || take == 0 {
+    INSTALL_LOGS.with_borrow(|logs| {
+        let prev = prev.unwrap_or(logs.len());
+        if take == 0 || prev == 0 || prev > logs.len() {
             return vec![];
         }
-
-        let prev = prev.unwrap_or(latest);
-        if prev > latest || prev == 0 {
-            return vec![];
-        }
-
-        if LOG_INDEX_STORE.with_borrow(|index| index.len()) == latest {
-            return LOG_INDEX_STORE.with_borrow(|index| {
-                index
-                    .range((
-                        std::ops::Bound::Included(LogKey(name.to_string(), 0)),
-                        std::ops::Bound::Excluded(LogKey(name.to_string(), prev)),
-                    ))
-                    .rev()
-                    .take(take)
-                    .filter_map(|entry| {
-                        let id = entry.value();
-                        logs.get(id).map(|log| deployment_info_with_args(id, log))
-                    })
-                    .collect()
-            });
-        }
-
-        let mut idx = prev.saturating_sub(1);
-        let mut res: Vec<DeploymentInfo> = Vec::with_capacity(take);
-        while let Some(log) = logs.get(idx) {
-            // entries for other wasm names are skipped, but the cursor must
-            // still move or the loop never terminates
-            if log.name == name {
-                res.push(deployment_info_with_args(idx, log));
-
-                if res.len() >= take {
-                    break;
-                }
-            }
-
-            if idx == 0 {
-                break;
-            }
-            idx -= 1;
-        }
-        res
+        LOG_INDEX_STORE.with_borrow(|index| {
+            index
+                .range((
+                    std::ops::Bound::Included(LogKey(name.to_string(), 0)),
+                    std::ops::Bound::Excluded(LogKey(name.to_string(), prev)),
+                ))
+                .rev()
+                .take(take)
+                .filter_map(|entry| {
+                    let id = entry.value();
+                    logs.get(id).map(|log| deployment_info_with_args(id, log))
+                })
+                .collect()
+        })
     })
 }
 

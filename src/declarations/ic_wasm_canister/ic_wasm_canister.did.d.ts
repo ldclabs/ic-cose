@@ -444,7 +444,8 @@ export type PoolCanisterState = {
   } |
   {
     /**
-     * Carries an installed module and never returns to the pool.
+     * Carries an installed module. No longer recorded: an installed canister
+     * leaves the pool, and the variant remains only so old data decodes.
      */
     'Installed' : null
   };
@@ -882,18 +883,6 @@ export interface _SERVICE {
    */
   'admin_handoff_canister' : ActorMethod<[UpdateSettingsArgs], Result>,
   /**
-   * Migrates one legacy monolithic artifact into the chunked stable layout.
-   */
-  'admin_migrate_legacy_wasm_artifact' : ActorMethod<
-    [Uint8Array | number[]],
-    Result_10
-  >,
-  /**
-   * Incrementally builds the per-wasm deployment-log index for records written
-   * by versions that only maintained the global stable log.
-   */
-  'admin_rebuild_log_index' : ActorMethod<[bigint, number], Result_3>,
-  /**
    * Repairs the deployment index after a successful target install whose local
    * callback could not append its log. The target's live module hash is checked
    * against repository metadata before any record is written.
@@ -993,10 +982,6 @@ export interface _SERVICE {
   'list_latest_wasm_versions' : ActorMethod<
     [[] | [string], [] | [number]],
     Result_22
-  >,
-  'list_legacy_wasm_artifacts' : ActorMethod<
-    [[] | [Uint8Array | number[]], [] | [number]],
-    Result_5
   >,
   /**
    * Recorded pool inventory of a template.

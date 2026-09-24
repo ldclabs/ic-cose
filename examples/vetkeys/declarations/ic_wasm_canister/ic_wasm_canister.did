@@ -286,7 +286,8 @@ type PoolCanisterState = variant {
   Available;
   // Claimed by a request id, not installed yet.
   Reserved;
-  // Carries an installed module and never returns to the pool.
+  // Carries an installed module. No longer recorded: an installed canister
+  // leaves the pool, and the variant remains only so old data decodes.
   Installed;
 };
 // Whether a template's pool may currently create another canister.
@@ -584,11 +585,6 @@ service : (opt ChainArgs) -> {
   // Explicitly transfers target control away from this canister and removes the
   // target from the managed deployment index after the settings call succeeds.
   admin_handoff_canister : (UpdateSettingsArgs) -> (Result);
-  // Migrates one legacy monolithic artifact into the chunked stable layout.
-  admin_migrate_legacy_wasm_artifact : (blob) -> (Result_10);
-  // Incrementally builds the per-wasm deployment-log index for records written
-  // by versions that only maintained the global stable log.
-  admin_rebuild_log_index : (nat64, nat32) -> (Result_3);
   // Repairs the deployment index after a successful target install whose local
   // callback could not append its log. The target's live module hash is checked
   // against repository metadata before any record is written.
@@ -646,7 +642,6 @@ service : (opt ChainArgs) -> {
   // Bounds scanned records, including non-matching requests. Follow next_cursor even on empty pages.
   list_expired_reservations_page : (opt blob, nat32) -> (Result_21) query;
   list_latest_wasm_versions : (opt text, opt nat32) -> (Result_22) query;
-  list_legacy_wasm_artifacts : (opt blob, opt nat32) -> (Result_5) query;
   // Recorded pool inventory of a template.
   //
   // Governance watches this against the reservation churn: a pool that keeps

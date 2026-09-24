@@ -2,6 +2,8 @@
 //! Keep its optimized default there and on native tests; wasm64 must not fall
 //! back to VectorMemory, which would discard every stable map on upgrade.
 
+use ic_stable_structures::{Memory, StableBTreeMap, Storable};
+
 #[cfg(not(target_arch = "wasm64"))]
 pub use ic_stable_structures::DefaultMemoryImpl;
 
@@ -10,7 +12,7 @@ pub use ic_stable_structures::DefaultMemoryImpl;
 pub struct DefaultMemoryImpl;
 
 #[cfg(target_arch = "wasm64")]
-impl ic_stable_structures::Memory for DefaultMemoryImpl {
+impl Memory for DefaultMemoryImpl {
     fn size(&self) -> u64 {
         ic_cdk::stable::stable_size()
     }
@@ -28,4 +30,20 @@ impl ic_stable_structures::Memory for DefaultMemoryImpl {
     fn write(&self, offset: u64, src: &[u8]) {
         ic_cdk::stable::stable_write(offset, src);
     }
+}
+
+/// Record count of a retired stable map, read without allocating its memory:
+/// a virtual memory that was never used must stay unallocated.
+///
+/// Retired maps stored unbounded values, so their V2 layout loads without
+/// checking the value type; only the header length is read.
+pub fn retired_map_len<K, M>(memory: M) -> u64
+where
+    K: Storable + Ord + Clone,
+    M: Memory,
+{
+    if memory.size() == 0 {
+        return 0;
+    }
+    StableBTreeMap::<K, Vec<u8>, M>::load(memory).len()
 }

@@ -1,44 +1,30 @@
 use super::*;
 
-fn load_setting_metadata(key: &SettingPathKey) -> Option<(Setting, bool)> {
-    if let Some(meta) = SETTING_META_STORE.with_borrow(|store| store.get(key)) {
-        let mut setting = meta.into_setting(None);
-        setting.readers.remove(&Principal::anonymous());
-        return Some((setting, false));
-    }
-    SETTINGS_STORE
+fn load_setting_metadata(key: &SettingPathKey) -> Option<Setting> {
+    SETTING_META_STORE
         .with_borrow(|store| store.get(key))
-        .map(|mut setting| {
+        .map(|meta| {
+            let mut setting = meta.into_setting(None);
             setting.readers.remove(&Principal::anonymous());
-            (setting, true)
+            setting
         })
 }
 
 fn load_setting(key: &SettingPathKey) -> Option<Setting> {
-    if let Some(meta) = SETTING_META_STORE.with_borrow(|store| store.get(key)) {
-        let data = SETTING_DATA_STORE.with_borrow(|store| store.get(key));
-        let mut setting = meta.into_setting(data);
-        setting.readers.remove(&Principal::anonymous());
-        return Some(setting);
+    let mut setting = load_setting_metadata(key)?;
+    if let Some(data) = SETTING_DATA_STORE.with_borrow(|store| store.get(key)) {
+        setting.payload = data.payload;
+        setting.dek = data.dek;
     }
-    SETTINGS_STORE.with_borrow(|store| {
-        store.get(key).map(|mut setting| {
-            setting.readers.remove(&Principal::anonymous());
-            setting
-        })
-    })
+    Some(setting)
 }
 
 fn contains_setting(key: &SettingPathKey) -> bool {
     SETTING_META_STORE.with_borrow(|store| store.contains_key(key))
-        || SETTINGS_STORE.with_borrow(|store| store.contains_key(key))
 }
 
 fn save_setting(key: SettingPathKey, setting: Setting) {
     let (meta, data) = setting.into_parts();
-    SETTING_META_STORE.with_borrow_mut(|store| {
-        store.insert(key.clone(), meta);
-    });
     SETTING_DATA_STORE.with_borrow_mut(|store| {
         if data.payload.is_some() || data.dek.is_some() {
             store.insert(key.clone(), data);
@@ -46,185 +32,88 @@ fn save_setting(key: SettingPathKey, setting: Setting) {
             store.remove(&key);
         }
     });
-    SETTINGS_STORE.with_borrow_mut(|store| {
-        store.remove(&key);
+    SETTING_META_STORE.with_borrow_mut(|store| {
+        store.insert(key, meta);
     });
 }
 
-fn save_setting_metadata(key: SettingPathKey, setting: Setting, was_legacy: bool) {
-    if was_legacy {
-        save_setting(key, setting);
-    } else {
-        SETTING_META_STORE.with_borrow_mut(|store| {
-            store.insert(key, setting.into_parts().0);
-        });
-    }
+fn save_setting_metadata(key: SettingPathKey, setting: Setting) {
+    SETTING_META_STORE.with_borrow_mut(|store| {
+        store.insert(key, setting.into_parts().0);
+    });
 }
 
 fn remove_setting(key: &SettingPathKey) -> Option<Setting> {
-    if let Some(meta) = SETTING_META_STORE.with_borrow_mut(|store| store.remove(key)) {
-        let data = SETTING_DATA_STORE.with_borrow_mut(|store| store.remove(key));
-        return Some(meta.into_setting(data));
-    }
-    SETTINGS_STORE.with_borrow_mut(|store| store.remove(key))
+    let meta = SETTING_META_STORE.with_borrow_mut(|store| store.remove(key))?;
+    let data = SETTING_DATA_STORE.with_borrow_mut(|store| store.remove(key));
+    Some(meta.into_setting(data))
 }
 
-fn ensure_acl_v1(namespace: &str, ns: &mut Namespace) {
-    if ns.acl_version != 0 {
-        return;
-    }
-    ACL_STORE.with_borrow_mut(|store| {
-        for principal in &ns.managers {
-            if *principal != Principal::anonymous() {
-                store.insert(AclKey(namespace.to_string(), ROLE_MANAGER, *principal), 0);
-            }
-        }
-        for principal in &ns.auditors {
-            if *principal != Principal::anonymous() {
-                store.insert(AclKey(namespace.to_string(), ROLE_AUDITOR, *principal), 0);
-            }
-        }
-        for principal in &ns.users {
-            if *principal != Principal::anonymous() {
-                store.insert(AclKey(namespace.to_string(), ROLE_USER, *principal), 0);
-            }
-        }
-    });
-    FIXED_IDENTITY_STORE.with_borrow_mut(|store| {
-        for (name, delegators) in &ns.fixed_id_names {
-            for principal in delegators {
-                if *principal != Principal::anonymous() {
-                    store.insert(
-                        FixedIdentityKey(namespace.to_string(), name.clone(), *principal),
-                        0,
-                    );
-                }
-            }
-        }
-    });
-    ns.manager_count = ns
-        .managers
-        .iter()
-        .filter(|principal| **principal != Principal::anonymous())
-        .count() as u32;
-    ns.auditor_count = ns
-        .auditors
-        .iter()
-        .filter(|principal| **principal != Principal::anonymous())
-        .count() as u32;
-    ns.user_count = ns
-        .users
-        .iter()
-        .filter(|principal| **principal != Principal::anonymous())
-        .count() as u32;
-    ns.fixed_delegator_count = ns
-        .fixed_id_names
-        .values()
-        .map(|values| {
-            values
-                .iter()
-                .filter(|principal| **principal != Principal::anonymous())
-                .count()
-        })
-        .sum::<usize>() as u32;
-    ns.managers.clear();
-    ns.auditors.clear();
-    ns.users.clear();
-    ns.fixed_id_names.clear();
-    ns.acl_version = 1;
+fn first_acl_key(namespace: &str, role: u8) -> AclKey {
+    AclKey(
+        namespace.to_string(),
+        role,
+        Principal::management_canister(),
+    )
 }
 
-fn role_members(namespace: &str, ns: &Namespace, role: u8) -> BTreeSet<Principal> {
-    if ns.acl_version == 0 {
-        return match role {
-            ROLE_MANAGER => ns.managers.clone(),
-            ROLE_AUDITOR => ns.auditors.clone(),
-            ROLE_USER => ns.users.clone(),
-            _ => BTreeSet::new(),
-        }
-        .into_iter()
-        .filter(|principal| *principal != Principal::anonymous())
-        .collect();
-    }
+fn role_members(namespace: &str, role: u8) -> BTreeSet<Principal> {
     ACL_STORE.with_borrow(|store| {
         store
-            .range(ops::RangeFrom {
-                start: AclKey(
-                    namespace.to_string(),
-                    role,
-                    Principal::management_canister(),
-                ),
-            })
-            .take_while(|entry| entry.key().0 == namespace && entry.key().1 == role)
-            .map(|entry| entry.key().2)
+            .keys_range(first_acl_key(namespace, role)..)
+            .take_while(|key| key.0 == namespace && key.1 == role)
+            .map(|key| key.2)
             .collect()
     })
 }
 
-fn fixed_identities(namespace: &str, ns: &Namespace) -> BTreeMap<String, BTreeSet<Principal>> {
-    if ns.acl_version == 0 {
-        return ns
-            .fixed_id_names
-            .iter()
-            .filter_map(|(name, principals)| {
-                let principals: BTreeSet<_> = principals
-                    .iter()
-                    .copied()
-                    .filter(|principal| *principal != Principal::anonymous())
-                    .collect();
-                (!principals.is_empty()).then(|| (name.clone(), principals))
-            })
-            .collect();
-    }
+fn fixed_identities(namespace: &str) -> BTreeMap<String, BTreeSet<Principal>> {
     FIXED_IDENTITY_STORE.with_borrow(|store| {
         let mut values = BTreeMap::<String, BTreeSet<Principal>>::new();
-        for entry in store
-            .range(ops::RangeFrom {
-                start: FixedIdentityKey(
+        for key in store
+            .keys_range(
+                FixedIdentityKey(
                     namespace.to_string(),
                     String::new(),
                     Principal::management_canister(),
-                ),
-            })
-            .take_while(|entry| entry.key().0 == namespace)
+                )..,
+            )
+            .take_while(|key| key.0 == namespace)
         {
-            values
-                .entry(entry.key().1.clone())
-                .or_default()
-                .insert(entry.key().2);
+            values.entry(key.1).or_default().insert(key.2);
         }
         values
     })
 }
 
-pub(super) fn namespace_info(name: String, ns: Namespace) -> NamespaceInfo {
-    let mut info = ns.clone().into_info(name.clone());
-    if ns.acl_version == 0 {
-        info.managers.remove(&Principal::anonymous());
-        info.auditors.remove(&Principal::anonymous());
-        info.users.remove(&Principal::anonymous());
-        info.fixed_id_names = fixed_identities(&name, &ns);
-    } else {
-        info.managers = role_members(&name, &ns, ROLE_MANAGER);
-        info.auditors = role_members(&name, &ns, ROLE_AUDITOR);
-        info.users = role_members(&name, &ns, ROLE_USER);
-        info.fixed_id_names = fixed_identities(&name, &ns);
-    }
+fn delegators(namespace: &str, name: &str) -> BTreeSet<Principal> {
+    FIXED_IDENTITY_STORE.with_borrow(|store| {
+        store
+            .keys_range(
+                FixedIdentityKey(
+                    namespace.to_string(),
+                    name.to_string(),
+                    Principal::management_canister(),
+                )..,
+            )
+            .take_while(|key| key.0 == namespace && key.1 == name)
+            .map(|key| key.2)
+            .collect()
+    })
+}
+
+pub(super) fn namespace_info(name: String, ns: &Namespace) -> NamespaceInfo {
+    let mut info = ns.to_info(name);
+    info.managers = role_members(&info.name, ROLE_MANAGER);
+    info.auditors = role_members(&info.name, ROLE_AUDITOR);
+    info.users = role_members(&info.name, ROLE_USER);
+    info.fixed_id_names = fixed_identities(&info.name);
     info
 }
 
-pub(super) fn namespace_summary(name: String, ns: Namespace) -> NamespaceInfo {
-    let mut info = ns.into_info(name);
-    info.managers.clear();
-    info.auditors.clear();
-    info.users.clear();
-    info.fixed_id_names.clear();
-    info
-}
-
-fn namespace_info_bounded(name: String, ns: Namespace) -> NamespaceInfo {
+fn namespace_info_bounded(name: String, ns: &Namespace) -> NamespaceInfo {
     if ns.info_size_hint() > MAX_NAMESPACE_PAGE_BYTES {
-        namespace_summary(name, ns)
+        ns.to_info(name)
     } else {
         namespace_info(name, ns)
     }
@@ -233,15 +122,8 @@ fn namespace_info_bounded(name: String, ns: Namespace) -> NamespaceInfo {
 fn remove_namespace_acl(namespace: &str) {
     ACL_STORE.with_borrow_mut(|store| {
         let keys: Vec<AclKey> = store
-            .range(ops::RangeFrom {
-                start: AclKey(
-                    namespace.to_string(),
-                    ROLE_MANAGER,
-                    Principal::management_canister(),
-                ),
-            })
-            .take_while(|entry| entry.key().0 == namespace)
-            .map(|entry| entry.key().clone())
+            .keys_range(first_acl_key(namespace, ROLE_MANAGER)..)
+            .take_while(|key| key.0 == namespace)
             .collect();
         for key in keys {
             store.remove(&key);
@@ -249,20 +131,28 @@ fn remove_namespace_acl(namespace: &str) {
     });
     FIXED_IDENTITY_STORE.with_borrow_mut(|store| {
         let keys: Vec<FixedIdentityKey> = store
-            .range(ops::RangeFrom {
-                start: FixedIdentityKey(
+            .keys_range(
+                FixedIdentityKey(
                     namespace.to_string(),
                     String::new(),
                     Principal::management_canister(),
-                ),
-            })
-            .take_while(|entry| entry.key().0 == namespace)
-            .map(|entry| entry.key().clone())
+                )..,
+            )
+            .take_while(|key| key.0 == namespace)
             .collect();
         for key in keys {
             store.remove(&key);
         }
     });
+}
+
+fn member_role(member_kind: &str) -> Result<u8, String> {
+    match member_kind {
+        "manager" => Ok(ROLE_MANAGER),
+        "auditor" => Ok(ROLE_AUDITOR),
+        "user" => Ok(ROLE_USER),
+        _ => Err(format!("invalid member kind: {member_kind}")),
+    }
 }
 
 fn mutate_members(
@@ -274,22 +164,13 @@ fn mutate_members(
     now_ms: u64,
 ) -> Result<(), String> {
     with_mut(namespace.clone(), |ns| {
-        if !ns.can_manage_namespace(&namespace, caller) {
+        if !ns.access(&namespace, caller).can_manage_namespace() {
             return Err("no permission".to_string());
         }
-        let current_count = if ns.acl_version == 0 {
-            role_members(&namespace, ns, role).len()
-        } else {
-            (match role {
-                ROLE_MANAGER => ns.manager_count,
-                ROLE_AUDITOR => ns.auditor_count,
-                ROLE_USER => ns.user_count,
-                _ => unreachable!(),
-            }) as usize
-        };
+        let current_count = ns.role_count(role) as usize;
         let changes: Vec<_> = values
             .into_iter()
-            .filter(|principal| ns.has_role(&namespace, role, principal) != add)
+            .filter(|principal| acl_contains(&namespace, role, principal) != add)
             .collect();
         let count = if add {
             current_count + changes.len()
@@ -306,7 +187,6 @@ fn mutate_members(
         if !add && role == ROLE_MANAGER && count == 0 {
             return Err("namespace must retain at least one manager".to_string());
         }
-        ensure_acl_v1(&namespace, ns);
         ACL_STORE.with_borrow_mut(|store| {
             for principal in changes {
                 let key = AclKey(namespace.clone(), role, principal);
@@ -317,13 +197,7 @@ fn mutate_members(
                 }
             }
         });
-        let count = count as u32;
-        match role {
-            ROLE_MANAGER => ns.manager_count = count,
-            ROLE_AUDITOR => ns.auditor_count = count,
-            ROLE_USER => ns.user_count = count,
-            _ => unreachable!(),
-        }
+        ns.set_role_count(role, count as u32);
         ns.updated_at = now_ms;
         Ok(())
     })
@@ -353,10 +227,16 @@ pub fn recover_managers(
     now_ms: u64,
 ) -> Result<(), String> {
     with_mut(namespace.clone(), |ns| {
-        if !role_members(&namespace, ns, ROLE_MANAGER).is_empty() {
+        let first = first_acl_key(&namespace, ROLE_MANAGER);
+        let has_manager = ACL_STORE.with_borrow(|store| {
+            store
+                .keys_range(first..)
+                .next()
+                .is_some_and(|key| key.0 == namespace && key.1 == ROLE_MANAGER)
+        });
+        if has_manager {
             return Err("namespace still has a manager".to_string());
         }
-        ensure_acl_v1(&namespace, ns);
         ACL_STORE.with_borrow_mut(|store| {
             for principal in &values {
                 store.insert(AclKey(namespace.clone(), ROLE_MANAGER, *principal), 0);
@@ -411,16 +291,10 @@ pub fn is_member(
     user: &Principal,
 ) -> Result<bool, String> {
     with(&namespace.to_string(), |ns| {
-        if !ns.can_read_namespace(namespace, caller) {
+        if !ns.access(namespace, caller).can_read_namespace() {
             return Err("no permission".to_string());
         }
-        let role = match member_kind {
-            "manager" => ROLE_MANAGER,
-            "auditor" => ROLE_AUDITOR,
-            "user" => ROLE_USER,
-            _ => return Err(format!("invalid member kind: {member_kind}")),
-        };
-        Ok(ns.has_role(namespace, role, user))
+        Ok(acl_contains(namespace, member_role(member_kind)?, user))
     })
 }
 
@@ -432,39 +306,20 @@ pub fn list_members(
     take: usize,
 ) -> Result<Vec<Principal>, String> {
     with(&namespace.to_string(), |ns| {
-        if !ns.can_read_namespace(namespace, caller) {
+        if !ns.access(namespace, caller).can_read_namespace() {
             return Err("no permission".to_string());
         }
-        let role = match member_kind {
-            "manager" => ROLE_MANAGER,
-            "auditor" => ROLE_AUDITOR,
-            "user" => ROLE_USER,
-            _ => return Err(format!("invalid member kind: {member_kind}")),
+        let role = member_role(member_kind)?;
+        let lower = match prev {
+            Some(principal) => ops::Bound::Excluded(AclKey(namespace.to_string(), role, principal)),
+            None => ops::Bound::Included(first_acl_key(namespace, role)),
         };
-        if ns.acl_version == 0 {
-            return Ok(role_members(namespace, &ns, role)
-                .into_iter()
-                .filter(|principal| prev.is_none_or(|cursor| principal > &cursor))
-                .take(take)
-                .collect());
-        }
-        let lower = prev
-            .map(|principal| {
-                std::ops::Bound::Excluded(AclKey(namespace.to_string(), role, principal))
-            })
-            .unwrap_or_else(|| {
-                std::ops::Bound::Included(AclKey(
-                    namespace.to_string(),
-                    role,
-                    Principal::management_canister(),
-                ))
-            });
         Ok(ACL_STORE.with_borrow(|store| {
             store
-                .range((lower, std::ops::Bound::Unbounded))
-                .take_while(|entry| entry.key().0 == namespace && entry.key().1 == role)
+                .keys_range((lower, ops::Bound::Unbounded))
+                .take_while(|key| key.0 == namespace && key.1 == role)
                 .take(take)
-                .map(|entry| entry.key().2)
+                .map(|key| key.2)
                 .collect()
         }))
     })
@@ -477,46 +332,30 @@ pub fn list_fixed_identity_names(
     take: usize,
 ) -> Result<Vec<String>, String> {
     with(&namespace.to_string(), |ns| {
-        if !ns.can_read_namespace(namespace, caller) {
+        if !ns.access(namespace, caller).can_read_namespace() {
             return Err("no permission".to_string());
-        }
-        if ns.acl_version == 0 {
-            return Ok(ns
-                .fixed_id_names
-                .iter()
-                .filter(|(_, principals)| {
-                    principals
-                        .iter()
-                        .any(|principal| *principal != Principal::anonymous())
-                })
-                .map(|(name, _)| name)
-                .filter(|name| prev.as_ref().is_none_or(|cursor| *name > cursor))
-                .take(take)
-                .cloned()
-                .collect());
         }
 
         let start_name = prev.clone().unwrap_or_default();
         Ok(FIXED_IDENTITY_STORE.with_borrow(|store| {
             let mut last_name: Option<String> = None;
             store
-                .range(ops::RangeFrom {
-                    start: FixedIdentityKey(
+                .keys_range(
+                    FixedIdentityKey(
                         namespace.to_string(),
                         start_name,
                         Principal::management_canister(),
-                    ),
-                })
-                .take_while(|entry| entry.key().0 == namespace)
-                .filter_map(|entry| {
-                    let name = &entry.key().1;
-                    if prev.as_ref().is_some_and(|cursor| name <= cursor)
-                        || last_name.as_ref() == Some(name)
+                    )..,
+                )
+                .take_while(|key| key.0 == namespace)
+                .filter_map(|key| {
+                    if prev.as_ref().is_some_and(|cursor| &key.1 <= cursor)
+                        || last_name.as_ref() == Some(&key.1)
                     {
                         return None;
                     }
-                    last_name = Some(name.clone());
-                    Some(name.clone())
+                    last_name = Some(key.1.clone());
+                    Some(key.1)
                 })
                 .take(take)
                 .collect()
@@ -530,32 +369,10 @@ pub fn get_delegators(
     caller: &Principal,
 ) -> Result<BTreeSet<Principal>, String> {
     with(&namespace.to_string(), |ns| {
-        if !ns.can_read_namespace(namespace, caller) {
+        if !ns.access(namespace, caller).can_read_namespace() {
             return Err("no permission".to_string());
         }
-        let values: BTreeSet<Principal> = if ns.acl_version == 0 {
-            ns.fixed_id_names
-                .get(name)
-                .into_iter()
-                .flatten()
-                .copied()
-                .filter(|principal| *principal != Principal::anonymous())
-                .collect()
-        } else {
-            FIXED_IDENTITY_STORE.with_borrow(|store| {
-                store
-                    .range(ops::RangeFrom {
-                        start: FixedIdentityKey(
-                            namespace.to_string(),
-                            name.to_string(),
-                            Principal::management_canister(),
-                        ),
-                    })
-                    .take_while(|entry| entry.key().0 == namespace && entry.key().1 == name)
-                    .map(|entry| entry.key().2)
-                    .collect()
-            })
-        };
+        let values = delegators(namespace, name);
         if values.is_empty() {
             Err("NotFound: name not found".to_string())
         } else {
@@ -573,33 +390,12 @@ pub fn mutate_delegators(
     now_ms: u64,
 ) -> Result<BTreeSet<Principal>, String> {
     with_mut(namespace.clone(), |ns| {
-        if !ns.can_manage_namespace(&namespace, caller) {
+        if !ns.access(&namespace, caller).can_manage_namespace() {
             return Err("no permission".to_string());
         }
-        let current = if ns.acl_version == 0 {
-            ns.fixed_id_names.get(&name).cloned().unwrap_or_default()
-        } else {
-            FIXED_IDENTITY_STORE.with_borrow(|store| {
-                store
-                    .range(ops::RangeFrom {
-                        start: FixedIdentityKey(
-                            namespace.clone(),
-                            name.clone(),
-                            Principal::management_canister(),
-                        ),
-                    })
-                    .take_while(|entry| entry.key().0 == namespace && entry.key().1 == name)
-                    .map(|entry| entry.key().2)
-                    .collect()
-            })
-        };
-        let current_len = current.len();
-        let current_total = if ns.acl_version == 0 {
-            ns.fixed_id_names.values().map(BTreeSet::len).sum::<usize>()
-        } else {
-            ns.fixed_delegator_count as usize
-        };
-        let mut next = current;
+        let mut next = delegators(&namespace, &name);
+        let current_len = next.len();
+        let current_total = ns.fixed_delegator_count as usize;
         if add {
             next.extend(values.iter().copied());
             if next.len() > MAX_NAMESPACE_FIXED_DELEGATORS
@@ -616,7 +412,6 @@ pub fn mutate_delegators(
         let next_total = current_total
             .saturating_sub(current_len)
             .saturating_add(next.len());
-        ensure_acl_v1(&namespace, ns);
         FIXED_IDENTITY_STORE.with_borrow_mut(|store| {
             for principal in values {
                 let key = FixedIdentityKey(namespace.clone(), name.clone(), principal);
@@ -642,19 +437,13 @@ pub fn delegation_session_expiry(
         return Err("anonymous user is not a delegator".to_string());
     }
     with(&namespace.to_string(), |ns| {
-        let allowed = if ns.acl_version == 0 {
-            ns.fixed_id_names
-                .get(name)
-                .is_some_and(|delegators| delegators.contains(caller))
-        } else {
-            FIXED_IDENTITY_STORE.with_borrow(|store| {
-                store.contains_key(&FixedIdentityKey(
-                    namespace.to_string(),
-                    name.to_string(),
-                    *caller,
-                ))
-            })
-        };
+        let allowed = FIXED_IDENTITY_STORE.with_borrow(|store| {
+            store.contains_key(&FixedIdentityKey(
+                namespace.to_string(),
+                name.to_string(),
+                *caller,
+            ))
+        });
         if allowed {
             Ok(ns.session_expires_in_ms)
         } else {
@@ -714,7 +503,6 @@ fn charge_namespace_cycles(namespace: &str, amount: u128) -> Result<NamespaceCha
     let liquid = ic_cdk::api::canister_liquid_cycle_balance();
     with_mut(namespace.to_string(), |ns| {
         debit_namespace_cycles(ns, amount, liquid, threshold)?;
-        ensure_acl_v1(namespace, ns);
         Ok(NamespaceCharge {
             namespace: namespace.to_string(),
             created_at: ns.created_at,
@@ -775,20 +563,12 @@ pub async fn random_bytes<const N: usize>(namespace: &str) -> Result<[u8; N], St
     bytes.try_into().map_err(format_error)
 }
 
-pub fn top_up_namespace(
-    namespace: String,
-    requested: u128,
-    available: u128,
-    now_ms: u64,
-) -> Result<u128, String> {
-    if requested > available {
-        return Err("insufficient cycles".to_string());
-    }
-    with_mut(namespace.clone(), |ns| {
+/// Credits `requested` attached cycles; the caller has checked they are attached.
+pub fn top_up_namespace(namespace: String, requested: u128, now_ms: u64) -> Result<u128, String> {
+    with_mut(namespace, |ns| {
         ns.gas_balance
             .checked_add(requested)
             .ok_or_else(|| "namespace gas balance overflowed".to_string())?;
-        ensure_acl_v1(&namespace, ns);
         let received = ic_cdk::api::msg_cycles_accept(requested);
         ns.gas_balance = ns
             .gas_balance
@@ -799,132 +579,28 @@ pub fn top_up_namespace(
     })
 }
 
-pub fn migrate(m: BTreeMap<String, NamespaceLegacy>) {
-    if m.is_empty() {
-        return;
-    }
-
-    NAMESPACES_STORE.with_borrow_mut(|r| {
-        for (name, ns) in m {
-            let mut nns = Namespace {
-                desc: ns.desc,
-                created_at: ns.created_at,
-                updated_at: ns.updated_at,
-                max_payload_size: ns.max_payload_size,
-                payload_bytes_total: ns.payload_bytes_total,
-                status: ns.status,
-                visibility: ns.visibility,
-                managers: ns.managers,
-                auditors: ns.auditors,
-                users: ns.users,
-                gas_balance: ns.gas_balance,
-                fixed_id_names: ns.fixed_id_names,
-                session_expires_in_ms: ns.session_expires_in_ms,
-                ..Default::default()
-            };
-            ensure_acl_v1(&name, &mut nns);
-            r.insert(name.clone(), nns);
-            for (k, setting) in ns.settings {
-                let spk = SettingPathKey(name.clone(), 0, k.0, k.1, 0);
-                save_setting(spk, setting);
-            }
-            for (k, setting) in ns.user_settings {
-                let spk = SettingPathKey(name.clone(), 1, k.0, k.1, 0);
-                save_setting(spk, setting);
-            }
-        }
-    });
-}
-
 pub fn namespace_count() -> u64 {
     NAMESPACES_STORE.with_borrow(|r| r.len())
 }
 
-pub fn migrate_legacy_settings(take: usize) -> u64 {
-    let keys: Vec<SettingPathKey> =
-        SETTINGS_STORE.with_borrow(|store| store.keys().take(take).collect());
-    for key in &keys {
-        if let Some(setting) = SETTINGS_STORE.with_borrow(|store| store.get(key)) {
-            save_setting(key.clone(), setting);
-        }
-    }
-    keys.len() as u64
-}
-
-pub fn migrate_legacy_namespace_acls_page(
-    prev: Option<String>,
-    scan_limit: usize,
-) -> ic_cose_types::types::ScanPage<String, String> {
-    let page = NAMESPACES_STORE.with_borrow(|store| {
-        let lower = prev
-            .map(std::ops::Bound::Excluded)
-            .unwrap_or(std::ops::Bound::Unbounded);
-        let mut iter = store.range((lower, std::ops::Bound::Unbounded));
-        let mut items = Vec::new();
-        let mut last = None;
-        for entry in iter.by_ref().take(scan_limit.clamp(1, 100)) {
-            last = Some(entry.key().clone());
-            if entry.value().acl_version == 0 {
-                items.push(entry.key().clone());
-            }
-        }
-        let next_cursor = iter.next().and(last);
-        ic_cose_types::types::ScanPage { items, next_cursor }
-    });
-    for name in &page.items {
-        with_mut(name.clone(), |ns| {
-            ensure_acl_v1(name, ns);
-            Ok(())
-        })
-        .expect("scanned namespace exists during synchronous migration");
-    }
-    page
-}
-
-pub fn migrate_legacy_namespace_acls(take: usize) -> u64 {
-    let names: Vec<String> = NAMESPACES_STORE.with_borrow(|store| {
-        store
-            .iter()
-            .filter_map(|entry| (entry.value().acl_version == 0).then(|| entry.key().clone()))
-            .take(take)
-            .collect()
-    });
-    for name in &names {
-        let _ = with_mut(name.clone(), |namespace| {
-            ensure_acl_v1(name, namespace);
-            Ok(())
-        });
-    }
-    names.len() as u64
+fn first_setting_key(namespace: &str) -> SettingPathKey {
+    SettingPathKey(
+        namespace.to_string(),
+        0,
+        Principal::management_canister(), // the smallest principal
+        ByteBuf::new(),
+        0,
+    )
 }
 
 pub fn rebuild_payload_bytes(namespace: String, caller: &Principal) -> Result<u64, String> {
     with_mut(namespace.clone(), |ns| {
-        if !ns.can_manage_namespace(&namespace, caller) {
+        if !ns.access(&namespace, caller).can_manage_namespace() {
             return Err("no permission".to_string());
         }
-        let start = SettingPathKey(
-            namespace.clone(),
-            0,
-            Principal::management_canister(),
-            ByteBuf::new(),
-            0,
-        );
-        let legacy = SETTINGS_STORE.with_borrow(|store| {
-            store
-                .range(ops::RangeFrom {
-                    start: start.clone(),
-                })
-                .take_while(|entry| entry.key().0 == namespace)
-                .fold(0u64, |total, entry| {
-                    total.saturating_add(entry.value().data_size())
-                })
-        });
         let current = SETTING_DATA_STORE.with_borrow(|store| {
             store
-                .range(ops::RangeFrom {
-                    start: start.clone(),
-                })
+                .range(first_setting_key(&namespace)..)
                 .take_while(|entry| entry.key().0 == namespace)
                 .fold(0u64, |total, entry| {
                     total.saturating_add(entry.value().size() as u64)
@@ -932,14 +608,13 @@ pub fn rebuild_payload_bytes(namespace: String, caller: &Principal) -> Result<u6
         });
         let archived = PAYLOADS_STORE.with_borrow(|store| {
             store
-                .range(ops::RangeFrom { start })
+                .range(first_setting_key(&namespace)..)
                 .take_while(|entry| entry.key().0 == namespace)
                 .fold(0u64, |total, entry| {
                     total.saturating_add(entry.value().data_size())
                 })
         });
-        let total = legacy.saturating_add(current).saturating_add(archived);
-        ensure_acl_v1(&namespace, ns);
+        let total = current.saturating_add(archived);
         ns.payload_bytes_total = total;
         Ok(total)
     })
@@ -972,61 +647,45 @@ pub fn list_setting_keys_page(
     take: usize,
 ) -> Vec<(Principal, ByteBuf)> {
     let kind = u8::from(user_owned);
-    let start = SettingPathKey(
-        namespace.to_owned(),
-        kind,
-        subject.unwrap_or_else(Principal::management_canister),
-        ByteBuf::new(),
-        0,
-    );
-    let lower = prev
-        .map(|(principal, key)| {
-            std::ops::Bound::Excluded(SettingPathKey(
-                namespace.to_owned(),
-                kind,
-                principal,
-                key,
-                u32::MAX,
-            ))
-        })
-        .unwrap_or(std::ops::Bound::Included(start));
-    let upper = if let Some(subject) = subject {
-        std::ops::Bound::Included(SettingPathKey(
+    let lower = match prev {
+        Some((principal, key)) => ops::Bound::Excluded(SettingPathKey(
+            namespace.to_owned(),
+            kind,
+            principal,
+            key,
+            u32::MAX,
+        )),
+        None => ops::Bound::Included(SettingPathKey(
+            namespace.to_owned(),
+            kind,
+            subject.unwrap_or_else(Principal::management_canister),
+            ByteBuf::new(),
+            0,
+        )),
+    };
+    let upper = match subject {
+        Some(subject) => ops::Bound::Included(SettingPathKey(
             namespace.to_owned(),
             kind,
             subject,
             ByteBuf::from(MAX_KEY.as_ref()),
             u32::MAX,
-        ))
-    } else {
-        std::ops::Bound::Excluded(SettingPathKey(
+        )),
+        None => ops::Bound::Excluded(SettingPathKey(
             namespace.to_owned(),
             kind + 1,
             Principal::management_canister(),
             ByteBuf::new(),
             0,
-        ))
+        )),
     };
-    let legacy = SETTINGS_STORE.with_borrow(|store| {
-        store
-            .keys_range((lower.clone(), upper.clone()))
-            .take(take)
-            .collect::<Vec<_>>()
-    });
-    let modern = SETTING_META_STORE.with_borrow(|store| {
+    SETTING_META_STORE.with_borrow(|store| {
         store
             .keys_range((lower, upper))
             .take(take)
-            .collect::<Vec<_>>()
-    });
-    legacy
-        .into_iter()
-        .chain(modern)
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .take(take)
-        .map(|key| (key.2, key.3))
-        .collect()
+            .map(|key| (key.2, key.3))
+            .collect()
+    })
 }
 
 pub fn with<R>(
@@ -1045,15 +704,33 @@ pub fn with_mut<R>(
     f: impl FnOnce(&mut Namespace) -> Result<R, String>,
 ) -> Result<R, String> {
     NAMESPACES_STORE.with_borrow_mut(|r| match r.get(&namespace) {
-        Some(mut ns) => match f(&mut ns) {
-            Ok(rt) => {
-                r.insert(namespace, ns);
-                Ok(rt)
-            }
-            Err(err) => Err(err),
-        },
+        Some(mut ns) => {
+            let rt = f(&mut ns)?;
+            r.insert(namespace, ns);
+            Ok(rt)
+        }
         None => Err(format!("NotFound: namespace {} not found", namespace)),
     })
+}
+
+/// Whether `caller` may obtain the KEK of `spk`, which spends the namespace's
+/// cycles on a chain-key call.
+fn kek_permission(ns: &Namespace, access: &NamespaceAccess, spk: &SettingPathKey) -> bool {
+    if ns.status < 0 && !access.is_manager() {
+        return false;
+    }
+    if access.is_auditor() || (spk.1 == 0 && access.is_manager()) {
+        return true;
+    }
+    // Members can prefetch their own key before creating a setting.
+    // External subjects and readers need an existing setting grant so
+    // arbitrary callers cannot spend another namespace's cycles.
+    let caller = access.caller;
+    if caller == &spk.2 && (access.is_user() || access.is_manager()) {
+        return true;
+    }
+    load_setting_metadata(&spk.v0())
+        .is_some_and(|setting| caller == &spk.2 || setting.readers.contains(caller))
 }
 
 pub fn has_kek_permission(caller: &Principal, spk: &SettingPathKey) -> bool {
@@ -1061,41 +738,44 @@ pub fn has_kek_permission(caller: &Principal, spk: &SettingPathKey) -> bool {
         return false;
     }
     with(&spk.0, |ns| {
-        if ns.status < 0 && !ns.has_role(&spk.0, ROLE_MANAGER, caller) {
-            return Ok(false);
-        }
-
-        if ns.has_role(&spk.0, ROLE_AUDITOR, caller)
-            || (spk.1 == 0 && ns.has_role(&spk.0, ROLE_MANAGER, caller))
-        {
-            return Ok(true);
-        }
-
-        // Members can prefetch their own key before creating a setting.
-        // External subjects and readers need an existing setting grant so
-        // arbitrary callers cannot spend another namespace's cycles.
-        if caller == &spk.2
-            && (ns.has_role(&spk.0, ROLE_USER, caller) || ns.has_role(&spk.0, ROLE_MANAGER, caller))
-        {
-            return Ok(true);
-        }
-        let setting = load_setting_metadata(&spk.v0()).map(|(setting, _)| setting);
-        Ok(setting.is_some_and(|s| caller == &spk.2 || s.readers.contains(caller)))
+        Ok(kek_permission(&ns, &ns.access(&spk.0, caller), spk))
     })
     .unwrap_or(false)
 }
 
 pub fn has_vetkd_public_key_permission(caller: &Principal, spk: &SettingPathKey) -> bool {
+    if caller == &Principal::anonymous() {
+        return false;
+    }
     // Visibility permits reading published data, not spending the namespace's
     // budget on a management call. Members and existing setting grants may pay.
     with(&spk.0, |ns| {
-        Ok(ns.can_read_namespace(&spk.0, caller)
-            && (ns.has_role(&spk.0, ROLE_MANAGER, caller)
-                || ns.has_role(&spk.0, ROLE_AUDITOR, caller)
-                || ns.has_role(&spk.0, ROLE_USER, caller)))
+        let access = ns.access(&spk.0, caller);
+        let member =
+            access.is_manager() || access.is_auditor() || (ns.status >= 0 && access.is_user());
+        Ok(member || kek_permission(&ns, &access, spk))
     })
     .unwrap_or(false)
-        || has_kek_permission(caller, spk)
+}
+
+fn ensure_can_read_namespace(namespace: &String, caller: &Principal) -> Result<(), String> {
+    with(namespace, |ns| {
+        if ns.access(namespace, caller).can_read_namespace() {
+            Ok(())
+        } else {
+            Err("no permission".to_string())
+        }
+    })
+}
+
+fn ensure_can_sign(namespace: &String, caller: &Principal) -> Result<(), String> {
+    with(namespace, |ns| {
+        if ns.access(namespace, caller).has_signing_permission() {
+            Ok(())
+        } else {
+            Err("no permission".to_string())
+        }
+    })
 }
 
 pub fn ecdsa_public_key(
@@ -1104,17 +784,11 @@ pub fn ecdsa_public_key(
     derivation_path: Vec<ByteBuf>,
 ) -> Result<PublicKeyOutput, String> {
     ic_cose_types::types::validate_derivation_path(&derivation_path)?;
-    with(&namespace, |ns| {
-        if !ns.can_read_namespace(&namespace, caller) {
-            Err("no permission".to_string())?;
-        }
-        Ok(())
-    })?;
-
+    ensure_can_read_namespace(&namespace, caller)?;
     state::with(|s| {
         let pk = s.ecdsa_public_key.as_ref().ok_or("no ecdsa public key")?;
         let path = signing_derivation_path(b"COSE_ECDSA_Signing", namespace, derivation_path);
-        derive_public_key(pk, path)
+        derive_ecdsa_public_key(pk, path)
     })
 }
 
@@ -1124,23 +798,15 @@ pub async fn ecdsa_sign_with(
     derivation_path: Vec<ByteBuf>,
     message: ByteBuf,
 ) -> Result<ByteBuf, String> {
-    if message.len() != 32 {
-        return Err("message must be 32 bytes".to_string());
-    }
-    ic_cose_types::types::validate_derivation_path(&derivation_path)?;
-    with(&namespace, |ns| {
-        if !ns.has_ns_signing_permission(&namespace, caller) {
-            Err("no permission".to_string())?;
-        }
-        Ok(())
-    })?;
-
-    let key_name = state::with(|s| s.ecdsa_key_name.clone());
-    let path = signing_derivation_path(b"COSE_ECDSA_Signing", namespace.clone(), derivation_path);
     let hash: [u8; 32] = message
         .as_slice()
         .try_into()
         .map_err(|_| "message must be 32 bytes")?;
+    ic_cose_types::types::validate_derivation_path(&derivation_path)?;
+    ensure_can_sign(&namespace, caller)?;
+
+    let key_name = state::with(|s| s.ecdsa_key_name.clone());
+    let path = signing_derivation_path(b"COSE_ECDSA_Signing", namespace.clone(), derivation_path);
     let sig = execute_chain_key(&namespace, Operation::ecdsa(key_name, path, hash)).await?;
     Ok(ByteBuf::from(sig))
 }
@@ -1152,13 +818,7 @@ pub fn schnorr_public_key(
     derivation_path: Vec<ByteBuf>,
 ) -> Result<PublicKeyOutput, String> {
     ic_cose_types::types::validate_derivation_path(&derivation_path)?;
-    with(&namespace, |ns| {
-        if !ns.can_read_namespace(&namespace, caller) {
-            Err("no permission".to_string())?;
-        }
-        Ok(())
-    })?;
-
+    ensure_can_read_namespace(&namespace, caller)?;
     state::with(|s| {
         let pk = match alg {
             SchnorrAlgorithm::Bip340secp256k1 => s
@@ -1183,12 +843,7 @@ pub async fn schnorr_sign_with(
     message: ByteBuf,
 ) -> Result<ByteBuf, String> {
     ic_cose_types::types::validate_derivation_path(&derivation_path)?;
-    with(&namespace, |ns| {
-        if !ns.has_ns_signing_permission(&namespace, caller) {
-            Err("no permission".to_string())?;
-        }
-        Ok(())
-    })?;
+    ensure_can_sign(&namespace, caller)?;
 
     let key_name = state::with(|s| s.schnorr_key_name.clone());
     let path = signing_derivation_path(b"COSE_Schnorr_Signing", namespace.clone(), derivation_path);
@@ -1203,10 +858,11 @@ pub async fn schnorr_sign_with(
 const CWT_EXPIRATION_SECONDS: i64 = 3600;
 fn identity_permission(namespace: &String, caller: &Principal) -> Result<String, String> {
     with(namespace, |ns| {
-        if ns.has_role(namespace, ROLE_MANAGER, caller) {
+        let access = ns.access(namespace, caller);
+        if access.is_manager() {
             Ok(format!("Namespace.*:{namespace}"))
-        } else if ns.has_role(namespace, ROLE_USER, caller) {
-            if ns.has_role(namespace, ROLE_AUDITOR, caller) {
+        } else if access.is_user() {
+            if access.is_auditor() {
                 Ok(format!(
                     "Namespace.Read:{namespace} Namespace.*.SubjectedSetting:{namespace}"
                 ))
@@ -1215,7 +871,7 @@ fn identity_permission(namespace: &String, caller: &Principal) -> Result<String,
                     "Namespace.Read.Info:{namespace} Namespace.*.SubjectedSetting:{namespace}"
                 ))
             }
-        } else if ns.has_role(namespace, ROLE_AUDITOR, caller) {
+        } else if access.is_auditor() {
             Ok(format!("Namespace.Read:{namespace}"))
         } else {
             Err("no permission".to_string())
@@ -1285,18 +941,26 @@ pub fn inner_derive_kek(spk: &SettingPathKey, key_id: &[u8]) -> Result<[u8; 32],
     })
 }
 
-pub async fn inner_vetkd_public_key(spk: &SettingPathKey) -> Result<Vec<u8>, String> {
+fn vetkd_context(spk: &SettingPathKey) -> Result<(String, Vec<u8>), String> {
     let (key_name, context_version) =
         state::with(|r| (r.vetkd_key_name.clone(), r.vetkd_context_version));
-    let context = [
-        b"COSE_Symmetric_Key".as_slice(),
-        spk.2.as_slice(),
-        &[spk.1],
-        spk.0.as_bytes(),
-    ];
+    let context = derivation_path_to_context(
+        context_version,
+        &[
+            b"COSE_Symmetric_Key".as_slice(),
+            spk.2.as_slice(),
+            &[spk.1],
+            spk.0.as_bytes(),
+        ],
+    )?;
+    Ok((key_name, context))
+}
+
+pub async fn inner_vetkd_public_key(spk: &SettingPathKey) -> Result<Vec<u8>, String> {
+    let (key_name, context) = vetkd_context(spk)?;
     let args = ic_cdk_management_canister::VetKDPublicKeyArgs {
         canister_id: None,
-        context: derivation_path_to_context(context_version, &context)?,
+        context,
         key_id: ic_cdk_management_canister::VetKDKeyId {
             curve: ic_cdk_management_canister::VetKDCurve::Bls12_381_G2,
             name: key_name,
@@ -1318,29 +982,17 @@ pub async fn inner_vetkd_encrypted_key(
     key_id: Vec<u8>,
     transport_public_key: Vec<u8>,
 ) -> Result<Vec<u8>, String> {
-    let (key_name, context_version) =
-        state::with(|r| (r.vetkd_key_name.clone(), r.vetkd_context_version));
-    let context = [
-        b"COSE_Symmetric_Key".as_slice(),
-        spk.2.as_slice(),
-        &[spk.1],
-        spk.0.as_bytes(),
-    ];
-    let operation = Operation::vetkd(
-        key_name,
-        derivation_path_to_context(context_version, &context)?,
-        key_id,
-        transport_public_key,
-    );
+    let (key_name, context) = vetkd_context(spk)?;
+    let operation = Operation::vetkd(key_name, context, key_id, transport_public_key);
     execute_chain_key(&spk.0, operation).await
 }
 
 pub fn get_namespace(caller: &Principal, namespace: String) -> Result<NamespaceInfo, String> {
     with(&namespace, |ns| {
-        if !ns.can_read_namespace(&namespace, caller) {
+        if !ns.access(&namespace, caller).can_read_namespace() {
             Err("no permission".to_string())?;
         }
-        Ok(namespace_info_bounded(namespace.clone(), ns))
+        Ok(namespace_info_bounded(namespace.clone(), &ns))
     })
 }
 
@@ -1350,61 +1002,40 @@ pub fn get_namespace_v2(
     with_members: bool,
 ) -> Result<NamespaceInfo, String> {
     with(&namespace, |ns| {
-        if !ns.can_read_namespace(&namespace, caller) {
+        if !ns.access(&namespace, caller).can_read_namespace() {
             return Err("no permission".to_string());
         }
-        if with_members {
-            if ns.info_size_hint() > MAX_NAMESPACE_PAGE_BYTES {
-                return Err(
-                    "namespace members exceed one response; use paginated member methods"
-                        .to_string(),
-                );
-            }
-            Ok(namespace_info(namespace.clone(), ns))
-        } else {
-            Ok(namespace_summary(namespace.clone(), ns))
+        if !with_members {
+            return Ok(ns.to_info(namespace.clone()));
         }
+        if ns.info_size_hint() > MAX_NAMESPACE_PAGE_BYTES {
+            return Err(
+                "namespace members exceed one response; use paginated member methods".to_string(),
+            );
+        }
+        Ok(namespace_info(namespace.clone(), &ns))
     })
 }
 
 pub fn list_namespaces(prev: Option<String>, take: usize) -> Vec<NamespaceInfo> {
     NAMESPACES_STORE.with_borrow(|r| {
+        let upper = prev.map_or(ops::Bound::Unbounded, ops::Bound::Excluded);
         let mut res = Vec::with_capacity(take);
         let mut estimated_bytes = 0usize;
-        match prev {
-            Some(p) => {
-                for e in r.range(ops::RangeTo { end: p }).rev() {
-                    let value = e.value();
-                    let item_bytes = value.info_size_hint();
-                    if !res.is_empty()
-                        && estimated_bytes.saturating_add(item_bytes) > MAX_NAMESPACE_PAGE_BYTES
-                    {
-                        break;
-                    }
-                    estimated_bytes = estimated_bytes.saturating_add(item_bytes);
-                    res.push(namespace_info_bounded(e.key().clone(), value));
-                    if res.len() >= take {
-                        break;
-                    }
-                }
+        for e in r.range((ops::Bound::Unbounded, upper)).rev() {
+            let value = e.value();
+            let item_bytes = value.info_size_hint();
+            if !res.is_empty()
+                && estimated_bytes.saturating_add(item_bytes) > MAX_NAMESPACE_PAGE_BYTES
+            {
+                break;
             }
-            None => {
-                for e in r.iter().rev() {
-                    let value = e.value();
-                    let item_bytes = value.info_size_hint();
-                    if !res.is_empty()
-                        && estimated_bytes.saturating_add(item_bytes) > MAX_NAMESPACE_PAGE_BYTES
-                    {
-                        break;
-                    }
-                    estimated_bytes = estimated_bytes.saturating_add(item_bytes);
-                    res.push(namespace_info_bounded(e.key().clone(), value));
-                    if res.len() >= take {
-                        break;
-                    }
-                }
+            estimated_bytes = estimated_bytes.saturating_add(item_bytes);
+            res.push(namespace_info_bounded(e.key().clone(), &value));
+            if res.len() >= take {
+                break;
             }
-        };
+        }
         res
     })
 }
@@ -1414,27 +1045,35 @@ pub fn create_namespace(input: CreateNamespaceInput, now_ms: u64) -> Result<Name
         if r.contains_key(&input.name) {
             Err(format!("namespace {} already exists", input.name))?;
         }
-        let mut ns = Namespace {
+        // members were validated as non-anonymous and bounded per request
+        let ns = Namespace {
             desc: input.desc.unwrap_or_default(),
             created_at: now_ms,
             updated_at: now_ms,
             max_payload_size: input.max_payload_size.unwrap_or(MAX_PAYLOAD_SIZE),
             visibility: input.visibility,
-            managers: input.managers,
-            auditors: input.auditors,
-            users: input.users,
             session_expires_in_ms: input.session_expires_in_ms.unwrap_or(SESSION_EXPIRES_IN_MS),
+            acl_version: ACL_VERSION,
+            manager_count: input.managers.len() as u32,
+            auditor_count: input.auditors.len() as u32,
+            user_count: input.users.len() as u32,
             ..Default::default()
         };
-
-        if ns.encoded_size_hint() > MAX_NAMESPACE_RECORD_BYTES {
-            return Err(format!(
-                "namespace record exceeds the limit {} bytes",
-                MAX_NAMESPACE_RECORD_BYTES
-            ));
-        }
-        ensure_acl_v1(&input.name, &mut ns);
-        let info = namespace_info(input.name.clone(), ns.clone());
+        ACL_STORE.with_borrow_mut(|store| {
+            for (role, members) in [
+                (ROLE_MANAGER, &input.managers),
+                (ROLE_AUDITOR, &input.auditors),
+                (ROLE_USER, &input.users),
+            ] {
+                for principal in members {
+                    store.insert(AclKey(input.name.clone(), role, *principal), 0);
+                }
+            }
+        });
+        let mut info = ns.to_info(input.name.clone());
+        info.managers = input.managers;
+        info.auditors = input.auditors;
+        info.users = input.users;
         r.insert(input.name, ns);
         Ok(info)
     })
@@ -1447,12 +1086,9 @@ pub fn update_namespace_info(
 ) -> Result<(), String> {
     let namespace = input.name.clone();
     with_mut(namespace.clone(), |ns| {
-        if !ns.can_manage_namespace(&namespace, caller) {
+        if !ns.access(&namespace, caller).can_manage_namespace() {
             Err("no permission".to_string())?;
         }
-
-        ensure_acl_v1(&namespace, ns);
-
         if let Some(desc) = input.desc {
             ns.desc = desc;
         }
@@ -1476,37 +1112,19 @@ pub fn update_namespace_info(
 pub fn delete_namespace(caller: &Principal, namespace: String) -> Result<(), String> {
     NAMESPACES_STORE.with_borrow_mut(|r| match r.get(&namespace) {
         Some(ns) => {
-            if !ns.can_manage_namespace(&namespace, caller) {
+            if !ns.access(&namespace, caller).can_manage_namespace() {
                 Err("no permission".to_string())?;
             }
-            let has_legacy = SETTINGS_STORE.with_borrow(|rr| {
-                // the range is open-ended, so the first key it yields may already
-                // belong to a later namespace: only a key still carrying this
-                // namespace means the namespace is not empty.
-                let mut iter = rr.keys_range(ops::RangeFrom {
-                    start: &SettingPathKey(
-                        namespace.clone(),
-                        0,
-                        Principal::management_canister(), // the smallest principal
-                        ByteBuf::new(),
-                        0,
-                    ),
-                });
-                iter.next().is_some_and(|k| k.0 == namespace)
+            // the range is open-ended, so the first key it yields may already
+            // belong to a later namespace: only a key still carrying this
+            // namespace means the namespace is not empty.
+            let has_settings = SETTING_META_STORE.with_borrow(|store| {
+                store
+                    .keys_range(first_setting_key(&namespace)..)
+                    .next()
+                    .is_some_and(|key| key.0 == namespace)
             });
-            let has_modern = SETTING_META_STORE.with_borrow(|rr| {
-                let mut iter = rr.keys_range(ops::RangeFrom {
-                    start: &SettingPathKey(
-                        namespace.clone(),
-                        0,
-                        Principal::management_canister(),
-                        ByteBuf::new(),
-                        0,
-                    ),
-                });
-                iter.next().is_some_and(|k| k.0 == namespace)
-            });
-            if has_legacy || has_modern {
+            if has_settings {
                 return Err(format!("namespace {} is not empty", namespace));
             }
             remove_namespace_acl(&namespace);
@@ -1519,17 +1137,17 @@ pub fn delete_namespace(caller: &Principal, namespace: String) -> Result<(), Str
 
 fn try_get_setting(caller: &Principal, spk: &SettingPathKey, with_data: bool) -> Option<Setting> {
     with(&spk.0, |ns| {
-        let can = ns.partial_can_read_setting(caller, spk);
+        let can = ns.access(&spk.0, caller).partial_can_read_setting(spk);
         if can == Some(false) {
             return Ok(None);
         }
 
         let key = spk.v0();
-        let setting = load_setting_metadata(&key).and_then(|(mut setting, legacy)| {
+        let setting = load_setting_metadata(&key).and_then(|mut setting| {
             if spk.4 > setting.version || (can != Some(true) && !setting.readers.contains(caller)) {
                 return None;
             }
-            if with_data && !legacy {
+            if with_data {
                 if let Some(data) = SETTING_DATA_STORE.with_borrow(|store| store.get(&key)) {
                     setting.payload = data.payload;
                     setting.dek = data.dek;
@@ -1592,7 +1210,7 @@ pub fn create_setting(
     now_ms: u64,
 ) -> Result<CreateSettingOutput, String> {
     with_mut(spk.0.clone(), |ns| {
-        if !ns.can_write_setting(&caller, &spk) {
+        if !ns.access(&spk.0, &caller).can_write_setting(&spk) {
             Err("no permission".to_string())?;
         }
 
@@ -1628,7 +1246,6 @@ pub fn create_setting(
         if contains_setting(&spk) {
             return Err(format!("setting {} already exists", spk));
         }
-        ensure_acl_v1(&spk.0, ns);
         save_setting(
             spk,
             Setting {
@@ -1644,14 +1261,12 @@ pub fn create_setting(
             },
         );
 
-        let output = CreateSettingOutput {
+        ns.payload_bytes_total = ns.payload_bytes_total.saturating_add(size as u64);
+        Ok(CreateSettingOutput {
             created_at: now_ms,
             updated_at: now_ms,
             version: 1,
-        };
-
-        ns.payload_bytes_total = ns.payload_bytes_total.saturating_add(size as u64);
-        Ok(output)
+        })
     })
 }
 
@@ -1661,66 +1276,54 @@ pub fn with_setting_mut<R>(
     f: impl FnOnce(&mut Setting) -> Result<R, String>,
 ) -> Result<R, String> {
     with(&spk.0, |ns| {
-        if !ns.can_write_setting(caller, spk) {
+        if !ns.access(&spk.0, caller).can_write_setting(spk) {
             Err("no permission".to_string())?;
         }
 
         let spkv0 = spk.v0();
-        match load_setting_metadata(&spkv0) {
-            Some((mut setting, was_legacy)) => {
-                if setting.version != spk.4 {
-                    Err("version mismatch".to_string())?;
-                }
-                match f(&mut setting) {
-                    Ok(rt) => {
-                        save_setting_metadata(spkv0, setting, was_legacy);
-                        Ok(rt)
-                    }
-                    Err(err) => Err(err),
-                }
-            }
-            None => Err(format!("NotFound: setting {} not found", spk)),
+        let mut setting = load_setting_metadata(&spkv0)
+            .ok_or_else(|| format!("NotFound: setting {} not found", spk))?;
+        if setting.version != spk.4 {
+            Err("version mismatch".to_string())?;
         }
+        let rt = f(&mut setting)?;
+        save_setting_metadata(spkv0, setting);
+        Ok(rt)
     })
 }
 
 pub fn delete_setting(caller: &Principal, spk: &SettingPathKey) -> Result<(), String> {
     with_mut(spk.0.clone(), |ns| {
-        if !ns.can_write_setting(caller, spk) {
+        if !ns.access(&spk.0, caller).can_write_setting(spk) {
             Err("no permission".to_string())?;
         }
 
         let spkv0 = spk.v0();
-        match load_setting_metadata(&spkv0) {
-            Some((setting, _)) => {
-                if setting.version != spk.4 {
-                    Err("version mismatch".to_string())?;
-                }
-                if setting.status >= 1 {
-                    Err("readonly setting can not be deleted".to_string())?;
-                }
-
-                ensure_acl_v1(&spk.0, ns);
-                let mut removed_bytes = remove_setting(&spkv0)
-                    .expect("setting was checked before deletion")
-                    .data_size();
-                if spk.4 > 1 {
-                    PAYLOADS_STORE.with_borrow_mut(|rr| {
-                        let mut pk = spk.clone();
-                        for v in 1..spk.4 {
-                            pk.4 = v;
-                            if let Some(archived) = rr.remove(&pk) {
-                                removed_bytes = removed_bytes.saturating_add(archived.data_size());
-                            }
-                        }
-                    });
-                }
-                ns.payload_bytes_total = ns.payload_bytes_total.saturating_sub(removed_bytes);
-
-                Ok(())
-            }
-            None => Err(format!("NotFound: setting {} not found", spk)),
+        let setting = load_setting_metadata(&spkv0)
+            .ok_or_else(|| format!("NotFound: setting {} not found", spk))?;
+        if setting.version != spk.4 {
+            Err("version mismatch".to_string())?;
         }
+        if setting.status >= 1 {
+            Err("readonly setting can not be deleted".to_string())?;
+        }
+
+        let mut removed_bytes = remove_setting(&spkv0)
+            .expect("setting was checked before deletion")
+            .data_size();
+        if spk.4 > 1 {
+            PAYLOADS_STORE.with_borrow_mut(|rr| {
+                let mut pk = spk.clone();
+                for v in 1..spk.4 {
+                    pk.4 = v;
+                    if let Some(archived) = rr.remove(&pk) {
+                        removed_bytes = removed_bytes.saturating_add(archived.data_size());
+                    }
+                }
+            });
+        }
+        ns.payload_bytes_total = ns.payload_bytes_total.saturating_sub(removed_bytes);
+        Ok(())
     })
 }
 
@@ -1731,93 +1334,83 @@ pub fn update_setting_payload(
     now_ms: u64,
 ) -> Result<UpdateSettingOutput, String> {
     with_mut(spk.0.clone(), |ns| {
-        if !ns.can_write_setting(&caller, &spk) {
+        if !ns.access(&spk.0, &caller).can_write_setting(&spk) {
             Err("no permission".to_string())?;
         }
 
-        let mut size = if let Some(ref payload) = input.payload {
-            payload.len()
-        } else {
-            0
-        };
-        if size as u64 > ns.max_payload_size {
+        if input
+            .payload
+            .as_ref()
+            .is_some_and(|payload| payload.len() as u64 > ns.max_payload_size)
+        {
             Err("payload size exceeds the limit".to_string())?;
         }
         if let Some(ref dek) = input.dek {
-            size += dek.len();
             // A DEK is itself a COSE_Encrypt0 envelope. Reject malformed
             // data before reading or rewriting the current setting.
             try_decode_encrypt0(dek)?;
         }
 
         let spkv0 = spk.v0();
-        let output = match load_setting(&spkv0) {
-            Some(mut setting) => {
-                if setting.version != spk.4 {
-                    Err("version mismatch".to_string())?;
-                }
-                if setting.status != 0 {
-                    Err("setting is not writable".to_string())?;
-                }
-                if setting.version >= ic_cose_types::types::setting::MAX_SETTING_VERSIONS {
-                    return Err("setting version limit reached".to_string());
-                }
-                let next_version = setting
-                    .version
-                    .checked_add(1)
-                    .ok_or_else(|| "setting version exhausted".to_string())?;
+        let mut setting =
+            load_setting(&spkv0).ok_or_else(|| format!("NotFound: setting {} not found", spk))?;
+        if setting.version != spk.4 {
+            Err("version mismatch".to_string())?;
+        }
+        if setting.status != 0 {
+            Err("setting is not writable".to_string())?;
+        }
+        if setting.version >= MAX_SETTING_VERSIONS {
+            return Err("setting version limit reached".to_string());
+        }
+        let next_version = setting
+            .version
+            .checked_add(1)
+            .ok_or_else(|| "setting version exhausted".to_string())?;
 
-                if setting.dek.is_some() || input.dek.is_some() {
-                    // When only the DEK changes, validate the retained payload
-                    // as well; otherwise plaintext could be relabeled as encrypted.
-                    if let Some(payload) = input.payload.as_ref().or(setting.payload.as_ref()) {
-                        try_decode_encrypt0(payload)?;
-                    }
-                }
-
-                ensure_acl_v1(&spk.0, ns);
-
-                let previous_payload = match input.payload {
-                    Some(payload) => setting.payload.replace(payload),
-                    None => setting.payload.clone(),
-                };
-                let previous_dek = match input.dek {
-                    Some(dek) => setting.dek.replace(dek),
-                    None => setting.dek.clone(),
-                };
-                if previous_payload.is_some() || previous_dek.is_some() {
-                    PAYLOADS_STORE.with_borrow_mut(|r| {
-                        r.insert(
-                            spk.clone(),
-                            SettingArchived {
-                                archived_at: now_ms,
-                                deprecated: input.deprecate_current.unwrap_or(false),
-                                payload: previous_payload,
-                                dek: previous_dek,
-                            },
-                        );
-                    });
-                }
-                setting.version = next_version;
-                setting.updated_at = now_ms;
-                if let Some(status) = input.status {
-                    setting.status = status;
-                }
-
-                size = setting.data_size() as usize;
-
-                let output = UpdateSettingOutput {
-                    created_at: setting.created_at,
-                    updated_at: setting.updated_at,
-                    version: setting.version,
-                };
-                save_setting(spkv0, setting);
-                Ok(output)
+        if setting.dek.is_some() || input.dek.is_some() {
+            // When only the DEK changes, validate the retained payload
+            // as well; otherwise plaintext could be relabeled as encrypted.
+            if let Some(payload) = input.payload.as_ref().or(setting.payload.as_ref()) {
+                try_decode_encrypt0(payload)?;
             }
-            None => Err(format!("NotFound: setting {} not found", spk)),
-        }?;
+        }
 
-        ns.payload_bytes_total = ns.payload_bytes_total.saturating_add(size as u64);
+        let previous_payload = match input.payload {
+            Some(payload) => setting.payload.replace(payload),
+            None => setting.payload.clone(),
+        };
+        let previous_dek = match input.dek {
+            Some(dek) => setting.dek.replace(dek),
+            None => setting.dek.clone(),
+        };
+        if previous_payload.is_some() || previous_dek.is_some() {
+            PAYLOADS_STORE.with_borrow_mut(|r| {
+                r.insert(
+                    spk.clone(),
+                    SettingArchived {
+                        archived_at: now_ms,
+                        deprecated: input.deprecate_current.unwrap_or(false),
+                        payload: previous_payload,
+                        dek: previous_dek,
+                    },
+                );
+            });
+        }
+        setting.version = next_version;
+        setting.updated_at = now_ms;
+        if let Some(status) = input.status {
+            setting.status = status;
+        }
+
+        // the previous version stays counted through its archived copy
+        ns.payload_bytes_total = ns.payload_bytes_total.saturating_add(setting.data_size());
+        let output = UpdateSettingOutput {
+            created_at: setting.created_at,
+            updated_at: setting.updated_at,
+            version: setting.version,
+        };
+        save_setting(spkv0, setting);
         Ok(output)
     })
 }
@@ -1847,6 +1440,7 @@ pub fn update_setting_info(
         })
     })
 }
+
 #[cfg(test)]
 mod billing_tests {
     use super::*;

@@ -84,29 +84,25 @@ type PublicKeyInput = record { ns : text; derivation_path : vec blob };
 type PublicKeyOutput = record { public_key : blob; chain_code : blob };
 type Result = variant { Ok; Err : text };
 type Result_1 = variant { Ok : NamespaceInfo; Err : text };
-type Result_10 = variant { Ok : principal; Err : text };
-type Result_11 = variant { Ok : bool; Err : text };
-type Result_12 = variant { Ok : vec text; Err : text };
-type Result_13 = variant { Ok : vec principal; Err : text };
-type Result_14 = variant { Ok : vec record { principal; blob }; Err : text };
-type Result_15 = variant { Ok : SignInResponse; Err : text };
-type Result_16 = variant { Ok : nat; Err : text };
-type Result_17 = variant { Ok : CreateSettingOutput; Err : text };
-type Result_18 = variant { Ok : SettingInfo; Err : text };
-type Result_19 = variant { Ok : SettingArchivedPayload; Err : text };
+type Result_10 = variant { Ok : vec text; Err : text };
+type Result_11 = variant { Ok : vec principal; Err : text };
+type Result_12 = variant { Ok : vec record { principal; blob }; Err : text };
+type Result_13 = variant { Ok : nat64; Err : text };
+type Result_14 = variant { Ok : SignInResponse; Err : text };
+type Result_15 = variant { Ok : nat; Err : text };
+type Result_16 = variant { Ok : CreateSettingOutput; Err : text };
+type Result_17 = variant { Ok : SettingInfo; Err : text };
+type Result_18 = variant { Ok : SettingArchivedPayload; Err : text };
+type Result_19 = variant { Ok : StateInfo; Err : text };
 type Result_2 = variant { Ok : vec NamespaceInfo; Err : text };
-type Result_20 = variant { Ok : StateInfo; Err : text };
-type Result_21 = variant { Ok : text; Err : text };
-type Result_3 = variant { Ok : nat64; Err : text };
-type Result_4 = variant { Ok : ScanPage; Err : text };
-type Result_5 = variant { Ok : ECDHOutput; Err : text };
-type Result_6 = variant { Ok : PublicKeyOutput; Err : text };
-type Result_7 = variant { Ok : blob; Err : text };
-type Result_8 = variant { Ok : SignedDelegation; Err : text };
-type Result_9 = variant { Ok : vec principal; Err : text };
-// A bounded scan page. Continue while `next_cursor` is present, even when no
-// matching items were returned. The cursor denotes the last scanned record.
-type ScanPage = record { next_cursor : opt text; items : vec text };
+type Result_20 = variant { Ok : text; Err : text };
+type Result_3 = variant { Ok : ECDHOutput; Err : text };
+type Result_4 = variant { Ok : PublicKeyOutput; Err : text };
+type Result_5 = variant { Ok : blob; Err : text };
+type Result_6 = variant { Ok : SignedDelegation; Err : text };
+type Result_7 = variant { Ok : vec principal; Err : text };
+type Result_8 = variant { Ok : principal; Err : text };
+type Result_9 = variant { Ok : bool; Err : text };
 // # Schnorr Algorithm.
 //
 // See [`SchnorrKeyId::algorithm`].
@@ -215,9 +211,6 @@ type UpgradeArgs = record {
   vetkd_context_version : opt nat8;
   subnet_size : opt nat64;
   clear_governance_canister : opt bool;
-  // Explicit opt-in for deployments upgrading directly from the legacy
-  // monolithic namespace store. Current deployments must leave this false.
-  migrate_legacy_namespaces : opt bool;
   vetkd_key_name : opt text;
 };
 service : (opt InstallArgs) -> {
@@ -227,40 +220,34 @@ service : (opt InstallArgs) -> {
   admin_clear_low_wasm_memory : () -> (Result);
   admin_create_namespace : (CreateNamespaceInput) -> (Result_1);
   admin_list_namespace : (opt text, opt nat32) -> (Result_2) query;
-  admin_migrate_legacy_namespace_acls : (nat32) -> (Result_3);
-  // Scans at most `scan_limit` namespaces. Continue with next_cursor even when items is empty.
-  admin_migrate_legacy_namespace_acls_page : (opt text, nat32) -> (Result_4);
-  // Incrementally moves legacy monolithic setting records into split metadata
-  // and payload stable maps. Re-run until it returns zero.
-  admin_migrate_legacy_settings : (nat32) -> (Result_3);
   admin_recover_namespace_managers : (text, vec principal) -> (Result);
   admin_remove_allowed_apis : (vec text) -> (Result);
   admin_remove_auditors : (vec principal) -> (Result);
   admin_remove_managers : (vec principal) -> (Result);
   // ecdh_encrypted_cose_key returns a permanent partial KEK encrypted with ECDH.
   // It should be used with a local partial key to derive a full KEK.
-  ecdh_cose_encrypted_key : (SettingPath, ECDHInput) -> (Result_5);
-  ecdsa_public_key : (opt PublicKeyInput) -> (Result_6) query;
-  ecdsa_sign : (SignInput) -> (Result_7);
-  get_delegation : (blob, blob, nat64) -> (Result_8) query;
+  ecdh_cose_encrypted_key : (SettingPath, ECDHInput) -> (Result_3);
+  ecdsa_public_key : (opt PublicKeyInput) -> (Result_4) query;
+  ecdsa_sign : (SignInput) -> (Result_5);
+  get_delegation : (blob, blob, nat64) -> (Result_6) query;
   namespace_add_auditors : (text, vec principal) -> (Result);
-  namespace_add_delegator : (NamespaceDelegatorsInput) -> (Result_9);
+  namespace_add_delegator : (NamespaceDelegatorsInput) -> (Result_7);
   namespace_add_managers : (text, vec principal) -> (Result);
   namespace_add_users : (text, vec principal) -> (Result);
   namespace_delete : (text) -> (Result);
-  namespace_get_delegators : (text, text) -> (Result_9) query;
-  namespace_get_fixed_identity : (text, text) -> (Result_10) query;
+  namespace_get_delegators : (text, text) -> (Result_7) query;
+  namespace_get_fixed_identity : (text, text) -> (Result_8) query;
   namespace_get_info : (text) -> (Result_1) query;
   namespace_get_info_v2 : (text, bool) -> (Result_1) query;
-  namespace_is_member : (text, text, principal) -> (Result_11) query;
+  namespace_is_member : (text, text, principal) -> (Result_9) query;
   namespace_list_fixed_identity_names : (text, opt text, opt nat32) -> (
-      Result_12,
+      Result_10,
     ) query;
   namespace_list_members : (text, text, opt principal, opt nat32) -> (
-      Result_13,
+      Result_11,
     ) query;
   namespace_list_setting_keys : (text, bool, opt principal) -> (
-      Result_14,
+      Result_12,
     ) query;
   namespace_list_setting_keys_v2 : (
       text,
@@ -268,44 +255,44 @@ service : (opt InstallArgs) -> {
       opt principal,
       opt record { principal; blob },
       opt nat32,
-    ) -> (Result_14) query;
-  namespace_rebuild_payload_bytes : (text) -> (Result_3);
+    ) -> (Result_12) query;
+  namespace_rebuild_payload_bytes : (text) -> (Result_13);
   namespace_remove_auditors : (text, vec principal) -> (Result);
   namespace_remove_delegator : (NamespaceDelegatorsInput) -> (Result);
   namespace_remove_managers : (text, vec principal) -> (Result);
   namespace_remove_users : (text, vec principal) -> (Result);
-  namespace_sign_delegation : (SignDelegationInput) -> (Result_15);
-  namespace_top_up : (text, nat) -> (Result_16);
+  namespace_sign_delegation : (SignDelegationInput) -> (Result_14);
+  namespace_top_up : (text, nat) -> (Result_15);
   namespace_update_info : (UpdateNamespaceInput) -> (Result);
   schnorr_public_key : (SchnorrAlgorithm, opt PublicKeyInput) -> (
-      Result_6,
+      Result_4,
     ) query;
-  schnorr_sign : (SchnorrAlgorithm, SignInput) -> (Result_7);
-  schnorr_sign_identity : (SchnorrAlgorithm, SignIdentityInput) -> (Result_7);
+  schnorr_sign : (SchnorrAlgorithm, SignInput) -> (Result_5);
+  schnorr_sign_identity : (SchnorrAlgorithm, SignIdentityInput) -> (Result_5);
   setting_add_readers : (SettingPath, vec principal) -> (Result);
-  setting_create : (SettingPath, CreateSettingInput) -> (Result_17);
+  setting_create : (SettingPath, CreateSettingInput) -> (Result_16);
   setting_delete : (SettingPath) -> (Result);
-  setting_get : (SettingPath) -> (Result_18) query;
-  setting_get_archived_payload : (SettingPath) -> (Result_19) query;
-  setting_get_info : (SettingPath) -> (Result_18) query;
+  setting_get : (SettingPath) -> (Result_17) query;
+  setting_get_archived_payload : (SettingPath) -> (Result_18) query;
+  setting_get_info : (SettingPath) -> (Result_17) query;
   setting_remove_readers : (SettingPath, vec principal) -> (Result);
-  setting_update_info : (SettingPath, UpdateSettingInfoInput) -> (Result_17);
+  setting_update_info : (SettingPath, UpdateSettingInfoInput) -> (Result_16);
   setting_update_payload : (SettingPath, UpdateSettingPayloadInput) -> (
-      Result_17,
+      Result_16,
     );
-  state_get_info : () -> (Result_20) query;
-  validate2_admin_add_allowed_apis : (vec text) -> (Result_21);
-  validate2_admin_add_auditors : (vec principal) -> (Result_21);
-  validate2_admin_add_managers : (vec principal) -> (Result_21);
-  validate2_admin_remove_allowed_apis : (vec text) -> (Result_21);
-  validate2_admin_remove_auditors : (vec principal) -> (Result_21);
-  validate2_admin_remove_managers : (vec principal) -> (Result_21);
+  state_get_info : () -> (Result_19) query;
+  validate2_admin_add_allowed_apis : (vec text) -> (Result_20);
+  validate2_admin_add_auditors : (vec principal) -> (Result_20);
+  validate2_admin_add_managers : (vec principal) -> (Result_20);
+  validate2_admin_remove_allowed_apis : (vec text) -> (Result_20);
+  validate2_admin_remove_auditors : (vec principal) -> (Result_20);
+  validate2_admin_remove_managers : (vec principal) -> (Result_20);
   validate_admin_add_allowed_apis : (vec text) -> (Result);
   validate_admin_add_auditors : (vec principal) -> (Result);
   validate_admin_add_managers : (vec principal) -> (Result);
   validate_admin_remove_allowed_apis : (vec text) -> (Result);
   validate_admin_remove_auditors : (vec principal) -> (Result);
   validate_admin_remove_managers : (vec principal) -> (Result);
-  vetkd_encrypted_key : (SettingPath, blob) -> (Result_7);
-  vetkd_public_key : (SettingPath) -> (Result_7);
+  vetkd_encrypted_key : (SettingPath, blob) -> (Result_5);
+  vetkd_public_key : (SettingPath) -> (Result_5);
 }

@@ -76,7 +76,7 @@ fn namespace_list_setting_keys(
     validate_str(&namespace)?;
     let caller = ic_cdk::api::msg_caller();
     store::ns::with(&namespace, |ns| {
-        match ns.read_permission(&namespace, &caller) {
+        match ns.access(&namespace, &caller).read_permission() {
             store::NamespaceReadPermission::Full => {
                 let values =
                     store::ns::list_setting_keys_page(&namespace, user_owned, subject, None, 1_001);
@@ -128,7 +128,7 @@ fn namespace_list_setting_keys_v2(
         }
     }
     store::ns::with(&namespace, |ns| {
-        match ns.read_permission(&namespace, &caller) {
+        match ns.access(&namespace, &caller).read_permission() {
             store::NamespaceReadPermission::Full => Ok(store::ns::list_setting_keys_page(
                 &namespace, user_owned, subject, prev, take,
             )),
@@ -271,12 +271,7 @@ fn namespace_top_up(namespace: String, cycles: u128) -> Result<u128, String> {
     }
 
     let now_ms = ic_cdk::api::time() / MILLISECONDS;
-    store::ns::top_up_namespace(
-        namespace,
-        cycles,
-        ic_cdk::api::msg_cycles_available(),
-        now_ms,
-    )
+    store::ns::top_up_namespace(namespace, cycles, now_ms)
 }
 
 #[ic_cdk::update(guard = "is_authenticated")]

@@ -194,8 +194,6 @@ Publishing validates name and description boundaries, verifies that Raw or decom
 | `get_wasm_chunk`                     | query                          | `(blob artifact_hash, nat64 offset, nat32 take) → blob` (Max 1 MiB per call)          |
 | `list_latest_wasm_versions`          | query                          | `(opt text, opt nat32) → vec record { text; blob }`                                   |
 | `get_next_wasm_version`              | query                          | `(text, blob previous_module_hash) → WasmMetadata`                                    |
-| `list_legacy_wasm_artifacts`         | query / controller or manager  | `(opt blob, opt nat32) → vec blob`                                                    |
-| `admin_migrate_legacy_wasm_artifact` | update / controller or manager | `(blob) → bool` (Migrates one legacy monolithic artifact)                             |
 
 `AddWasmInput = { name : text; description : text; wasm : blob; encoding : opt WasmEncoding }`. `encoding` defaults to Raw when omitted. `WasmInfo` and `WasmMetadata` return `hash`, `module_hash`, and `wasm_size`.
 
@@ -219,7 +217,7 @@ Publishing establishes a transition edge `(wasm_name, previous_module_hash) → 
 
 `force_prev_hash` serves as an optimistic CAS lock on the artifact's latest pointer. When provided, it must match the current latest artifact hash for that name (all-zeros for initial publish), and existing lineage edges are protected against overwrite. Publishing an artifact whose module hash matches an existing or historical module hash under the same name (including recompressed variants) is rejected to prevent cyclic dependency loops.
 
-Lineage is partitioned by `wasm_name`; independent modules starting from all-zero hashes do not conflict. Legacy monolithic artifacts without explicit encodings are identified via Gzip magic headers during incremental migration to preserve exact artifact bytes and calculate uncompressed module hashes.
+Lineage is partitioned by `wasm_name`; independent modules starting from all-zero hashes do not conflict.
 
 ## 5. Classic Creation and Deployment Endpoints
 
@@ -242,7 +240,7 @@ Creation automatically appends the **management canister itself** to target cont
 
 Classic endpoints do not use `request_id`. If a response is lost during creation, the assigned canister ID cannot be retrieved via request parameters. If creation succeeds but code installation fails, the error returns `canister <id> created, but install failed: ...` and records an audit log. Do not re-run creation; inspect the returned ID and retry installation via `admin_deploy`. Only canisters with confirmed installations enter `deployed_list`.
 
-All installation routines clear the target's management chunk store before proceeding. If `wasm_size + args_size <= 1,500,000 bytes`, code is installed directly via `install_code`; larger binaries stream from stable storage in 1 MiB blocks and install via `install_chunked_code`. Target chunk stores are cleaned up on a best-effort basis post-install. While the manager synchronizes operations internally, external controllers should not manipulate the target's chunk store concurrently.
+If `wasm_size + args_size <= 1,500,000 bytes`, code is installed directly via `install_code`, which does not touch the target's chunk store. Larger binaries first clear the target's bounded chunk store, upload 1 MiB blocks from stable storage (a few at a time), and install via `install_chunked_code`; the chunk store is cleared again on a best-effort basis afterwards. While the manager synchronizes operations internally, external controllers should not manipulate the target's chunk store concurrently.
 
 ## 6. Provisioning Templates and Pre-Created Canister Pool
 
@@ -468,7 +466,7 @@ Idempotency checks evaluate whether the target runs `expected_module_hash`. The 
 `admin_batch_call(vec principal canisters, text method, opt blob args) → Result<vec blob>`:
 
 - Passing an empty canister list targets **all registered canisters**; non-empty lists must contain only registered canisters.
-- Invocations execute sequentially ordered by principal, sending identical method names and raw arguments.
+- Targets are called in principal order, up to 7 at a time, with identical method names and raw arguments. Each call uses a bounded wait (about 5 minutes), so a target that never answers yields a per-target error instead of blocking this canister's upgrades; a timed-out call may still have executed on the target.
 - Returns raw Candid response bytes per target. Application errors returned within target response payloads are treated as successful replies by the management canister.
 - Limits: up to 100 targets, arguments up to 256 KiB, reply up to 64 KiB per target, and aggregated responses up to ~1.5 MB.
 - `admin_batch_call_v2` returns structured results `{ canister; reply; error }`. The legacy endpoint aborts on first failure and returns target failure details; prior side effects are not rolled back. Non-idempotent batch calls should not be blindly retried.
@@ -666,6 +664,8 @@ Chunked upload, commit, clear, refill, and ensure methods do not have separate v
 ### 11.2 Upgrading the Manager Canister Itself
 
 Deploying takes `Init`; upgrades accept `opt variant { Upgrade = record { ... } }` or `null`. `token_expiration` is a reserved field; passing any non-empty value is rejected to prevent silent configuration ignore.
+
+Since 0.12 the legacy monolithic artifact store, the schema v1 migration and the deployment-log index rebuild are gone. An upgrade traps, and is rolled back, while the stable schema is older than v2, legacy artifacts remain, or the per-wasm log index does not cover every deployment log. Upgrade such deployments to 0.11 first and run `admin_migrate_legacy_wasm_artifact` (listing with `list_legacy_wasm_artifacts`) and `admin_rebuild_log_index` there until nothing is left.
 
 ```bash
 RUSTFLAGS='--cfg=getrandom_backend="custom"' dfx deploy ic_wasm_canister --mode upgrade --argument '(opt variant { Upgrade = record {

@@ -36,7 +36,11 @@ test('example bindings match the canonical generated interfaces', async () => {
     }
   }
   const actor = createCose('aaaaa-aa', { agent: new HttpAgent({ host: 'https://icp-api.io' }) });
-  for (const method of ['namespace_get_info_v2', 'namespace_list_members', 'namespace_list_setting_keys_v2', 'admin_migrate_legacy_namespace_acls_page']) {
+  for (const method of ['namespace_get_info_v2', 'namespace_list_members', 'namespace_list_setting_keys_v2', 'namespace_list_fixed_identity_names']) {
     assert.equal(typeof actor[method], 'function');
+  }
+  // legacy migrations were retired in 0.12
+  for (const method of ['admin_migrate_legacy_settings', 'admin_migrate_legacy_namespace_acls_page']) {
+    assert.equal(actor[method], undefined);
   }
 });

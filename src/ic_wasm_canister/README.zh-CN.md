@@ -192,8 +192,6 @@ dfx canister call ic_wasm_canister admin_add_provisioners "(vec { principal \"$M
 | `get_wasm_chunk`                     | query                          | `(blob artifact_hash, nat64 offset, nat32 take) → blob`，单次最多 1 MiB           |
 | `list_latest_wasm_versions`          | query                          | `(opt text, opt nat32) → vec record { text; blob }`                               |
 | `get_next_wasm_version`              | query                          | `(text, blob previous_module_hash) → WasmMetadata`                                |
-| `list_legacy_wasm_artifacts`         | query / controller 或 manager  | `(opt blob, opt nat32) → vec blob`                                                |
-| `admin_migrate_legacy_wasm_artifact` | update / controller 或 manager | `(blob) → bool`，迁移一个旧单体制品                                               |
 
 `AddWasmInput = { name; description; wasm : blob; encoding : opt WasmEncoding }`，encoding 为空默认为 Raw。`WasmInfo` / `WasmMetadata` 同时返回 artifact `hash`、`module_hash` 和 `wasm_size`。
 
@@ -219,8 +217,6 @@ dfx canister call ic_wasm_canister admin_add_provisioners "(vec { principal \"$M
 
 版本路径按 name 分区，因此不同 WASM 家族的全零起点不再冲突。旧全局路径在首次升级时迁移，并为每个历史 name 重建确定性的首版本边。
 
-旧制品未记录 encoding 时，会按 gzip 魔数识别实际编码；迁移至分块存储会保留原制品字节与 artifact hash，并保存解压后的 module hash。
-
 ## 5. 传统创建与部署接口
 
 | 方法                             | 参数 → `Ok`                                                                           | 行为                                          |
@@ -244,7 +240,7 @@ dfx canister call ic_wasm_canister admin_add_provisioners "(vec { principal \"$M
 
 传统部署会用仓库计算的真实 module hash 核验安装结果；成功写入稳定部署索引，失败也写入不含参数明文的审计日志。若安装已落地但本地记账失败，可用 reconcile 修复。
 
-所有安装先清空目标 chunk store（ICP 安装前置条件）；当 `wasm字节数 + args字节数 <= 1,500,000` 时直接 `install_code`，更大时按 1 MiB 从 stable storage 逐块上传，再 `install_chunked_code`。安装尝试后再次尽力清理；服务内部按目标串行，但其他 controller 仍不应与它并行操作同一 chunk store。
+当 `wasm字节数 + args字节数 <= 1,500,000` 时直接 `install_code`，不触碰目标 chunk store；更大时先清空目标容量有限的 chunk store，再按 1 MiB 从 stable storage 分批并发上传，最后 `install_chunked_code`，安装尝试后再次尽力清理；服务内部按目标串行，但其他 controller 仍不应与它并行操作同一 chunk store。
 
 ## 6. Provisioning 模板与预创建池
 
@@ -459,7 +455,7 @@ Released 记录按模板保留 tombstone：过期阈值 **24 小时**、数量�
 
 `get_deployed_canisters_info` 返回每个目标最近一次成功登记的公开摘要，`args` 与 `args_hash` 固定为空；不是实时目标探测。记录仍包含 `log_id`、真实 `module_hash` 和 `args_size`，受限的日志接口才返回参数 hash。兼容全量接口超过 1000 项会要求使用 v2。
 
-`deployment_logs` 通过稳定的 `(name, log_id)` 索引逆序分页，take 默认 10、最大 100。`prev` 是排除式全局 log ID；返回记录的 `log_id` 可直接作为下一页游标。超出 u64 的 nat 会明确报错，旧日志索引可用 `admin_rebuild_log_index(start, take)` 增量补建。
+`deployment_logs` 通过稳定的 `(name, log_id)` 索引逆序分页，take 默认 10、最大 100。`prev` 是排除式全局 log ID；返回记录的 `log_id` 可直接作为下一页游标。超出 u64 的 nat 会明确报错。
 
 传统创建 / 部署会记录安装成功或失败（到达日志步骤时）；ensure 成功会在同一无 `await` 的提交阶段衔接日志、请求完成和部署索引，失败主要通过请求回执的 error 排查。新日志不保存 args 明文。
 
@@ -468,7 +464,7 @@ Released 记录按模板保留 tombstone：过期阈值 **24 小时**、数量�
 `admin_batch_call(vec principal canisters, text method, opt blob args) → Result<vec blob>`：
 
 - 输入集合为空表示**全部已部署目标**；非空时每个目标必须已登记。
-- 按 principal 集合的排序逐个调用，不按输入原始顺序；所有目标使用相同 method 和原始 Candid 参数。
+- 按 principal 排序、每批最多 7 个并发调用，不按输入原始顺序；所有目标使用相同 method 和原始 Candid 参数。每个调用使用 bounded wait（约 5 分钟），永不响应的目标只会得到该目标的错误，不会阻塞本服务升级；超时的调用仍可能已在目标上执行。
 - 返回各目标原始 Candid 响应字节，应用按目标接口解码；目标返回业务 Err 仍属于成功的原始响应，不由管理服务自动识别。
 - 最多 100 个目标，参数最多 256 KiB，单目标回复最多 64 KiB、聚合回复最多约 1.5 MB。`admin_batch_call_v2` 为每个目标返回 `{ canister; reply; error }`；兼容接口遇到任一失败会返回包含目标明细的整体 Err。此前副作用不会回滚，非幂等动作不可盲目整批重试。
 
@@ -658,6 +654,8 @@ pub fn template(
 ### 11.2 升级管理服务自身
 
 安装接收 `Init`；升级接收 `opt variant { Upgrade = record { ... } }` 或 `null`。UpgradeArgs 还包含显式的 `clear_governance_canister`；`token_expiration` 为保留字段，任何非空值都会被拒绝，避免静默忽略配置。
+
+自 0.12 起移除了旧单体制品存储、schema v1 迁移与部署日志索引补建：stable schema 低于 v2、仍有旧制品或按名日志索引未覆盖全部部署日志时，升级会 trap 并回滚。此类部署需先升级到 0.11，并在其上运行 `admin_migrate_legacy_wasm_artifact`（配合 `list_legacy_wasm_artifacts`）与 `admin_rebuild_log_index` 直至完成。
 
 ```bash
 RUSTFLAGS='--cfg=getrandom_backend="custom"' dfx deploy ic_wasm_canister --mode upgrade --argument '(opt variant { Upgrade = record {

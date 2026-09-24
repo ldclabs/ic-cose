@@ -14,9 +14,10 @@ use num_traits::ToPrimitive;
 use serde::Deserialize;
 use serde_bytes::ByteArray;
 
-/// Keep direct install payloads comfortably below the 2 MiB inter-canister
-/// message limit, including Candid framing and init/upgrade arguments.
-const MAX_DIRECT_INSTALL_PAYLOAD_BYTES: usize = 1_500_000;
+use crate::MAX_MESSAGE_PAYLOAD_BYTES;
+
+/// Chunks uploaded to a target concurrently during a chunked install.
+const UPLOAD_CONCURRENCY: usize = 4;
 
 /// The narrow projection used by deployment checks.
 ///
@@ -171,31 +172,16 @@ pub async fn install_stored_code(
     arg: &[u8],
 ) -> Result<(), String> {
     let metadata = crate::store::wasm::get_metadata(&artifact_hash)?;
-    let direct = use_direct_install(metadata.wasm_size as usize, arg.len());
-    if !direct && crate::store::wasm::is_legacy_artifact(&artifact_hash) {
-        return Err(
-            "large legacy artifact must be migrated with admin_migrate_legacy_wasm_artifact before installation"
-                .to_string(),
-        );
+    if use_direct_install(metadata.wasm_size as usize, arg.len()) {
+        // `install_code` does not touch the target's chunk store.
+        let wasm = crate::store::wasm::get_wasm(&artifact_hash)?;
+        return install_code(canister, mode, &wasm, arg).await;
     }
-    // ICP requires an empty target chunk store before installation. The
-    // caller holds this repository's per-target operation lock while here.
-    mgt::clear_chunk_store(&mgt::ClearChunkStoreArgs {
-        canister_id: canister,
-    })
-    .await
-    .map_err(format_error)?;
-    if direct {
-        let wasm = crate::store::wasm::get_wasm(&artifact_hash)
-            .ok_or_else(|| "NotFound: artifact not found".to_string())?;
-        return install_code(canister, mode, &wasm.wasm, arg).await;
-    }
-
     install_stored_chunked_code(canister, mode, artifact_hash, arg).await
 }
 
 fn use_direct_install(wasm_bytes: usize, arg_bytes: usize) -> bool {
-    wasm_bytes.saturating_add(arg_bytes) <= MAX_DIRECT_INSTALL_PAYLOAD_BYTES
+    wasm_bytes.saturating_add(arg_bytes) <= MAX_MESSAGE_PAYLOAD_BYTES
 }
 
 async fn install_stored_chunked_code(
@@ -207,20 +193,26 @@ async fn install_stored_chunked_code(
     let clear_args = mgt::ClearChunkStoreArgs {
         canister_id: canister,
     };
+    // `install_chunked_code` only needs the listed chunks, but a target's store
+    // holds a bounded number of them, so start from an empty one. The caller
+    // holds this repository's per-target operation lock while here.
+    mgt::clear_chunk_store(&clear_args)
+        .await
+        .map_err(format_error)?;
     let install_result = async {
         let count = crate::store::wasm::storage_chunk_count(&artifact_hash)?;
-        let mut chunk_hashes = Vec::with_capacity(count as usize);
-        for index in 0..count {
-            let chunk = crate::store::wasm::storage_chunk(&artifact_hash, index)?;
-            let response = Call::unbounded_wait(Principal::management_canister(), "upload_chunk")
-                .with_arg(UploadChunkArgs {
-                    canister_id: canister,
-                    chunk: &chunk,
-                })
-                .await
-                .map_err(format_error)?;
-            let hash: mgt::UploadChunkResult = response.candid().map_err(format_error)?;
-            chunk_hashes.push(hash);
+        let indexes: Vec<u32> = (0..count).collect();
+        let mut chunk_hashes = Vec::with_capacity(indexes.len());
+        for group in indexes.chunks(UPLOAD_CONCURRENCY) {
+            let uploads = futures::future::join_all(
+                group
+                    .iter()
+                    .map(|index| upload_stored_chunk(canister, &artifact_hash, *index)),
+            )
+            .await;
+            for hash in uploads {
+                chunk_hashes.push(hash?);
+            }
         }
 
         let response =
@@ -244,6 +236,22 @@ async fn install_stored_chunked_code(
         .with_arg(&clear_args)
         .await;
     install_result
+}
+
+async fn upload_stored_chunk(
+    canister: Principal,
+    artifact_hash: &ByteArray<32>,
+    index: u32,
+) -> Result<mgt::UploadChunkResult, String> {
+    let chunk = crate::store::wasm::storage_chunk(artifact_hash, index)?;
+    let response = Call::unbounded_wait(Principal::management_canister(), "upload_chunk")
+        .with_arg(UploadChunkArgs {
+            canister_id: canister,
+            chunk: &chunk,
+        })
+        .await
+        .map_err(format_error)?;
+    response.candid().map_err(format_error)
 }
 
 #[cfg(test)]
@@ -270,12 +278,9 @@ mod tests {
 
     #[test]
     fn direct_install_limit_accounts_for_arguments() {
-        assert!(use_direct_install(MAX_DIRECT_INSTALL_PAYLOAD_BYTES, 0));
-        assert!(use_direct_install(
-            MAX_DIRECT_INSTALL_PAYLOAD_BYTES - 10,
-            10
-        ));
-        assert!(!use_direct_install(MAX_DIRECT_INSTALL_PAYLOAD_BYTES, 1));
+        assert!(use_direct_install(MAX_MESSAGE_PAYLOAD_BYTES, 0));
+        assert!(use_direct_install(MAX_MESSAGE_PAYLOAD_BYTES - 10, 10));
+        assert!(!use_direct_install(MAX_MESSAGE_PAYLOAD_BYTES, 1));
         assert!(!use_direct_install(usize::MAX, usize::MAX));
     }
 

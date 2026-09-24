@@ -84,56 +84,66 @@ impl CanisterCaller for Client {
     }
 }
 
+/// Calls a query method whose Candid reply is `Result<T, String>`.
+async fn query<C, In, T>(sdk: &C, method: &str, args: In) -> Result<T, String>
+where
+    C: CoseSDK + Sync,
+    In: ArgumentEncoder + Send,
+    T: CandidType + for<'a> candid::Deserialize<'a>,
+{
+    sdk.canister_query::<In, Result<T, String>>(sdk.canister(), method, args)
+        .await
+        .map_err(format_error)?
+}
+
+/// Calls an update method whose Candid reply is `Result<T, String>`.
+async fn update<C, In, T>(sdk: &C, method: &str, args: In) -> Result<T, String>
+where
+    C: CoseSDK + Sync,
+    In: ArgumentEncoder + Send,
+    T: CandidType + for<'a> candid::Deserialize<'a>,
+{
+    sdk.canister_update::<In, Result<T, String>>(sdk.canister(), method, args)
+        .await
+        .map_err(format_error)?
+}
+
 #[async_trait]
 pub trait CoseSDK: CanisterCaller + Sized {
     fn canister(&self) -> &Principal;
 
     async fn get_state(&self) -> Result<StateInfo, String> {
-        self.canister_query(self.canister(), "state_get_info", ())
-            .await
-            .map_err(format_error)?
+        query(self, "state_get_info", ()).await
     }
 
     /// the caller of agent should be canister controller
     async fn admin_add_managers(&self, args: &BTreeSet<Principal>) -> Result<(), String> {
-        self.canister_update(self.canister(), "admin_add_managers", (args,))
-            .await
-            .map_err(format_error)?
+        update(self, "admin_add_managers", (args,)).await
     }
 
     /// the caller of agent should be canister controller
     async fn admin_remove_managers(&self, args: &BTreeSet<Principal>) -> Result<(), String> {
-        self.canister_update(self.canister(), "admin_remove_managers", (args,))
-            .await
-            .map_err(format_error)?
+        update(self, "admin_remove_managers", (args,)).await
     }
 
     /// the caller of agent should be canister controller
     async fn admin_add_auditors(&self, args: &BTreeSet<Principal>) -> Result<(), String> {
-        self.canister_update(self.canister(), "admin_add_auditors", (args,))
-            .await
-            .map_err(format_error)?
+        update(self, "admin_add_auditors", (args,)).await
     }
 
     /// the caller of agent should be canister controller
     async fn admin_remove_auditors(&self, args: &BTreeSet<Principal>) -> Result<(), String> {
-        self.canister_update(self.canister(), "admin_remove_auditors", (args,))
-            .await
-            .map_err(format_error)?
+        update(self, "admin_remove_auditors", (args,)).await
     }
 
     /// the caller of agent should be canister controller
     async fn admin_add_allowed_apis(&self, args: &BTreeSet<String>) -> Result<(), String> {
-        self.canister_update(self.canister(), "admin_add_allowed_apis", (args,))
-            .await
-            .map_err(format_error)?
+        update(self, "admin_add_allowed_apis", (args,)).await
     }
 
     /// the caller of agent should be canister controller
     async fn admin_remove_allowed_apis(&self, args: &BTreeSet<String>) -> Result<(), String> {
-        self.canister_update(self.canister(), "admin_remove_allowed_apis", (args,))
-            .await
-            .map_err(format_error)?
+        update(self, "admin_remove_allowed_apis", (args,)).await
     }
 
     /// the caller of agent should be canister controller
@@ -141,9 +151,7 @@ pub trait CoseSDK: CanisterCaller + Sized {
         &self,
         args: &CreateNamespaceInput,
     ) -> Result<NamespaceInfo, String> {
-        self.canister_update(self.canister(), "admin_create_namespace", (args,))
-            .await
-            .map_err(format_error)?
+        update(self, "admin_create_namespace", (args,)).await
     }
 
     async fn admin_list_namespace(
@@ -151,24 +159,18 @@ pub trait CoseSDK: CanisterCaller + Sized {
         prev: Option<&str>,
         take: Option<u32>,
     ) -> Result<Vec<NamespaceInfo>, String> {
-        self.canister_update(self.canister(), "admin_list_namespace", (prev, take))
-            .await
-            .map_err(format_error)?
+        update(self, "admin_list_namespace", (prev, take)).await
     }
 
     async fn ecdsa_public_key(
         &self,
         args: Option<&PublicKeyInput>,
     ) -> Result<PublicKeyOutput, String> {
-        self.canister_query(self.canister(), "ecdsa_public_key", (args,))
-            .await
-            .map_err(format_error)?
+        query(self, "ecdsa_public_key", (args,)).await
     }
 
     async fn ecdsa_sign(&self, args: &SignInput) -> Result<ByteBuf, String> {
-        self.canister_update(self.canister(), "ecdsa_sign", (args,))
-            .await
-            .map_err(format_error)?
+        update(self, "ecdsa_sign", (args,)).await
     }
 
     async fn schnorr_public_key(
@@ -176,9 +178,7 @@ pub trait CoseSDK: CanisterCaller + Sized {
         algorithm: &SchnorrAlgorithm,
         input: Option<PublicKeyInput>,
     ) -> Result<PublicKeyOutput, String> {
-        self.canister_query(self.canister(), "schnorr_public_key", (algorithm, input))
-            .await
-            .map_err(format_error)?
+        query(self, "schnorr_public_key", (algorithm, input)).await
     }
 
     async fn schnorr_sign(
@@ -186,9 +186,7 @@ pub trait CoseSDK: CanisterCaller + Sized {
         algorithm: &SchnorrAlgorithm,
         input: &SignInput,
     ) -> Result<ByteBuf, String> {
-        self.canister_update(self.canister(), "schnorr_sign", (algorithm, input))
-            .await
-            .map_err(format_error)?
+        update(self, "schnorr_sign", (algorithm, input)).await
     }
 
     async fn schnorr_sign_identity(
@@ -196,9 +194,7 @@ pub trait CoseSDK: CanisterCaller + Sized {
         algorithm: &SchnorrAlgorithm,
         input: &SignIdentityInput,
     ) -> Result<ByteBuf, String> {
-        self.canister_update(self.canister(), "schnorr_sign_identity", (algorithm, input))
-            .await
-            .map_err(format_error)?
+        update(self, "schnorr_sign_identity", (algorithm, input)).await
     }
 
     async fn ecdh_cose_encrypted_key(
@@ -206,9 +202,7 @@ pub trait CoseSDK: CanisterCaller + Sized {
         path: &SettingPath,
         ecdh: &ECDHInput,
     ) -> Result<ECDHOutput<ByteBuf>, String> {
-        self.canister_update(self.canister(), "ecdh_cose_encrypted_key", (path, ecdh))
-            .await
-            .map_err(format_error)?
+        update(self, "ecdh_cose_encrypted_key", (path, ecdh)).await
     }
 
     async fn get_cose_encrypted_key(&self, path: &SettingPath) -> Result<ByteArray<32>, String> {
@@ -242,9 +236,7 @@ pub trait CoseSDK: CanisterCaller + Sized {
     }
 
     async fn vetkd_public_key(&self, path: &SettingPath) -> Result<ByteBuf, String> {
-        self.canister_update(self.canister(), "vetkd_public_key", (path,))
-            .await
-            .map_err(format_error)?
+        update(self, "vetkd_public_key", (path,)).await
     }
 
     async fn vetkd_encrypted_key(
@@ -252,13 +244,7 @@ pub trait CoseSDK: CanisterCaller + Sized {
         path: &SettingPath,
         transport_public_key: &ByteBuf,
     ) -> Result<ByteBuf, String> {
-        self.canister_update(
-            self.canister(),
-            "vetkd_encrypted_key",
-            (path, transport_public_key),
-        )
-        .await
-        .map_err(format_error)?
+        update(self, "vetkd_encrypted_key", (path, transport_public_key)).await
     }
 
     async fn vetkey(&self, path: &SettingPath) -> Result<(VetKey, DerivedPublicKey), String> {
@@ -281,13 +267,7 @@ pub trait CoseSDK: CanisterCaller + Sized {
         namespace: &str,
         name: &str,
     ) -> Result<Principal, String> {
-        self.canister_query(
-            self.canister(),
-            "namespace_get_fixed_identity",
-            (namespace, name),
-        )
-        .await
-        .map_err(format_error)?
+        query(self, "namespace_get_fixed_identity", (namespace, name)).await
     }
 
     async fn namespace_get_delegators(
@@ -295,40 +275,28 @@ pub trait CoseSDK: CanisterCaller + Sized {
         namespace: &str,
         name: &str,
     ) -> Result<BTreeSet<Principal>, String> {
-        self.canister_query(
-            self.canister(),
-            "namespace_get_delegators",
-            (namespace, name),
-        )
-        .await
-        .map_err(format_error)?
+        query(self, "namespace_get_delegators", (namespace, name)).await
     }
 
     async fn namespace_add_delegator(
         &self,
         input: &NamespaceDelegatorsInput,
     ) -> Result<BTreeSet<Principal>, String> {
-        self.canister_update(self.canister(), "namespace_add_delegator", (input,))
-            .await
-            .map_err(format_error)?
+        update(self, "namespace_add_delegator", (input,)).await
     }
 
     async fn namespace_remove_delegator(
         &self,
         input: &NamespaceDelegatorsInput,
     ) -> Result<(), String> {
-        self.canister_update(self.canister(), "namespace_remove_delegator", (input,))
-            .await
-            .map_err(format_error)?
+        update(self, "namespace_remove_delegator", (input,)).await
     }
 
     async fn namespace_sign_delegation(
         &self,
         input: &SignDelegationInput,
     ) -> Result<SignInResponse, String> {
-        self.canister_update(self.canister(), "namespace_sign_delegation", (input,))
-            .await
-            .map_err(format_error)?
+        update(self, "namespace_sign_delegation", (input,)).await
     }
 
     async fn get_delegation(
@@ -337,19 +305,11 @@ pub trait CoseSDK: CanisterCaller + Sized {
         pubkey: &ByteBuf,
         expiration: u64,
     ) -> Result<SignedDelegation, String> {
-        self.canister_query(
-            self.canister(),
-            "get_delegation",
-            (seed, pubkey, expiration),
-        )
-        .await
-        .map_err(format_error)?
+        query(self, "get_delegation", (seed, pubkey, expiration)).await
     }
 
     async fn namespace_get_info(&self, namespace: &str) -> Result<NamespaceInfo, String> {
-        self.canister_query(self.canister(), "namespace_get_info", (namespace,))
-            .await
-            .map_err(format_error)?
+        query(self, "namespace_get_info", (namespace,)).await
     }
 
     async fn namespace_get_info_v2(
@@ -357,13 +317,7 @@ pub trait CoseSDK: CanisterCaller + Sized {
         namespace: &str,
         with_members: bool,
     ) -> Result<NamespaceInfo, String> {
-        self.canister_query(
-            self.canister(),
-            "namespace_get_info_v2",
-            (namespace, with_members),
-        )
-        .await
-        .map_err(format_error)?
+        query(self, "namespace_get_info_v2", (namespace, with_members)).await
     }
 
     async fn namespace_list_members(
@@ -373,13 +327,12 @@ pub trait CoseSDK: CanisterCaller + Sized {
         prev: Option<Principal>,
         take: Option<u32>,
     ) -> Result<Vec<Principal>, String> {
-        self.canister_query(
-            self.canister(),
+        query(
+            self,
             "namespace_list_members",
             (namespace, kind, prev, take),
         )
         .await
-        .map_err(format_error)?
     }
 
     async fn namespace_list_fixed_identity_names(
@@ -388,13 +341,12 @@ pub trait CoseSDK: CanisterCaller + Sized {
         prev: Option<&str>,
         take: Option<u32>,
     ) -> Result<Vec<String>, String> {
-        self.canister_query(
-            self.canister(),
+        query(
+            self,
             "namespace_list_fixed_identity_names",
             (namespace, prev, take),
         )
         .await
-        .map_err(format_error)?
     }
 
     /// Lists a page after the exclusive `(subject, key)` cursor. Keep the same
@@ -407,13 +359,12 @@ pub trait CoseSDK: CanisterCaller + Sized {
         prev: Option<(Principal, ByteBuf)>,
         take: Option<u32>,
     ) -> Result<Vec<(Principal, ByteBuf)>, String> {
-        self.canister_query(
-            self.canister(),
+        query(
+            self,
             "namespace_list_setting_keys_v2",
             (namespace, user_owned, subject, prev, take),
         )
         .await
-        .map_err(format_error)?
     }
 
     /// Lists the `(subject, key)` pairs of a namespace's settings.
@@ -423,25 +374,20 @@ pub trait CoseSDK: CanisterCaller + Sized {
         user_owned: bool,
         subject: Option<Principal>,
     ) -> Result<Vec<(Principal, ByteBuf)>, String> {
-        self.canister_query(
-            self.canister(),
+        query(
+            self,
             "namespace_list_setting_keys",
             (namespace, user_owned, subject),
         )
         .await
-        .map_err(format_error)?
     }
 
     async fn namespace_update_info(&self, args: &UpdateNamespaceInput) -> Result<(), String> {
-        self.canister_update(self.canister(), "namespace_update_info", (args,))
-            .await
-            .map_err(format_error)?
+        update(self, "namespace_update_info", (args,)).await
     }
 
     async fn namespace_delete(&self, namespace: &str) -> Result<(), String> {
-        self.canister_update(self.canister(), "namespace_delete", (namespace,))
-            .await
-            .map_err(format_error)?
+        update(self, "namespace_delete", (namespace,)).await
     }
 
     async fn namespace_add_managers(
@@ -449,9 +395,7 @@ pub trait CoseSDK: CanisterCaller + Sized {
         namespace: &str,
         args: &BTreeSet<Principal>,
     ) -> Result<(), String> {
-        self.canister_update(self.canister(), "namespace_add_managers", (namespace, args))
-            .await
-            .map_err(format_error)?
+        update(self, "namespace_add_managers", (namespace, args)).await
     }
 
     async fn namespace_remove_managers(
@@ -459,13 +403,7 @@ pub trait CoseSDK: CanisterCaller + Sized {
         namespace: &str,
         args: &BTreeSet<Principal>,
     ) -> Result<(), String> {
-        self.canister_update(
-            self.canister(),
-            "namespace_remove_managers",
-            (namespace, args),
-        )
-        .await
-        .map_err(format_error)?
+        update(self, "namespace_remove_managers", (namespace, args)).await
     }
 
     async fn namespace_add_auditors(
@@ -473,9 +411,7 @@ pub trait CoseSDK: CanisterCaller + Sized {
         namespace: &str,
         args: &BTreeSet<Principal>,
     ) -> Result<(), String> {
-        self.canister_update(self.canister(), "namespace_add_auditors", (namespace, args))
-            .await
-            .map_err(format_error)?
+        update(self, "namespace_add_auditors", (namespace, args)).await
     }
 
     async fn namespace_remove_auditors(
@@ -483,13 +419,7 @@ pub trait CoseSDK: CanisterCaller + Sized {
         namespace: &str,
         args: &BTreeSet<Principal>,
     ) -> Result<(), String> {
-        self.canister_update(
-            self.canister(),
-            "namespace_remove_auditors",
-            (namespace, args),
-        )
-        .await
-        .map_err(format_error)?
+        update(self, "namespace_remove_auditors", (namespace, args)).await
     }
 
     async fn namespace_add_users(
@@ -497,9 +427,7 @@ pub trait CoseSDK: CanisterCaller + Sized {
         namespace: &str,
         args: &BTreeSet<Principal>,
     ) -> Result<(), String> {
-        self.canister_update(self.canister(), "namespace_add_users", (namespace, args))
-            .await
-            .map_err(format_error)?
+        update(self, "namespace_add_users", (namespace, args)).await
     }
 
     async fn namespace_remove_users(
@@ -507,9 +435,7 @@ pub trait CoseSDK: CanisterCaller + Sized {
         namespace: &str,
         args: &BTreeSet<Principal>,
     ) -> Result<(), String> {
-        self.canister_update(self.canister(), "namespace_remove_users", (namespace, args))
-            .await
-            .map_err(format_error)?
+        update(self, "namespace_remove_users", (namespace, args)).await
     }
 
     async fn namespace_is_member(
@@ -518,13 +444,7 @@ pub trait CoseSDK: CanisterCaller + Sized {
         kind: &str,
         user: &Principal,
     ) -> Result<bool, String> {
-        self.canister_query(
-            self.canister(),
-            "namespace_is_member",
-            (namespace, kind, user),
-        )
-        .await
-        .map_err(format_error)?
+        query(self, "namespace_is_member", (namespace, kind, user)).await
     }
 
     /// Adds cycles to a namespace's gas balance.
@@ -535,37 +455,27 @@ pub trait CoseSDK: CanisterCaller + Sized {
     /// "insufficient cycles"; a top-up must be sent from a canister that
     /// attaches the cycles to the call itself.
     async fn namespace_top_up(&self, namespace: &str, cycles: u128) -> Result<u128, String> {
-        self.canister_update(self.canister(), "namespace_top_up", (namespace, cycles))
-            .await
-            .map_err(format_error)?
+        update(self, "namespace_top_up", (namespace, cycles)).await
     }
 
     async fn setting_get_info(&self, path: &SettingPath) -> Result<SettingInfo, String> {
-        self.canister_query(self.canister(), "setting_get_info", (path,))
-            .await
-            .map_err(format_error)?
+        query(self, "setting_get_info", (path,)).await
     }
 
     async fn setting_get(&self, path: &SettingPath) -> Result<SettingInfo, String> {
-        self.canister_query(self.canister(), "setting_get", (path,))
-            .await
-            .map_err(format_error)?
+        query(self, "setting_get", (path,)).await
     }
 
     /// Reads a setting through replicated execution and a certified update reply.
     async fn setting_get_consensus(&self, path: &SettingPath) -> Result<SettingInfo, String> {
-        self.canister_update(self.canister(), "setting_get", (path,))
-            .await
-            .map_err(format_error)?
+        update(self, "setting_get", (path,)).await
     }
 
     async fn setting_get_archived_payload(
         &self,
         path: &SettingPath,
     ) -> Result<SettingArchivedPayload, String> {
-        self.canister_query(self.canister(), "setting_get_archived_payload", (path,))
-            .await
-            .map_err(format_error)?
+        query(self, "setting_get_archived_payload", (path,)).await
     }
 
     async fn setting_create(
@@ -573,9 +483,7 @@ pub trait CoseSDK: CanisterCaller + Sized {
         path: &SettingPath,
         input: &CreateSettingInput,
     ) -> Result<CreateSettingOutput, String> {
-        self.canister_update(self.canister(), "setting_create", (path, input))
-            .await
-            .map_err(format_error)?
+        update(self, "setting_create", (path, input)).await
     }
 
     async fn setting_update_info(
@@ -583,9 +491,7 @@ pub trait CoseSDK: CanisterCaller + Sized {
         path: &SettingPath,
         input: &UpdateSettingInfoInput,
     ) -> Result<UpdateSettingOutput, String> {
-        self.canister_update(self.canister(), "setting_update_info", (path, input))
-            .await
-            .map_err(format_error)?
+        update(self, "setting_update_info", (path, input)).await
     }
 
     async fn setting_update_payload(
@@ -593,9 +499,7 @@ pub trait CoseSDK: CanisterCaller + Sized {
         path: &SettingPath,
         input: &UpdateSettingPayloadInput,
     ) -> Result<UpdateSettingOutput, String> {
-        self.canister_update(self.canister(), "setting_update_payload", (path, input))
-            .await
-            .map_err(format_error)?
+        update(self, "setting_update_payload", (path, input)).await
     }
 
     async fn setting_add_readers(
@@ -603,9 +507,7 @@ pub trait CoseSDK: CanisterCaller + Sized {
         path: &SettingPath,
         args: &BTreeSet<Principal>,
     ) -> Result<(), String> {
-        self.canister_update(self.canister(), "setting_add_readers", (path, args))
-            .await
-            .map_err(format_error)?
+        update(self, "setting_add_readers", (path, args)).await
     }
 
     async fn setting_remove_readers(
@@ -613,15 +515,11 @@ pub trait CoseSDK: CanisterCaller + Sized {
         path: &SettingPath,
         args: &BTreeSet<Principal>,
     ) -> Result<(), String> {
-        self.canister_update(self.canister(), "setting_remove_readers", (path, args))
-            .await
-            .map_err(format_error)?
+        update(self, "setting_remove_readers", (path, args)).await
     }
 
     async fn setting_delete(&self, path: &SettingPath) -> Result<(), String> {
-        self.canister_update(self.canister(), "setting_delete", (path,))
-            .await
-            .map_err(format_error)?
+        update(self, "setting_delete", (path,)).await
     }
 }
 

@@ -50,18 +50,64 @@ fn direct_cbor_decode_handles_principals_without_an_intermediate_value_tree() {
     assert_eq!(decoded.name, "round_trip");
     assert_eq!(decoded.managers, BTreeSet::from([principal]));
 
-    let wasm = Wasm {
-        name: "round_trip".to_string(),
-        created_at: 1,
-        created_by: principal,
-        description: String::new(),
-        wasm: ByteBuf::from([0, 97, 115, 109, 1, 0, 0, 0]),
-        encoding: WasmEncoding::Raw,
-        module_hash: Some(ByteArray::from([3; 32])),
-    };
-    let decoded = Wasm::from_bytes(Cow::Owned(wasm.into_bytes()));
-    assert_eq!(decoded.created_by, principal);
-    assert_eq!(decoded.wasm.as_slice(), &[0, 97, 115, 109, 1, 0, 0, 0]);
+    // snapshots written by 0.11 still carry the retired legacy fields
+    #[derive(Serialize)]
+    struct OldState {
+        name: String,
+        managers: BTreeSet<Principal>,
+        latest_version: BTreeMap<String, ByteArray<32>>,
+        topup_threshold: u128,
+        topup_amount: u128,
+        governance_canister: Option<Principal>,
+        committers: BTreeSet<Principal>,
+    }
+    let decoded = State::from_bytes(Cow::Owned(
+        cbor2::to_vec(&OldState {
+            name: "old".to_string(),
+            managers: BTreeSet::from([principal]),
+            latest_version: BTreeMap::from([("x".to_string(), ByteArray::from([1; 32]))]),
+            topup_threshold: 1,
+            topup_amount: 2,
+            governance_canister: None,
+            committers: BTreeSet::new(),
+        })
+        .unwrap(),
+    ));
+    assert_eq!(decoded.name, "old");
+    assert_eq!(decoded.topup_amount, 2);
+}
+
+#[test]
+fn upgrades_refuse_state_that_still_needs_a_retired_migration() {
+    wasm::add_log(log("indexed")).unwrap();
+    // a fresh canister starts at the current schema
+    state::initialize_schema();
+    state::save();
+    state::load();
+
+    // a log appended without its index entry was only rebuilt by 0.11
+    INSTALL_LOGS.with_borrow_mut(|logs| logs.append(&log("unindexed")).unwrap());
+    assert!(state::ensure_no_legacy_state()
+        .unwrap_err()
+        .contains("admin_rebuild_log_index"));
+    LOG_INDEX_STORE.with_borrow_mut(|index| index.insert(LogKey("unindexed".into(), 1), 1));
+    assert!(state::ensure_no_legacy_state().is_ok());
+
+    // monolithic artifacts must be moved into chunked storage by 0.11 first
+    let memory = MEMORY_MANAGER.with_borrow(|m| m.get(LEGACY_WASM_MEMORY_ID));
+    let mut legacy = StableBTreeMap::<[u8; 32], Vec<u8>, Memory>::init(memory);
+    legacy.insert([9; 32], vec![1]);
+    assert!(state::ensure_no_legacy_state()
+        .unwrap_err()
+        .contains("legacy artifacts"));
+    legacy.remove(&[9; 32]);
+    assert!(state::ensure_no_legacy_state().is_ok());
+
+    // a pre-v2 schema must be migrated by 0.11 first
+    SCHEMA_STORE.with_borrow_mut(|schema| schema.set(1));
+    assert!(state::ensure_no_legacy_state()
+        .unwrap_err()
+        .contains("upgrade through 0.11"));
 }
 
 fn log(name: &str) -> DeployLog {
@@ -200,26 +246,38 @@ fn reserve_is_idempotent_and_never_creates_a_canister() {
 }
 
 #[test]
-fn available_pool_index_rebuilds_old_state_once() {
+fn reservations_scan_the_stable_pool_and_upgrades_prune_installed_records() {
     let id = "tpl_index";
     let entry = seed_template(id);
+    let installed = Principal::from_slice(&[7, 8, 0]);
     let first = Principal::from_slice(&[7, 8, 1]);
     let second = Principal::from_slice(&[7, 8, 2]);
     add_pool_canister(id, first, 1);
     add_pool_canister(id, second, 2);
-
-    // Simulate state written by a version that only had the stable pool.
-    state::with_mut(|s| {
-        s.available_pool.remove(id);
+    // older versions kept installed canisters in the pool
+    let installed_key = PoolKey(id.to_string(), installed);
+    POOL_STORE.with_borrow_mut(|r| {
+        r.insert(
+            installed_key.clone(),
+            PoolCanister {
+                state: PoolCanisterState::Installed,
+                created_at: 0,
+                request_id: Some(rid(30)),
+            },
+        )
     });
+    state::initialize_schema();
+    state::save();
+    state::load();
+    assert!(!POOL_STORE.with_borrow(|r| r.contains_key(&installed_key)));
 
     let reserved = provision::reserve(GOV, 10, &reserve_req(id, &entry, 31)).unwrap();
-    assert!(reserved.canister == first || reserved.canister == second);
-    state::with(|s| {
-        let remaining = s.available_pool.get(id).unwrap();
-        assert_eq!(remaining.len(), 1);
-        assert!(!remaining.contains(&reserved.canister));
-    });
+    assert_eq!(reserved.canister, first);
+    let reserved = provision::reserve(GOV, 11, &reserve_req(id, &entry, 32)).unwrap();
+    assert_eq!(reserved.canister, second);
+    assert!(provision::reserve(GOV, 12, &reserve_req(id, &entry, 33))
+        .unwrap_err()
+        .contains("no available canister"));
 }
 
 #[test]
@@ -750,7 +808,7 @@ fn publishing_a_newer_wasm_does_not_move_an_approved_template() {
         None,
     )
     .unwrap();
-    let latest = wasm::get_latest("project").unwrap().0;
+    let latest = wasm::get_latest_metadata("project").unwrap().0;
     assert_ne!(latest, pinned, "latest should have moved");
 
     // the approved template still resolves the artifact it was approved with
@@ -825,7 +883,10 @@ fn artifacts_bind_raw_and_gzip_module_hashes_and_support_chunk_reads() {
     let metadata = wasm::get_metadata(&raw_hash).unwrap();
     assert_eq!(metadata.module_hash, raw_hash);
     assert_eq!(wasm::get_chunk(&raw_hash, 2, 5).unwrap(), raw[2..7]);
-    assert_eq!(wasm::get_wasm(&raw_hash).unwrap().wasm.as_slice(), raw);
+    assert_eq!(wasm::get_wasm(&raw_hash).unwrap(), raw);
+    assert_eq!(wasm::storage_chunk_count(&raw_hash).unwrap(), 1);
+    assert_eq!(wasm::storage_chunk(&raw_hash, 0).unwrap(), raw);
+    assert!(wasm::storage_chunk(&raw_hash, 1).is_err());
 
     let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
     encoder.write_all(&raw).unwrap();
@@ -861,6 +922,11 @@ fn artifacts_bind_raw_and_gzip_module_hashes_and_support_chunk_reads() {
             .unwrap()
             .0,
         artifact_hash
+    );
+    // an unknown name resolves to nothing instead of scanning the repository
+    assert_eq!(
+        wasm::next_version_metadata("artifact_none", Default::default()).unwrap_err(),
+        "no next version"
     );
 
     assert!(wasm::validate_wasm(
@@ -905,31 +971,6 @@ fn artifacts_bind_raw_and_gzip_module_hashes_and_support_chunk_reads() {
     )
     .unwrap_err()
     .contains("same module"));
-}
-
-#[test]
-fn legacy_artifact_migration_is_incremental_and_lossless() {
-    let bytes = vec![0, 97, 115, 109, 1, 0, 0, 0];
-    let hash = ByteArray::from(sha256(&bytes));
-    WASM_STORE.with_borrow_mut(|store| {
-        store.insert(
-            *hash,
-            Wasm {
-                name: "legacy_artifact".to_string(),
-                created_at: 1,
-                created_by: GOV,
-                description: String::new(),
-                wasm: ByteBuf::from(bytes.clone()),
-                encoding: WasmEncoding::Raw,
-                module_hash: None,
-            },
-        );
-    });
-    assert_eq!(wasm::list_legacy_artifacts(None, 10), vec![hash]);
-    assert!(wasm::migrate_legacy_artifact(&hash).unwrap());
-    assert!(wasm::list_legacy_artifacts(None, 10).is_empty());
-    assert_eq!(wasm::get_wasm(&hash).unwrap().wasm.as_slice(), bytes);
-    assert!(!wasm::migrate_legacy_artifact(&hash).unwrap());
 }
 
 #[test]
@@ -1031,77 +1072,6 @@ fn historical_module_republication_is_rejected_without_changing_latest() {
         wasm::next_version_metadata("history", latest).unwrap().0,
         next
     );
-}
-
-#[test]
-fn legacy_gzip_without_encoding_survives_upgrade_and_chunk_migration() {
-    use flate2::{write::GzEncoder, Compression};
-    use std::io::Write;
-    #[derive(Serialize)]
-    struct LegacyWasm {
-        name: String,
-        created_at: u64,
-        created_by: Principal,
-        description: String,
-        wasm: ByteBuf,
-    }
-    #[derive(Serialize)]
-    struct LegacyState {
-        #[serde(flatten)]
-        state: State,
-        latest_version: BTreeMap<String, ByteArray<32>>,
-        upgrade_path: BTreeMap<ByteArray<32>, ByteArray<32>>,
-        deployed_list: BTreeMap<Principal, (u64, ByteArray<32>)>,
-    }
-    let raw = vec![0, 97, 115, 109, 1, 0, 0, 0];
-    let raw_hash = ByteArray::from(sha256(&raw));
-    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-    encoder.write_all(&raw).unwrap();
-    let compressed = encoder.finish().unwrap();
-    let hash = ByteArray::from(sha256(&compressed));
-    let bytes = cbor2::to_vec(&LegacyWasm {
-        name: "legacy_gzip".to_string(),
-        created_at: 1,
-        created_by: GOV,
-        description: String::new(),
-        wasm: compressed.clone().into(),
-    })
-    .unwrap();
-    let legacy = Wasm::from_bytes(Cow::Owned(bytes));
-    assert_eq!(legacy.encoding, WasmEncoding::Raw);
-    WASM_STORE.with_borrow_mut(|store| store.insert(*hash, legacy));
-    let target = Principal::from_slice(&[4, 4]);
-    let log_id = wasm::add_log(log("legacy_gzip")).unwrap();
-    let legacy_state = cbor2::to_vec(&LegacyState {
-        state: State::default(),
-        latest_version: BTreeMap::from([("legacy_gzip".to_string(), hash)]),
-        upgrade_path: BTreeMap::from([(ByteArray::from([0; 32]), hash)]),
-        deployed_list: BTreeMap::from([(target, (log_id, hash))]),
-    })
-    .unwrap();
-    let memory = MEMORY_MANAGER.with_borrow(|m| m.get(STATE_MEMORY_ID));
-    StableCell::init(memory, Vec::<u8>::new()).set(legacy_state);
-    state::load();
-    assert_eq!(state::deployed(&target).unwrap().module_hash, raw_hash);
-    assert_eq!(
-        wasm::get_metadata(&hash).unwrap().encoding,
-        WasmEncoding::Gzip
-    );
-    assert_eq!(wasm::get_metadata(&hash).unwrap().module_hash, raw_hash);
-    assert_eq!(wasm::get_wasm(&hash).unwrap().encoding, WasmEncoding::Gzip);
-    assert!(wasm::migrate_legacy_artifact(&hash).unwrap());
-    assert_eq!(wasm::get_metadata(&hash).unwrap().module_hash, raw_hash);
-    assert_eq!(
-        wasm::get_metadata(&hash).unwrap().encoding,
-        WasmEncoding::Gzip
-    );
-    assert_eq!(
-        wasm::get_chunk(&hash, 0, compressed.len()).unwrap(),
-        compressed
-    );
-    state::save();
-    state::load();
-    assert_eq!(state::deployed(&target).unwrap().module_hash, raw_hash);
 }
 
 fn attempted_reservation(id: &str) -> (TemplateEntry, InstallRequest) {
